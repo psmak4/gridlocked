@@ -1,6 +1,6 @@
 # Gridlocked — Data Model
 
-**Status:** Phase 2 in progress. Part 0 (conventions and the checking method) and Part 1 (reference data) are drafted. Part 1 was revised on 2026-10-27 after a scenario check against the real 2026 calendar, and you approved it. Part 2 (ingestion and results) is drafted for review. Parts 3–6 come next, one at a time.
+**Status:** Phase 2 in progress. Part 0 (conventions and the checking method) and Part 1 (reference data) are drafted. Part 1 was revised on 2026-10-27 after a scenario check against the real 2026 calendar, and you approved it. Part 2 (ingestion and results) is approved. Part 3 (fantasy core) is drafted for review. Parts 4–6 come next, one at a time.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md), approved 2026-10-27. Section references like "HLD §5.2" point there.
 
@@ -15,8 +15,8 @@ The model is split into parts that follow the HLD's modules. Each part is review
 | 0 | Conventions used everywhere | **Drafted** |
 | 1 | Reference data: seasons, events, sessions, drivers, constructors, entries, availability, provider IDs | **Drafted** |
 | 2 | Ingestion and results: raw snapshots, normalized results, overrides, the review queue, the job table | **Drafted** |
-| 3 | Fantasy core: games, rulesets, the pool and prices, teams, lineup versions, transfers, chips, team value | Next |
-| 4 | Scoring and standings: asset score lines, team ledger, per-event totals, leagues, tiebreaks | |
+| 3 | Fantasy core: games, rulesets, the pool and prices, teams, lineup versions, transfers, chips, team value | **Drafted** |
+| 4 | Scoring and standings: asset score lines, team ledger, per-event totals, leagues, tiebreaks | Next |
 | 5 | Community: categories, threads, posts, chat, votes, spoiler state, moderation, notifications | |
 | 6 | Identity, admin and audit: Better Auth tables, profiles, roles, trust levels, the audit log | |
 
@@ -613,7 +613,323 @@ No foreseeable change here is a redesign.
 
 ---
 
+## Part 3. Fantasy core (proposed)
+
+This part covers the game itself: which rules apply, what can be picked and at what price, and what each team picked and when. Points and standings are Part 4. Everything here is **game data**: it points down at reference data and results, never the other way (0.5).
+
+```mermaid
+erDiagram
+  seasons ||--o{ games : has
+  games ||--o{ ruleset_versions : has
+  ruleset_versions ||--o{ scoring_rules : contains
+  games ||--o{ game_events : schedules
+  events ||--o{ game_events : "played as"
+  games ||--o{ pool_assets : offers
+  pool_assets ||--o{ asset_prices : "priced per event"
+  games ||--o{ teams : has
+  users ||--o{ teams : owns
+  teams ||--o{ lineup_versions : saves
+  lineup_versions ||--o{ lineup_picks : contains
+  teams ||--o{ chip_plays : plays
+  teams ||--o{ team_event_states : "locked as"
+```
+
+### 3.0 Official rules this part relies on (re-checked 2026-10-27)
+Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [game rules](https://fantasy.formula1.com/en/game-rules). All of this matches HLD §5–6:
+- Prices update after each race and stay fixed until the next. They're based on average fantasy performance over the last three Grands Prix, bounded at $3M–$34M.
+- Transfers are counted as the net difference from the previous race's lineup, so reverting a change gets the transfer back. One unused transfer carries over, "but must be used then".
+- Limitless restores the original team after the race, and a Limitless week carries no free transfer forward.
+- **Final Fix:** the outgoing driver keeps points already earned, and the incoming one scores only from the race. If the outgoing driver had Boost, the incoming one gets the 2x. The original team is restored after the race.
+- The Wildcard stays active until the next lock.
+- **Chip unlocks:** three chips unlock "for your team's 2nd race", the rest are available from the start, and a played chip can't be cancelled.
+- If an inactive driver is swapped for the game's suggested replacement, that swap counts toward the transfer allowance.
+
+**Not published officially:**
+- **How team value works when you sell.** A fan guide's worked example shows a team's cost cap rising by exactly the price gain of a driver it owns ([FanAmp](https://www.fanamp.com/articles/f1-fantasy-cost-caps-explained)). That matches "buy and sell at the current price, keep unspent money in a bank", which is what 3.6 models. *My call; it mirrors the official game as far as it can be observed.*
+- **What a cancelled race does** to chips and transfers. 3.9 proposes rules for this. *My call; check it.*
+
+### 3.1 `games` (one playable game; kept open for other game types, decided 2026-10-27)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| season_id | uuid FK → seasons | |
+| game_type | text: `season_fantasy` | The only type at launch. A future weekly prediction game would be a new value with its own tables |
+| slug, name | text | `2027-fantasy` |
+| status | text: `setup`, `open`, `running`, `completed` | `setup`: admins seed the pool and prices. `open`: teams can be created before the first lock |
+
+- Unique `(season_id, game_type)`.
+- **Each season is a new game, and teams don't carry over** (proposed; it's how the official game works). Last season's teams, leagues and standings stay readable as history.
+
+### 3.2 `ruleset_versions` and `scoring_rules` (rules as versioned data; decided, HLD §5.6)
+**`ruleset_versions`**
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| game_id | uuid FK | |
+| version | integer | Unique with `game_id` |
+| effective_from_event_id | uuid FK → events | Applies from this event's lock onwards, until a later version takes over |
+| params | jsonb (Zod-validated) | Everything about the game that isn't a scoring rule (below) |
+| notes | text | What changed and why. Shown on the public rules page |
+| published_at | timestamptz | |
+
+**What goes in `params`:** these values are read together, never searched, so `jsonb` fits rule 0.3:
+- **Squad:** drivers 5, constructors 2, boosts 1, starting budget `1000` ($100M), teams per user 3.
+- **Transfers:** free per event 2, carry-over max 1, penalty -10, unlimited before the team's first event, and how chip weeks treat carry-over (3.8).
+- **Chips:** the list of chips. Each has our own name, a stable code (`chip_autopilot`, `chip_triple_boost`, …), an unlock rule (`from_start` or `after_first_event`) and an effect code the engine knows.
+- **Knockout cut-offs:** qualifying and sprint qualifying, Q2 from P16 and Q3 from P10 (HLD §5.6).
+- **Prices:** the formula's constants (3.5) and the $3M–$34M bounds (`30`–`340`).
+- **Abandoned sessions:** the default policy is `score_as_classified` (3.9).
+
+**`scoring_rules`**
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| ruleset_version_id | uuid FK | |
+| code | text | Stable key such as `race.finish_position`, unique within the version. Score lines refer to it (Part 4) |
+| session_kind | text | Matches `sessions.kind` |
+| target | text: `driver`, `constructor` | |
+| kind | text: `position_table`, `positions_delta`, `classification_penalty`, `flag_bonus`, `knockout_stage`, `per_driver_penalty`, `aggregate_drivers` | The calculation; HLD §5.6 lists them |
+| category | text | The scoring category that No Negative floors at 0 (HLD §5.4) |
+| params | jsonb (Zod-validated per `kind`) | e.g. the points table, a cap of -10 on sprint positions lost, which classifications a penalty applies to |
+| sort_order | integer | Order on the score explanation |
+
+- **A version is frozen once used.** A trigger refuses updates to a version, and to its rules, once any event using it has locked. A rule change means a new version from a later event, so past scores can always be reproduced exactly.
+- **Rule changes are mostly config.** "Sprint DNF penalty reduced to -10" (an official 2026 change, per the FAQ) is a new version with a different param. Only a genuinely new `kind` of calculation needs code.
+
+### 3.3 `game_events` (an event as the game sees it)
+| Column | Type | Notes |
+|---|---|---|
+| game_id, event_id | composite PK | |
+| sequence | integer | The event's order **in this game**, by `lock_at`. Recomputed if the calendar changes before lock; frozen once locked. Mini-league ranges and "the previous event" use it |
+| status | text: `upcoming`, `open`, `locked`, `scored`, `final`, `cancelled` | `open`: the current transfer window. `scored`: provisional points exist. `final`: the event is final and the price update has run |
+| ruleset_version_id | uuid FK | The version in force for this event, frozen at lock |
+| prices_ready_at | timestamptz, nullable | When this event's prices were published (3.5) |
+
+**`game_session_exceptions`** handles the rare session the game shouldn't score as normal, such as an abandoned race the admins decide to void (3.9):
+- Columns: `game_id`, `session_id`, `policy` (`skip`), `reason`, `decided_by`, `decided_at`.
+- It's audited, and changing it triggers a re-score.
+
+### 3.4 `pool_assets` (what can be picked)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | **The ID the whole game layer uses** for a driver or constructor: in picks, prices and score lines |
+| game_id | uuid FK | |
+| asset_type | text: `driver`, `constructor` | |
+| driver_id | uuid FK, nullable | Exactly one of these is set, matching `asset_type` (`CHECK`) |
+| constructor_id | uuid FK, nullable | |
+| status | text: `active`, `withdrawn` | `withdrawn`: it can't be bought, but owners can keep it and still take its penalties |
+| added_from_event_id | uuid FK | When it became pickable. A mid-season substitute added by an admin starts at the next event (HLD §8.1) |
+| withdrawn_from_event_id | uuid FK, nullable | |
+
+- Unique `(game_id, driver_id)` and `(game_id, constructor_id)`.
+- One asset ID for both kinds keeps the pick, price and score tables generic, so a squad-size change is config, not schema (3.10).
+
+### 3.5 `asset_prices` and `price_update_runs`
+**`asset_prices`:** one row per asset per event.
+| Column | Type | Notes |
+|---|---|---|
+| asset_id | uuid FK → pool_assets | Composite PK with `event_id` |
+| event_id | uuid FK | |
+| price | integer, units of $0.1M | `CHECK` within 30–340 |
+| source | text: `initial`, `formula`, `admin`, `carried` | `carried`: no update ran before this event's lock, so the previous price stands |
+| run_id | uuid FK → price_update_runs, nullable | |
+
+- **Why one row per event** rather than "price from event X onward": a price list per event is about 33 rows, so a season is under 1,000 rows. Every lookup becomes a direct key read. Each event's prices are frozen at lock, so what a team paid can always be explained.
+- **Publishing:** after event E is `final`, the price job writes the rows for event E+1 and sets `prices_ready_at`. Builders see the new prices from then on.
+- **If prices aren't ready by E+1's lock,** for example because E is stuck in review, E+1 uses `carried` prices and admins are alerted. The update is never applied after a lock.
+
+**`price_update_runs`:** `id`, `game_id`, `after_event_id`, `ruleset_version_id`, `inputs` (jsonb: each asset's last-3 average and tier), `ran_at`, `ran_by` (job or admin). Our published formula can then be shown working for every change.
+
+**Formula shape (constants in ruleset params; calibrated on the 2026 replay before launch):**
+1. Average our fantasy points for the asset over its last 3 events. Use fewer at the season start or for a newly added asset.
+2. Compare that with the points its price "should" earn: `price_in_$M × points_per_million`. This baseline is separate for drivers and constructors.
+3. The ratio falls into a tier (e.g. terrible, poor, good, great), and each tier maps to a change scaled by price band. For example, a great week might be +$0.3M for an expensive asset and +$0.6M for a cheap one.
+4. Clamp the result to $3M–$34M.
+
+**Calibration target:** the spread of weekly changes over the replayed 2026 season should look like the official game's.
+
+**Corrections after a price update don't change prices** (HLD §5.5). They change points only.
+
+### 3.6 `teams`
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| game_id | uuid FK | |
+| user_id | uuid FK → users | |
+| slot | smallint | **Unique `(game_id, user_id, slot)`.** On insert, a trigger checks `1 ≤ slot ≤` the ruleset's teams-per-user (3). Two simultaneous creates can't both take slot 3, because the unique key serialises them |
+| name | text | User content: filtered and reportable (Part 5) |
+| first_event_id | uuid FK, nullable | The team's first **locked** event. Set by the first lock it takes part in, which drives unlimited transfers and chip unlocks (HLD §5.2) |
+| status | text: `active`, `retired` | Before its first lock, a team can be deleted outright. After that, deleting a team **retires** it, so league history stays correct |
+| created_at | timestamptz | |
+
+### 3.7 `lineup_versions` and `lineup_picks` (versioned, never overwritten; decided, HLD §5.2)
+**`lineup_versions`**
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| team_id | uuid FK | |
+| for_event_id | uuid FK → events | The event whose window was open when it was saved |
+| kind | text: `regular`, `limitless`, `final_fix` | `limitless` and `final_fix` versions are temporary: they apply to one event and are never the base for the next (3.8) |
+| effective_from_session_id | uuid FK, nullable | Only for `final_fix`: the race session |
+| based_on_version_id | uuid FK, nullable | The version the user was editing. If it isn't the latest, the save still succeeds, but the app shows "your other device saved changes" |
+| saved_at | timestamptz | Set by the database from the clock function (below), not by the client |
+
+**`lineup_picks`**
+| Column | Type | Notes |
+|---|---|---|
+| lineup_version_id | uuid FK, `ON DELETE CASCADE` | Composite PK with `asset_id`, so the same asset can't be picked twice |
+| asset_id | uuid FK → pool_assets | |
+| is_boost | boolean | The 2x Boost. Exactly one per version, and only on a driver |
+
+**What the database checks on every save** (a constraint trigger at commit):
+- **Window:** for `regular` and `limitless` versions, `app_now() < lock_at` of `for_event_id`, and `for_event_id` is the game's single `open` event. A `final_fix` version is only allowed after the qualifying session is `completed` and before the race's scheduled start.
+- **Composition:** squad counts per type, and one Boost on a driver, all read from ruleset params.
+- **Assets:** active, or already owned in the base lineup if withdrawn.
+- **Budget:** the cost at this event's prices fits within the team's purchasing power (3.8). A `limitless` version skips this check.
+- **Only complete lineups can be saved.** Drafts live in the browser. That removes the "half a team at lock" case entirely.
+
+**The clock function (`app_now()`).** It returns `now()` in production. On a replay branch, where a `simulated_clock` setting exists, it returns the simulated time. This keeps HLD rule 6 (one injectable clock) true inside the database too. A production database never has the setting.
+
+**The locked lineup for event E** is the latest `regular` or `limitless` version for E with `saved_at < lock_at`. If there's none, it's the team's base lineup carried forward. It's deterministic, so it can be recomputed at any time with the same answer (HLD §3.3 rule 3).
+
+**Pruning:** versions that never became a locked lineup are deleted 7 days after the event is final, keeping the last one before lock. Locked versions are kept forever.
+
+### 3.8 Transfers, team value and the per-event lock record
+**`team_event_states`:** one row per team per event it took part in, written by the lock job.
+| Column | Type | Notes |
+|---|---|---|
+| team_id, event_id | composite PK | |
+| game_id | uuid FK | |
+| base_version_id | uuid FK | The lineup compared against: the previous event's locked `regular` lineup, or the pre-Limitless one |
+| locked_version_id | uuid FK | What counts for this event |
+| final_fix_version_id | uuid FK, nullable | |
+| chip_play_id | uuid FK, nullable | |
+| is_first_event | boolean | |
+| purchasing_power | integer | Money available at this event's prices |
+| spent | integer | Cost of the locked lineup at this event's prices |
+| bank | integer | `purchasing_power - spent`, never below 0 (except Limitless) |
+| transfers_made | integer | Net count: assets in the locked lineup that aren't in the base |
+| free_transfers | integer | Allowance this event, including carry-over in, or "unlimited" (null) |
+| carry_over_out | smallint | 0 or 1 |
+| transfer_penalty | integer | Copied into the ledger as its own line (Part 4) |
+| ruleset_version_id | uuid FK | |
+
+**Team value (my call, mirroring the official game):** every asset is bought and sold at its **current** price, and unspent money stays in the bank.
+- First event: `purchasing_power = budget` ($100M).
+- After that: `purchasing_power(E) = bank(base event) + the base lineup's assets at E's prices`.
+
+So price rises of owned assets raise a team's value, and falls lower it. **Keeping an unchanged lineup is always affordable**, because that sum is exactly the base lineup's cost plus a bank that's never negative.
+
+**Chip weeks:**
+- **Limitless:** budget not checked, transfers unlimited, no carry-over out. The next event's base is the **pre-Limitless** lineup, with that lineup's bank, so the team "reverts" automatically. The next event's purchasing power uses current prices for the restored team.
+- **Wildcard:** transfers unlimited and free, but the budget still applies. It stays playable until lock, and the result becomes the new base. Carry-over out in a Wildcard week follows a ruleset param. *Proposed: 0, the same as Limitless.* Official text only says this for Limitless, so it's my call.
+- **Final Fix:** one asset swap, checked against this event's purchasing power. It's free. The next event's base is the **locked** (pre-Final-Fix) lineup.
+
+**Carry-over:** `carry_over_out = min(1, free_transfers - transfers_made)`, never below 0. That keeps "one transfer carries over but must be used then": two unused don't become two carried. The exact formula lives with the ruleset and is pinned by tests.
+
+**Lock correctness doesn't depend on the lock job.** If the job is late, the row can be computed afterwards from versions, prices and chip plays with the same result. A team created after lock gets no row for that event and starts at the next one (decided, HLD §5.2).
+
+### 3.9 Chips, cancellations and abandoned sessions
+**`chip_plays`**
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| team_id | uuid FK | |
+| game_id | uuid FK | |
+| chip_code | text | Must exist in the event's ruleset params |
+| event_id | uuid FK | |
+| target_asset_id | uuid FK, nullable | The x3 Boost driver. It must be a driver in the locked lineup and not the 2x Boost one (checked at lock) |
+| played_at | timestamptz | From `app_now()` |
+| status | text: `played`, `refunded` | No delete and no undo (verified rule). Only the system refunds, for a cancelled event |
+
+- **Constraints:** unique `(team_id, chip_code) WHERE status = 'played'` gives once per season. Unique `(team_id, event_id) WHERE status = 'played'` gives one chip per race.
+- **Timing:** a trigger checks the play window (before lock, or the Final Fix window) and the unlock rule against `teams.first_event_id`.
+
+**Cancelled events (my calls, check these):**
+- **Cancelled before lock:** nothing locks. Chips played for it are **refunded**. There's no `team_event_states` row, so the next event's transfers are counted against the last real locked lineup, and no extra free transfers are granted. Prices don't change.
+- **Session cancelled after lock** (e.g. a race called off after qualifying): sessions already run stay scored, and the cancelled session simply has no results. Chips stay used, because the lock happened. Prices update as normal from what was scored.
+
+**Abandoned sessions with a classification** (e.g. Belgium 2021): scored as classified by default (ruleset param). Admins can void one through `game_session_exceptions`. That's audited and triggers a re-score.
+
+### 3.10 Indexes beyond keys
+- `lineup_versions (team_id, for_event_id, saved_at DESC)`: the locked-lineup lookup and the builder.
+- `lineup_picks (asset_id)`: ownership share ("selected by 34%") and "who owns this withdrawn driver".
+- `team_event_states (event_id)`: lock and scoring fan-out per event.
+- `chip_plays (event_id) WHERE status = 'played'`: scoring loads one event's chips at once.
+- `asset_prices (event_id)`: the price list.
+- `teams (user_id)`: "my teams".
+
+### 3.11 Scenario check
+| Scenario | Real example or source | How it's handled |
+|---|---|---|
+| Joining after the season starts | Official FAQ | The team starts at the next locked event; unlimited changes until then (3.6, 3.8) |
+| Save attempted at the deadline | Every week | The database decides with `app_now() < lock_at`; the API check is only for a friendly message (3.7) |
+| Qualifying rescheduled before lock | Suzuka 2019 | `lock_at` follows the session. **An admin can never move `lock_at` to a time already past**, so no saved lineup is retroactively late |
+| Session delayed after lock passed | Rain delays | Lock already happened; nothing changes |
+| Two devices editing | Common | Both saves are versions; the latest before lock wins; `based_on_version_id` warns the user (3.7) |
+| Swapping the Boost only | Common | Not a transfer: the net asset difference is 0 (verified rule) |
+| Reverting a transfer | Official FAQ | Net-based counting gives it back for free (3.8) |
+| Unused transfer carries over, must be used | Official FAQ | `carry_over_out` formula caps at 1 (3.8) |
+| Limitless, then the team restored | Official FAQ | A temporary version; the next base is the pre-Limitless lineup and its bank (3.8) |
+| Final Fix after qualifying, Boost moves | Official FAQ | A `final_fix` version from the race session, with Boost on the incoming driver. Earlier sessions are scored from the locked lineup (3.7, Part 4) |
+| Final Fix on a sprint weekend | Official rule (after Qualifying) | Window opens when Qualifying completes, after the sprint, and closes at race start |
+| x3 Boost on the 2x Boost driver | Official FAQ | Rejected at lock (3.9) |
+| Chips unlock for the team's 2nd race | Official FAQ | Unlock rule versus `first_event_id` (3.9) |
+| Driver injured or replaced | Hadjar 2026 (verified) | Owners keep him and get the penalties; swapping him out is a normal transfer (verified rule) |
+| Substitute becomes pickable | Tsunoda 2026 (HLD §8.1) | A new pool asset with a price from the next event (3.4) |
+| Driver or team leaves for good | Rare mid-season | Asset `withdrawn`: can't be bought, can be kept or sold (3.4) |
+| Prices not ready by the next lock | A stuck review | `carried` prices, plus an alert. Never applied after a lock (3.5) |
+| Correction after prices moved | Late stewards' change | Points re-scored; prices untouched (3.5) |
+| Owned asset's price rises or falls | Every week | Purchasing power follows; an unchanged lineup always stays affordable (3.8) |
+| Event cancelled before lock | Bahrain and Saudi Arabia 2026 (verified) | Chips refunded, no lock record, transfers compared with the last real lineup (3.9) |
+| Race cancelled after qualifying | Possible (weather) | Earlier sessions stand; chips used (3.9) |
+| Abandoned race with a classification | Belgium 2021 | Scored as classified by default; admins can void (3.9) |
+| Mid-season rule change | Sprint DNF penalty reduced to -10 for 2026 (official) | New ruleset version from an event; old events keep their version (3.2) |
+| Squad size or budget changes | Possible in a future season | Ruleset params; picks are generic rows (3.2, 3.4) |
+| User deletes a team mid-season | Common | Retired, not deleted, so league history holds (3.6) |
+| Season rollover | Every year | A new game; old teams stay as read-only history (3.1) |
+| Replaying 2026 with a fake clock | HLD §12 | `app_now()` on a replay branch (3.7) |
+
+**Known limits:**
+- **Late entry during a weekend** (the official game lets a late team score from the race) isn't supported, by your decision. If it's ever wanted: lineup versions already support "effective from session" (Final Fix uses it), so it would be additive.
+- **Exact official parity on unpublished rules** (selling, cancellations, Wildcard carry-over) can't be guaranteed. Each is a ruleset param or a single function, so changing one is config or a small code change, with no migration.
+
+### 3.12 Scale
+| Table | Beta (1k teams) | Established (25k) | Big (250k) | Notes |
+|---|---|---|---|---|
+| lineup_versions | ~15k/season | ~400k | ~4M | About 0.6 locked versions per team per event, since an unchanged lineup reuses its version; plus unlocked versions held for 7 days |
+| lineup_picks | ~100k/season | ~2.8M | ~28M | 7 per version. The biggest table in this part. Partition by `game` (season) if needed (0.7) |
+| team_event_states | ~24k/season | ~600k | ~6M | One per team per event |
+| chip_plays | ≤6k/season | ≤150k | ≤1.5M | At most 6 per team |
+| asset_prices, scoring_rules, game_events | <1k/season | same | same | Don't grow with users |
+
+**Hot paths:**
+- **The deadline rush:** many saves in the last minutes before lock. Each save is one version insert plus 7 pick inserts and a price lookup by key. That's cheap, and it's rate-limited per team.
+- **The lock fan-out:** writing `team_event_states` for every team. It's batched in jobs of about 1,000 teams (2.10). At 250k teams that's about 250 jobs in minutes, and nothing waits on it (3.8).
+- **Ownership percentages** (`lineup_picks` by asset for one event) are computed once at lock and cached, not per page view.
+
+**Storage at the beta size** is a few MB for this part, comfortably inside the free tier.
+
+### 3.13 Change test
+| Foreseeable change | Kind of change |
+|---|---|
+| Points values change, or a penalty changes | Config: a new ruleset version |
+| A new kind of scoring rule (e.g. overtakes, if data allows) | Code (a new `kind`) plus config; Part 2 adds the result facts |
+| Squad size, budget, teams per user, transfer counts | Config (ruleset params). The `slot` trigger reads the param |
+| A new chip | Config plus a small effect function. `chip_plays` is generic |
+| A new price formula, or a formula change mid-season | Config: a new ruleset version, with old runs explained by `price_update_runs` |
+| Unpublished official rules turn out different (selling, Wildcard carry-over, cancellations) | A param or a single function; no migration |
+| Late entry from the race (official behavior) | Additive: allow `regular` versions effective from a session. Not planned |
+| A second game type (e.g. weekly predictions) | Additive: a new `game_type` plus its own tables (decided 2026-10-27) |
+| Per-league scoring | **Redesign**; excluded by your decision (0.8) |
+
+---
+
 ## Open items carried forward
 - **Part 2 (resolved here, for your review):** default session durations (2.11); snapshot retention (2.2).
-- **Part 3:** the official game's sell-price rule for team value, to be verified before modelling the bank; what a cancelled event does in the game; confirm every official price is a multiple of $0.1M.
+- **Part 3 (resolved, for your review):**
+  - The sell-price rule isn't published. It's modelled as current-price buy/sell plus a bank, matching an observed example (3.0, 3.8).
+  - Cancellation rules are my call (3.9).
+  - Wildcard carry-over is my call (3.8).
+  - Prices in $0.1M units are consistent with the official $3M/$34M bounds and the official columns' $0.2M and $0.6M examples.
 - **Part 5:** what happens to a deleted user's posts; how long chat is kept (free-tier storage). These are your calls and will be asked when we get there.
