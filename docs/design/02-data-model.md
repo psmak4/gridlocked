@@ -1,6 +1,6 @@
 # Gridlocked — Data Model
 
-**Status:** Phase 2 in progress. Part 0 (conventions and the checking method) and Part 1 (reference data) are drafted. Part 1 was revised on 2026-10-27 after a scenario check against the real 2026 calendar, and you approved it. Part 2 (ingestion and results) is approved. Part 3 (fantasy core) is approved. Part 4 (scoring and standings) is drafted for review. Parts 5–6 come next, one at a time.
+**Status:** Phase 2 in progress. Part 0 (conventions and the checking method) and Part 1 (reference data) are drafted. Part 1 was revised on 2026-10-27 after a scenario check against the real 2026 calendar, and you approved it. Part 2 (ingestion and results) is approved. Part 3 (fantasy core) is approved. Part 4 (scoring and standings) is approved. Part 5 (community) is drafted for review. Part 6 is last.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md), approved 2026-10-27. Section references like "HLD §5.2" point there.
 
@@ -17,8 +17,8 @@ The model is split into parts that follow the HLD's modules. Each part is review
 | 2 | Ingestion and results: raw snapshots, normalized results, overrides, the review queue, the job table | **Drafted** |
 | 3 | Fantasy core: games, rulesets, the pool and prices, teams, lineup versions, transfers, chips, team value | **Drafted** |
 | 4 | Scoring and standings: asset score lines, team ledger, per-event totals, leagues, tiebreaks | **Drafted** |
-| 5 | Community: categories, threads, posts, chat, votes, spoiler state, moderation, notifications | Next |
-| 6 | Identity, admin and audit: Better Auth tables, profiles, roles, trust levels, the audit log | |
+| 5 | Community: categories, threads, posts, chat, votes, spoiler state, moderation, notifications | **Drafted** |
+| 6 | Identity, admin and audit: Better Auth tables, profiles, roles, trust levels, the audit log | Next |
 
 ---
 
@@ -1175,6 +1175,322 @@ None of these grows with the user count. Public league pages are cached at the C
 
 ---
 
+## Part 5. Community (proposed)
+
+This part covers the forum, live session chat, votes, spoiler state, moderation and notifications. It follows HLD §7 and §10. Two decisions shape it, both made 2026-10-27:
+- **Deleted accounts are always anonymized.** Posts stay, the author shows as "deleted user", and personal data is removed. Before leaving, a user can still delete individual posts.
+- **Chat is archived after 30 days.** A session's chat moves to a compressed, read-only file in object storage. It can still be replayed under its thread, but it's no longer searchable.
+
+```mermaid
+erDiagram
+  categories ||--o{ threads : contains
+  threads ||--o{ posts : has
+  posts ||--o{ posts : "replies to"
+  posts ||--o{ post_revisions : "edited as"
+  posts ||--o{ post_votes : receives
+  threads ||--o{ chat_messages : "live chat"
+  threads ||--o{ chat_archives : "archived to"
+  sessions ||--o{ threads : "spoiler scope"
+  users ||--o{ session_watch_marks : marks
+  mod_queue_items ||--o{ reports : groups
+  users ||--o{ notifications : receives
+  users ||--o{ push_subscriptions : has
+```
+
+### 5.1 How deleted users work (affects every table here)
+- **A deleted account becomes a tombstone, not a missing row.** The `users` row stays, so every foreign key still holds (0.7: `ON DELETE RESTRICT`). Its personal data is scrubbed: email, name, avatar, profile fields, sign-in accounts and sessions. Its status becomes `deleted`.
+- **Anywhere an author is shown, a deleted author renders as "deleted user".** There's nothing to rewrite in posts, chat or archives, because they store only user IDs and names are looked up when displayed.
+- **Teams and leagues follow the same rule:**
+  - A deleted user's teams are retired and renamed "Deleted team" (3.6).
+  - A league they owned stays active, and admins can reassign the owner (4.5).
+  - The mechanics are in Part 6.
+- **For your lawyer (HLD §13.6):** after scrubbing, the tombstone is a random ID with no personal data. But a post's text can itself contain personal data. Requests to remove specific posts are handled through support with a moderator `remove` action.
+
+### 5.2 `categories`
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| slug, name, description | text | |
+| position | integer | Display order |
+| kind | text: `general`, `race_weekend`, `fantasy`, `news` | `race_weekend` turns on the spoiler-title check for new threads (HLD §7.3) |
+| min_trust_to_start_thread | smallint | Default TL1 (HLD §7.4) |
+| status | text: `active`, `archived` | |
+
+### 5.3 `threads`
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| category_id | uuid FK | |
+| kind | text: `user`, `session`, `results`, `league`, `rumor` | HLD §7.1 |
+| title | text | The real title |
+| spoiler_safe_title | text, nullable | Shown to anyone who hasn't revealed this thread's session. Auto threads get generic ones, e.g. "Race — Discussion". User threads that are flagged get "Spoiler thread" |
+| contains_spoilers | boolean | Set by the author or the title check, or by a moderator |
+| author_user_id | uuid FK → users, nullable | Null for system-created threads |
+| session_id | uuid FK, nullable | **Spoiler scope** (0.5). Set for session and results threads, and for user threads the author ties to a session |
+| event_id | uuid FK, nullable | For the event hub's thread list |
+| league_id | uuid FK, nullable | League threads. **A private league's thread is visible only to members**, and is never in public listings, search or the CDN cache |
+| chat_opens_at, chat_closes_at | timestamptz, nullable | Session threads only. Derived from the session's times (−15 min / +15 min, HLD §7.2) and updated when the session moves. While the session is `suspended`, chat stays open past `chat_closes_at` |
+| status | text: `open`, `locked`, `removed`, `archived` | |
+| pinned | boolean | |
+| reply_count, score | integer | Counters, updated in the same transaction as the post or vote |
+| hot_rank | real | For "hot" sorting. Recomputed by a job every few minutes for active threads only |
+| last_activity_at | timestamptz | |
+| created_at | timestamptz | |
+
+- **Chat mode or discussion mode is never stored.** It's decided from the clock and the session status, so there's nothing to flip and nothing to get stuck.
+- **A thread's opening text is its first post** (a `posts` row with no parent and `is_opening = true`). Votes on a thread are votes on that post.
+- Auto threads are created by planned jobs (2.10) with dedupe keys like `open_threads:<event_id>`, so they're never duplicated.
+
+### 5.4 `posts` (nested discussion; decided, about 4 levels on mobile)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | UUIDv7, so IDs sort by time |
+| thread_id | uuid FK | |
+| parent_post_id | uuid FK → posts, nullable | Null for top-level replies and the opening post |
+| path | ltree | Materialized path of ancestor IDs. One indexed query loads a whole thread or one subtree. `ltree` is a standard extension that Neon supports |
+| depth | smallint | No cap in the data. The UI shows about 4 levels, then a "continue thread" link |
+| is_opening | boolean | |
+| author_user_id | uuid FK → users | A tombstone if the account was deleted (5.1) |
+| body | text | Markdown source, at most 10k characters. Links and embeds are allowed only from the embed allow-list, and only for trust levels that permit links (HLD §7.1, §7.4) |
+| session_id | uuid FK, nullable | Copied from the thread, so spoiler filtering is one column check |
+| contains_spoilers | boolean | |
+| status | text: `visible`, `pending_review`, `hidden_by_flags`, `removed`, `deleted_by_author` | `pending_review`: held by a filter. `hidden_by_flags`: auto-hidden by weighted flags (HLD §7.4) |
+| score, upvotes, downvotes | integer | Counters |
+| edit_count | smallint | |
+| created_at, edited_at | timestamptz | |
+
+- **An author deleting their own post** keeps the row as a "[deleted]" placeholder with the body cleared, so replies under it stay in place. Earlier text survives only in `post_revisions` for the moderation retention period (5.10).
+- **Rendering:** posts are stored as Markdown and rendered with a strict sanitizer. Public thread pages are cached at the CDN, spoiler-safe by default (HLD §7.3, §11.4).
+
+**`post_revisions`** stores each earlier version of an edited post: `post_id`, `body`, `edited_at`, `edited_by`. That lets moderators see what a reported post said before it was edited.
+
+**`post_mentions`** (`post_id`, `user_id`) drives "you were mentioned" notifications.
+
+### 5.5 `chat_messages` and `chat_archives` (live session chat; stored apart from posts, HLD §7.2)
+**`chat_messages`**
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | UUIDv7. The chat gateway polls "messages after the last ID I sent", so time ordering is the cursor (HLD §11.2) |
+| thread_id | uuid FK | |
+| session_id | uuid FK | Spoiler scope |
+| author_user_id | uuid FK → users | |
+| body | text, at most 500 characters | Plain text. Links follow trust-level rules |
+| status | text: `visible`, `removed` | |
+| created_at | timestamptz | |
+
+- **Index:** `(thread_id, id)`, used for the gateway's poll and for loading the history.
+- **Partition-ready:** the time-ordered ID lets the table be partitioned by month later without query changes (0.7).
+- **Slow mode and rate limits:** the thread's slow-mode setting and per-trust-level limits (HLD §7.4) are enforced by the gateway and checked again on insert.
+
+**`chat_archives`**
+| Column | Type | Notes |
+|---|---|---|
+| thread_id | uuid PK, FK | |
+| object_key | text | A gzip JSON-lines file in Neon Object Storage (5 GB free, HLD §11.4) |
+| message_count | integer | |
+| first_message_at, last_message_at | timestamptz | |
+| bytes | integer | |
+| archived_at | timestamptz | |
+
+**Archiving (decided: after 30 days):**
+1. A job writes the thread's visible messages to the file. Each message keeps only its ID, author ID, time and text.
+2. It checks the file's message count against the table.
+3. Then it deletes the rows.
+
+The thread page replays the archive under the discussion. Removed messages aren't archived. Any message that was reported is already preserved in its moderation queue item (5.9), so archiving never destroys evidence.
+
+### 5.6 `post_votes`
+| Column | Type | Notes |
+|---|---|---|
+| post_id, user_id | composite PK | One vote per user per post |
+| value | smallint: `1`, `-1` | Downvotes need TL1 or above (HLD §7.4, proposed) |
+| created_at | timestamptz | |
+
+- Changing or removing a vote updates the post's and thread's counters in the same transaction.
+- **Reputation** is recomputed by a daily job from votes cast by TL1+ users only, so brand-new accounts can't farm or bomb it. It's stored on the profile (Part 6).
+
+### 5.7 `session_watch_marks` (spoiler state; decided, HLD §7.3)
+| Column | Type | Notes |
+|---|---|---|
+| user_id, session_id | composite PK | "I've watched this; show me everything" |
+| marked_at | timestamptz | |
+
+**A session is revealed for a user if** they've marked it, **or** its spoiler window (session start + 7 days, decided) has ended, **or** they've turned spoiler protection off in their profile (Part 6). It's checked in one batched lookup for every session that appears on a page.
+
+- **Logged-out visitors** keep their reveal choice in the browser (decided).
+- **Fantasy scores and standings** use the same check, with `points_by_session` (4.4).
+
+### 5.8 `reports` (flags from anyone)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| queue_item_id | uuid FK → mod_queue_items | Reports about the same thing are grouped |
+| target_type | text: `post`, `thread`, `chat_message`, `user`, `team_name`, `league_name` | |
+| target_id | uuid | Polymorphic, like `provider_ids` (1.11). It's checked by code and protected by the content snapshot (5.9) |
+| reporter_user_id | uuid FK, nullable | **Null for a logged-out report.** The EU Digital Services Act expects anyone to be able to report illegal content (HLD §13.6). Those reports need a contact email |
+| reporter_contact | text, nullable | Only for logged-out reporters. Deleted when the item is resolved |
+| reason | text: `spam`, `abuse`, `spoiler`, `off_topic`, `illegal`, `copyright`, `other` | `copyright` covers DMCA notices (HLD §13.6) |
+| note | text, nullable | |
+| weight | real | From the reporter's trust level (HLD §7.4) |
+| created_at | timestamptz | |
+
+A user can report a given target only once.
+
+### 5.9 Moderation: queue, actions, restrictions and filters
+**`mod_queue_items`:** one open item per target.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| target_type, target_id | | Unique while open |
+| target_user_id | uuid FK | Whose content it is, for per-user moderation history |
+| source | text: `reports`, `filter`, `auto_hide` | |
+| report_count, weight_sum | | When `weight_sum` passes the threshold, the content is auto-hidden (`hidden_by_flags`) pending review |
+| content_snapshot | jsonb | **A copy of the content when it was first queued**, updated if it's edited. Evidence survives edits, deletion and chat archiving |
+| filter_hits | jsonb, nullable | Which rules matched |
+| status | text: `open`, `actioned`, `dismissed` | |
+| resolved_by, resolved_at, resolution | | |
+| version | integer | So two moderators can't both resolve it (0.7) |
+
+**`mod_actions`:** the moderation log. Users can see actions taken against them.
+- Columns: `moderator_user_id` (null for the system), `action`, `target_type`, `target_id`, `target_user_id`, `reason`, `until`, `queue_item_id`, `created_at`.
+- `action` values: `remove`, `restore`, `lock`, `unlock`, `pin`, `unpin`, `move`, `retitle`, `warn`, `mute`, `unmute`, `chat_ban`, `ban`, `unban`, `set_trust_level`.
+- Every action also writes the general `audit_log` (Part 6).
+
+**`user_restrictions`:** active limits on a user.
+- Columns: `user_id`, `kind` (`mute`, `chat_ban`, `thread_ban`), `until` (null means until lifted), `reason`, `created_by`, `lifted_at`.
+- Posting checks the active restrictions in the same query as the trust level.
+- Full bans use Better Auth's admin plugin (HLD §9) and are mirrored as a `mod_actions` row.
+
+**`filter_rules`:** the hard-rule filters (HLD §7.4).
+- Columns: `pattern`, `match_type` (`word`, `regex`, `domain`), `effect` (`block`, `hold_for_review`, `flag`), `scope` (`all`, `titles`, `chat`), `created_by`, `active`.
+- It's config, editable by admins and audited. Link limits, mention limits and duplicate detection are code, with their thresholds in `settings` (2.11).
+
+**Rate limits** are checked by counting the user's recent rows, e.g. posts by this author in the last 10 minutes. That uses the index `posts (author_user_id, created_at)`, so there's no separate counter table to keep in sync.
+
+### 5.10 Retention (proposed except chat, which you decided)
+| Data | Kept |
+|---|---|
+| Posts, threads, votes | Permanently, unless removed for legal reasons |
+| Chat messages | 30 days in the database, then the archive file (decided) |
+| Post revisions | 1 year, then only the current text |
+| Reports, queue items, mod actions | 2 years, for repeat-offender history and legal requests. Logged-out reporters' contact details are deleted at resolution |
+| Notifications | 90 days |
+| Push subscriptions | Until they fail permanently (HTTP 410) or the user removes them |
+| Email outbox | 30 days |
+
+### 5.11 Notifications (in-app and Web Push at launch; email for account messages only, HLD §10)
+**`notifications`:** personal notifications only.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| user_id | uuid FK | |
+| kind | text: `reply`, `mention`, `roster_change`, `lock_reminder`, `league_activity`, `score_correction`, `moderation` | |
+| group_key | text, nullable | e.g. `reply:<thread_id>`. **One unread row per group, updated in place** ("5 new replies in …"), so busy threads don't flood the table |
+| count | integer | |
+| actor_user_id | uuid FK, nullable | |
+| thread_id, post_id, event_id, session_id, league_id, team_id | uuid FKs, nullable | What it's about. **`session_id` makes it spoiler-scoped:** the text is rendered spoiler-safe until that session is revealed |
+| data | jsonb | Template values. Never pre-rendered text, so spoiler-safe rendering is decided at display time |
+| created_at, read_at | timestamptz | |
+
+**Unique `(user_id, group_key) WHERE read_at IS NULL`.**
+
+**`broadcasts`:** messages for everyone.
+- Columns: `game_id` or none, `kind`, `session_id`/`event_id`, `data`, `created_at`.
+- Examples: "provisional scores are in", "Qualifying thread is live", site announcements.
+- **These aren't copied into every user's inbox.** The bell merges a user's notifications with broadcasts newer than their `broadcasts_read_at` (Part 6). Telling 250k users that scores are in writes one row, not 250k.
+
+**`notification_preferences`:** (`user_id`, `kind`, `channel`: `in_app` or `push`, `enabled`). Only overrides are stored; defaults live in config.
+
+**`push_subscriptions`:** `id`, `user_id`, `endpoint` (unique), `p256dh`, `auth`, `user_agent`, `created_at`, `last_success_at`, `failure_count`. It's pruned on HTTP 410, and push fan-out is batched (2.10).
+
+**`email_outbox`:** account emails waiting for the daily cap (HLD §10).
+- Columns: `id`, `to_email`, `template` (`verify_email`, `magic_link`, `password_reset`), `payload`, `status` (`queued`, `sent`, `failed`), `attempts`, `send_after`, `provider_message_id`, `created_at`.
+- **Magic links and resets go first**, since they expire. Verification emails wait if the cap is near.
+
+### 5.12 Search (proposed; not in the HLD's launch list, so it can wait)
+It's cheap enough to include at launch. If it's deferred, adding it later is purely additive.
+- Threads and posts get a generated `tsvector` column with a GIN index: Postgres full-text search, with no extra service.
+- **Search never returns:** private league threads, removed content, or results inside a spoiler window for users who haven't revealed them.
+
+### 5.13 Indexes beyond keys
+- `threads (category_id, last_activity_at DESC) WHERE status IN ('open','locked')` and `threads (category_id, hot_rank DESC)`: category lists.
+- `threads (session_id)` and `threads (event_id)`: event hubs and spoiler lookups.
+- `posts (thread_id, path)`: loading a thread or subtree.
+- `posts (author_user_id, created_at)`: profiles and rate limits.
+- `chat_messages (thread_id, id)`: the gateway poll and history.
+- `post_votes (user_id)`: "my votes" on a thread page, in one lookup.
+- `notifications (user_id, created_at DESC)` and `notifications (user_id) WHERE read_at IS NULL`: the bell and the unread count.
+- `mod_queue_items (status, created_at) WHERE status = 'open'`: the mod queue.
+- GIN on the `tsvector` columns.
+
+### 5.14 Scenario check
+| Scenario | Real example or source | How it's handled |
+|---|---|---|
+| Event week starts | Every race weekend | Planned jobs create session threads with generic titles (5.3, 2.10) |
+| Session delayed or moved | Rain delays; Suzuka 2019 | Chat window recalculated from session times; nothing stored to flip (5.3) |
+| Red flag runs long | Common | `suspended` keeps chat open (5.3, 1.4) |
+| Chat flood at lights out | Every race start | Slow mode plus per-trust limits in the gateway and on insert. Time-ordered IDs make polling cheap (5.5) |
+| User hasn't watched yet | Core feature | Generic titles, hidden results, comments and chat, hidden fantasy scores, spoiler-safe notifications until the session is marked or the 7 days end (5.7) |
+| Spoiler in a user's thread title | "Verstappen wins!" posted 5 min after the flag | The title check warns and flags it; unrevealed users see "Spoiler thread"; moderators retitle (5.3) |
+| Post edited after being reported | Common evasion | The queue item's content snapshot plus revisions (5.4, 5.9) |
+| Author deletes a post with replies | Common | A "[deleted]" placeholder keeps the tree (5.4) |
+| Account deleted | Decided: always anonymize | A tombstone user shows as "deleted user", and personal data is scrubbed (5.1) |
+| Spam wave of new accounts | Any forum | Turnstile, TL0 limits, link limits, filters that hold for review, weighted flags auto-hide (5.9) |
+| Vote brigading | Any forum | Downvotes TL1+, rate limits, reputation from TL1+ votes only (5.6) |
+| Two moderators on one item | Busy race day | `version` check (5.9) |
+| Moderator mistake | Any | `restore`, with an audit trail (5.9) |
+| Mute expires | Common | `until` on the restriction (5.9) |
+| Private league thread | Decided feature | Visible to members only; not in listings, search or cache (5.3) |
+| Report from a logged-out visitor | EU Digital Services Act | Nullable reporter plus a contact email that's deleted at resolution (5.8) |
+| Copyright notice | Race clips (HLD §13.6) | A `copyright` report, then a `remove` action with a logged reason (5.8, 5.9) |
+| Chat reaches 30 days | Decided | Archived to object storage, replayable; reported messages preserved in the queue (5.5) |
+| "Scores are in" to everyone | Every session | One `broadcasts` row, not one per user (5.11) |
+| Busy thread replies | Popular threads | One grouped unread notification per thread (5.11) |
+| Expired push subscription | Common | Pruned on HTTP 410 (5.11) |
+| Email cap reached | 100/day free (HLD §10) | Outbox queue; magic links and resets first (5.11) |
+| Old thread revived | Common | Optional auto-lock after N days of inactivity per category (config) |
+
+**Known limits:**
+- A deleted user's username can still appear inside **other people's** posts, as text they wrote. That's the same as Reddit and Discourse, and it's removed on request through moderation (5.1).
+- Archived chat can be replayed but not searched (decided).
+
+### 5.15 Scale
+| Table | Beta (500 users) | Established (10k) | Big (100k) | Notes |
+|---|---|---|---|---|
+| posts | ~20k/season | ~500k | ~5M | About 1 KB each with indexes, so about 5 GB at big (a paid tier by then) |
+| post_votes | ~150k/season | ~4M | ~50M | The biggest table at scale. Small rows; partition by `post_id` hash or by time if needed (0.7) |
+| chat_messages (in the database) | ≤25k at any time | ~250k | ~1–2M | Only the last 30 days are in the database (decided) |
+| chat archives (object storage) | ~10 MB/season | ~100 MB | ~1 GB | Compressed |
+| session_watch_marks | ~20k/season | ~400k | ~4M | |
+| notifications | ~10k (90 days) | ~200k | ~2M | Personal only; broadcasts are one row each |
+| mod tables | hundreds | thousands | tens of thousands | |
+
+**Storage at beta:** tens of MB, within the free tier.
+
+**Hot reads:**
+- **Thread page:** one path-ordered index scan plus a batched check of my votes and the spoiler state.
+- **Category list:** index-ordered.
+- **Chat poll:** "after this ID" on `(thread_id, id)`.
+- **Unread count:** a partial index.
+
+None of these scans a whole table. Logged-out thread pages are served from the CDN (HLD §11.4).
+
+### 5.16 Change test
+| Foreseeable change | Kind of change |
+|---|---|
+| Image uploads | Additive: an `attachments` table plus object storage and image moderation (HLD §15, later) |
+| Rumor tracker | Additive: `rumors`, `rumor_votes`, `rumor_resolutions` linked to `threads` (kind `rumor` already exists) |
+| AI moderation classifier | Additive: classifier scores on queue items; a new `source` value (HLD §7.4, later) |
+| Emoji reactions in chat or on posts | Additive: a reactions table |
+| Polls in threads | Additive |
+| Replies inside chat | Additive: `reply_to_message_id` |
+| Swapping the chat gateway to Ably | No schema change; only the gateway changes (HLD §11.2) |
+| Email notifications once on a paid plan | Config: a new `channel` value in preferences, plus templates |
+| Direct messages | Additive, but deliberately not planned: private messaging is a moderation and safety burden |
+| Per-language forums | Additive: a `language` column on categories and posts |
+
+---
+
 ## Open items carried forward
 - **Part 2 (resolved here, for your review):** default session durations (2.11); snapshot retention (2.2).
 - **Part 3 (resolved, for your review):**
@@ -1182,4 +1498,4 @@ None of these grows with the user count. Public league pages are cached at the C
   - Cancellation rules are my call (3.9).
   - Wildcard carry-over is my call (3.8).
   - Prices in $0.1M units are consistent with the official $3M/$34M bounds and the official columns' $0.2M and $0.6M examples.
-- **Part 5:** what happens to a deleted user's posts; how long chat is kept (free-tier storage). These are your calls and will be asked when we get there.
+- **Part 5 (decided 2026-10-27):** deleted users' posts are always anonymized; chat is archived after 30 days.
