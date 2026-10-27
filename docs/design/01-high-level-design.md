@@ -429,7 +429,7 @@ The roster checker runs on a schedule and can also be triggered by an admin:
 ### 8.3 Communicating changes
 When a pool driver becomes `doubtful` or `unavailable` before lock:
 - show a warning in the team builder;
-- send an in-app, email and push notification to owners of affected teams, respecting their preferences;
+- send an in-app and push notification to owners of affected teams, respecting their preferences (email too, once we're on a paid email plan; §10);
 - optionally have the system account post in the news thread, with admin approval.
 
 ---
