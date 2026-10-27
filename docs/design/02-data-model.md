@@ -1,6 +1,6 @@
 # Gridlocked — Data Model
 
-**Status:** Phase 2 in progress. Part 0 (conventions and the checking method) and Part 1 (reference data) are drafted. Part 1 was revised on 2026-10-27 after a scenario check against the real 2026 calendar, and you approved it. Part 2 (ingestion and results) is approved. Part 3 (fantasy core) is drafted for review. Parts 4–6 come next, one at a time.
+**Status:** Phase 2 in progress. Part 0 (conventions and the checking method) and Part 1 (reference data) are drafted. Part 1 was revised on 2026-10-27 after a scenario check against the real 2026 calendar, and you approved it. Part 2 (ingestion and results) is approved. Part 3 (fantasy core) is approved. Part 4 (scoring and standings) is drafted for review. Parts 5–6 come next, one at a time.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md), approved 2026-10-27. Section references like "HLD §5.2" point there.
 
@@ -16,8 +16,8 @@ The model is split into parts that follow the HLD's modules. Each part is review
 | 1 | Reference data: seasons, events, sessions, drivers, constructors, entries, availability, provider IDs | **Drafted** |
 | 2 | Ingestion and results: raw snapshots, normalized results, overrides, the review queue, the job table | **Drafted** |
 | 3 | Fantasy core: games, rulesets, the pool and prices, teams, lineup versions, transfers, chips, team value | **Drafted** |
-| 4 | Scoring and standings: asset score lines, team ledger, per-event totals, leagues, tiebreaks | Next |
-| 5 | Community: categories, threads, posts, chat, votes, spoiler state, moderation, notifications | |
+| 4 | Scoring and standings: asset score lines, team ledger, per-event totals, leagues, tiebreaks | **Drafted** |
+| 5 | Community: categories, threads, posts, chat, votes, spoiler state, moderation, notifications | Next |
 | 6 | Identity, admin and audit: Better Auth tables, profiles, roles, trust levels, the audit log | |
 
 ---
@@ -693,7 +693,7 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 | params | jsonb (Zod-validated per `kind`) | e.g. the points table, a cap of -10 on sprint positions lost, which classifications a penalty applies to |
 | sort_order | integer | Order on the score explanation |
 
-- **A version is frozen once used.** A trigger refuses updates to a version, and to its rules, once any event using it has locked. A rule change means a new version from a later event, so past scores can always be reproduced exactly.
+- **A version is frozen once used.** A trigger refuses updates to a version, and to its rules, once any event using it has locked. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
 - **Rule changes are mostly config.** "Sprint DNF penalty reduced to -10" (an official 2026 change, per the FAQ) is a new version with a different param. Only a genuinely new `kind` of calculation needs code.
 
 ### 3.3 `game_events` (an event as the game sees it)
@@ -702,7 +702,7 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 | game_id, event_id | composite PK | |
 | sequence | integer | The event's order **in this game**, by `lock_at`. Recomputed if the calendar changes before lock; frozen once locked. Mini-league ranges and "the previous event" use it |
 | status | text: `upcoming`, `open`, `locked`, `scored`, `final`, `cancelled` | `open`: the current transfer window. `scored`: provisional points exist. `final`: the event is final and the price update has run |
-| ruleset_version_id | uuid FK | The version in force for this event, frozen at lock |
+| ruleset_version_id | uuid FK | The version in force for this event. Frozen at lock, except for an audited correction (4.9) |
 | prices_ready_at | timestamptz, nullable | When this event's prices were published (3.5) |
 
 **`game_session_exceptions`** handles the rare session the game shouldn't score as normal, such as an abandoned race the admins decide to void (3.9):
@@ -921,6 +921,256 @@ So price rises of owned assets raise a team's value, and falls lower it. **Keepi
 | Unpublished official rules turn out different (selling, Wildcard carry-over, cancellations) | A param or a single function; no migration |
 | Late entry from the race (official behavior) | Additive: allow `regular` versions effective from a session. Not planned |
 | A second game type (e.g. weekly predictions) | Additive: a new `game_type` plus its own tables (decided 2026-10-27) |
+| Per-league scoring | **Redesign**; excluded by your decision (0.8) |
+
+---
+
+## Part 4. Scoring and standings (proposed)
+
+This part turns effective results (Part 2) and locked lineups (Part 3) into points, totals, ranks and league tables. Every point must be explainable line by line (HLD §1). Every number here can also be **rebuilt from its inputs** (0.7), so a bug or correction is a re-run, never a hand repair.
+
+```mermaid
+erDiagram
+  games ||--o{ scoring_runs : has
+  sessions ||--o{ scoring_runs : "scored by"
+  scoring_runs ||--o{ asset_score_lines : wrote
+  pool_assets ||--o{ asset_score_lines : earns
+  teams ||--o{ team_adjustment_lines : has
+  teams ||--o{ team_event_totals : has
+  games ||--o{ leagues : has
+  leagues ||--o{ league_memberships : has
+  teams ||--o{ league_memberships : joins
+  leagues ||--o{ league_standings : ranks
+```
+
+### 4.0 The ledger's shape (decided principle; storage choice is my call)
+The HLD fixed the principle: a two-tier ledger, with asset score lines computed once and shared, plus team lines on top (HLD §5.6). What remained was **how much of the team tier to store**. At the "big" size of 250k teams there are about 30 team lines per team per event, which makes it decisive:
+
+| Option | What's stored per team | Rows per season at 250k teams | Trade-off |
+|---|---|---|---|
+| A. Store every team line | base points per asset per session, plus boosts, chips and penalties | ~180M | Simplest to read, but the biggest table in the system by far. Every re-score rewrites millions of rows |
+| B. Store only totals | totals; the breakdown is recomputed by the engine on demand | ~6M | Smallest, but a breakdown depends on today's engine code matching the code that produced the total. That's harder to trust after a bug fix |
+| **C. Store only what's team-specific (chosen)** | Boost, chips and penalties as stored lines. **Base lines are a SQL view**: the locked lineup joined to the shared asset lines | ~30M | Every line is still visible and adds up exactly. Base lines can't drift from asset scores because they *are* asset scores. A re-score rewrites about a sixth of option A's rows |
+
+**Option C** keeps the HLD's promise (boosts and chips as separate lines; every point explainable) at a fraction of the cost, and stays comfortably inside the free tier at beta size. *My call; it settles the open "proposed" item in HLD §5.6.*
+
+### 4.1 `scoring_runs` (every scoring attempt, and which one counts)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| game_id | uuid FK | |
+| session_id | uuid FK | Scoring is per session (delete and replace; decided, HLD §5.6) |
+| ruleset_version_id | uuid FK | |
+| engine_version | text | The scoring code's version. A bug fix bumps it |
+| input_fingerprint | text | Hash of everything read: the effective results, session exceptions, ruleset version and engine version. **If it matches the current run's fingerprint, the run is skipped**, which makes re-triggering free |
+| trigger | text: `results`, `override`, `exception`, `ruleset_correction`, `engine_change`, `admin`, `replay` | |
+| mode | text: `live`, `dry_run` | `dry_run` computes and reports differences without writing (4.9) |
+| status | text: `running`, `succeeded`, `failed`, `superseded` | |
+| is_current | boolean | **Partial unique index: at most one current run per `(game_id, session_id)`** |
+| inputs | jsonb | The effective results rows exactly as read, about 22 rows. That's what the score explanation cites, even if results change later |
+| diff_summary | jsonb, nullable | Counts of assets and teams whose points changed versus the previous current run, with the biggest changes. This feeds admin review and correction notices |
+| started_at, finished_at | timestamptz | |
+
+**Concurrency:** if a second run starts while one is in flight for the same session (two corrections a minute apart), the later run wins. Each write step checks that its run is still the newest started one and stops if not, marking itself `superseded`. Two runs never interleave their writes.
+
+### 4.2 `asset_score_lines` (tier 1: shared by every team)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| game_id, session_id | uuid FKs | |
+| run_id | uuid FK → scoring_runs | |
+| asset_id | uuid FK → pool_assets | |
+| rule_code | text | From `scoring_rules.code` (3.2) |
+| category | text | Copied from the rule, for No Negative |
+| subject_driver_id | uuid FK → drivers, nullable | For a constructor's aggregate lines: **which driver's points these are**. This can be a driver **who isn't in the pool**, such as a substitute (HLD §8.1) |
+| points | integer | |
+| detail | jsonb | For the explanation only, e.g. `{ "from": 7, "to": 3 }` or `{ "position": 2 }` |
+
+- **Unique `(game_id, session_id, asset_id, rule_code, coalesce(subject_driver_id, nil))`.**
+- **How a constructor's aggregate is built:** the engine scores **every driver in the results**, not only pool drivers. A constructor's aggregate lines then sum the drivers whose result rows name that constructor in that session (1.9).
+- **Only pool assets get rows.** A non-pool driver's points exist only inside the constructor aggregate that used them.
+- **Inactive pool drivers get their penalty lines** even with no result row. The engine iterates the pool, not the results (HLD §6).
+- **Re-scoring a session** deletes its lines and inserts the new set in one transaction, tagged with the new `run_id` (HLD §5.6).
+
+**`asset_session_totals`** is a view: points per asset per session, with per-category subtotals. Team math and the price formula read it.
+
+### 4.3 `team_adjustment_lines` (tier 2: what's specific to a team)
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| game_id, team_id, event_id | uuid FKs | |
+| session_id | uuid FK, nullable | Null for event-level lines, such as the transfer penalty or the Autopilot move |
+| asset_id | uuid FK, nullable | The asset the line is about |
+| line_type | text: `boost`, `triple_boost`, `autopilot_remove`, `autopilot_add`, `no_negative`, `transfer_penalty` | Each is a separate visible line (decided) |
+| category | text, nullable | For `no_negative`: which category was floored |
+| points | integer | e.g. Boost = +1× the asset's session points, x3 = +2×, No Negative = the amount added back |
+| run_id | uuid FK | The scoring run that last wrote it |
+
+**`team_base_lines`** is a view, and needs no storage. For each team, scored session and asset in that session's effective lineup, it gives the asset's session points. The **effective lineup** is the locked version, or for the race session the Final Fix version where one exists (3.7). It's a straight join, so base lines can't disagree with asset scores.
+
+**A team's score explanation** is `team_base_lines` plus `team_adjustment_lines` for that team and event, and the two always add up to the stored total (4.4). A nightly check compares them for a sample of teams, and any mismatch alerts admins and triggers a rebuild.
+
+**How adjustments are calculated (proposed):**
+- **Boost:** +1× the boosted driver's session points, per session. After a Final Fix, the incoming driver gets it from the race (verified rule).
+- **x3 Boost:** +2× the target's points. The 2x Boost still applies to its own, different driver.
+- **Autopilot:** after each scored session, it recomputes which driver has the highest event points so far, and moves the Boost there with a remove/add pair. It's provisional until the event is final. **Ties: the original Boost choice stays if it's among the tied drivers; otherwise the higher-priced driver gets it** (my call; a ruleset param).
+- **No Negative:** for each owned asset and each scoring category with a negative subtotal, a line adds back exactly that amount. **Transfer penalties still apply** (verified rule).
+- **Transfer penalty:** copied from `team_event_states.transfer_penalty` (3.8), as one event-level line.
+
+### 4.4 `team_event_totals` (totals, running totals and ranks)
+| Column | Type | Notes |
+|---|---|---|
+| game_id, team_id, event_id | composite PK (team, event) | |
+| event_sequence | integer | From `game_events.sequence` (3.3) |
+| points | integer | This event: base plus adjustments |
+| points_by_session | jsonb | `{session_id: points}` for the event's scored sessions. **Spoiler control:** show only the sessions a user has watched (HLD §7.3), without extra rows |
+| cumulative_points | integer | The season running total through this event |
+| first_reached_sequence | integer | The earliest event sequence at which the running total was **at least** today's `cumulative_points`. **This is the tiebreak** (decided: earliest to reach) |
+| global_rank | integer | Rank in the game through this event. Ties on points and `first_reached_sequence` share a rank (decided) |
+| status | text: `provisional`, `final` | Follows the event (2.3) |
+| computed_at | timestamptz | |
+
+- **One row per team per event it took part in.** A team that joined later has no rows for earlier events. A cancelled event has no rows, and the next event's running total simply carries on.
+- **`first_reached_sequence`** is computed with a window over the team's running totals. The running total can go down (negative weeks), so it's "first time at or above", not "first time equal".
+- **Indexes:** `(game_id, event_id, global_rank)` for the leaderboard, and `(team_id, event_sequence)` for a team's history.
+
+### 4.5 `leagues`
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| game_id | uuid FK | |
+| kind | text: `global`, `public`, `private`, `auto_constructor`, `auto_driver`, `auto_country` | Decided 2026-10-27 |
+| name, slug | text | User-named for public and private leagues. Those names are user content (Part 5) |
+| owner_user_id | uuid FK, nullable | Public and private only. If the owner deletes their account, a league admin can reassign it (Part 6) |
+| join_code | text, unique, nullable | Private and public. Random, at least 8 characters, and rate-limited when entered |
+| constructor_id / driver_id / country_code | nullable | Exactly one, matching the `auto_*` kind (`CHECK`) |
+| start_sequence | integer, default 1 | **Mini-leagues:** counts events from here… |
+| end_sequence | integer, nullable | …to here. Null means to the end of the season |
+| max_members | integer, nullable | Optional owner limit |
+| status | text: `active`, `archived` | |
+
+- **Unique per auto league:** `(game_id, kind, constructor_id)` and its driver and country equivalents. There's exactly one "Ferrari fans" league per game.
+- **Auto leagues are keyed by constructor ID, not name,** so a rebrand doesn't split a league (1.7).
+- **A mini-league range uses event sequences, not rounds,** which survive renumbering (1.3, 3.3).
+
+### 4.6 `league_memberships`
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| league_id | uuid FK | |
+| team_id | uuid FK | Must belong to the league's game (trigger) |
+| joined_at, left_at | timestamptz | Leaving sets `left_at` and rejoining makes a new row, so there's history |
+| source | text: `user`, `auto` | `auto` covers the global, constructor, driver and country leagues |
+
+- **A team is in a league at most once at a time:** unique `(league_id, team_id) WHERE left_at IS NULL`.
+- **The soft cap of 50 leagues per team** (decided) is a trigger, and it counts `user` memberships only.
+- **Auto memberships follow the profile.** If a user changes their favorite team or country, the team leaves the old auto league and joins the new one.
+- **A league ranks its members' totals over the league's range, regardless of when they joined.** That's how the official mini-leagues work: only the selected races count.
+- **The global league has no membership rows.** Every active team is in it by definition, and its ranks are `team_event_totals.global_rank`. That saves 250k rows per game.
+
+### 4.7 `league_standings` (current table for each league; replaced after each scoring run)
+| Column | Type | Notes |
+|---|---|---|
+| league_id, team_id | composite PK | |
+| points | integer | Over the league's range |
+| first_reached_sequence | integer | The tiebreak, computed **within the league's range** (decided) |
+| rank | integer | Shared on a full tie |
+| previous_rank | integer, nullable | For the "up 3" arrows |
+| through_event_id | uuid FK | |
+| status | text: `provisional`, `final` | |
+
+- **Only the current table is stored.** Rank history for one team in one league is computed on demand from `team_event_totals`. That's cheap for one league, and saves storing every league's table for every event.
+- **Retired teams** (3.6) stop scoring and are dropped from league tables. Their past `team_event_totals` stay.
+- **Index:** `(league_id, rank)` for paged tables, including a 100k-team public league.
+
+### 4.8 What happens after results change (the scoring pipeline)
+Each step is a job (2.10) keyed by the run ID, so a re-run is safe and a superseded run stops early:
+1. **Score the session:** replace the asset lines (4.2).
+2. **Recompute team adjustments for the event:** done for all teams in batches of about 1,000, in set-based SQL. Boost amounts, Autopilot and No Negative depend on asset points, so all of them are recomputed.
+3. **Recompute `team_event_totals`** for that event, then the running totals and ranks for that event **and every later one**, since a correction to an old event moves everything after it.
+4. **Recompute `league_standings`** for leagues whose range includes the event.
+5. **Notify:** "provisional scores are in", or for a correction, "your score changed by +3 (stewards' decision)". Spoiler-safe wording, batched (2.10).
+
+**Cost at 250k teams:** steps 2–4 are a few set-based queries over about 1.75M lineup rows and about 1.25M memberships. That's seconds to a minute of database time per run, and it doesn't grow with how many people are browsing.
+
+### 4.9 Corrections to the rules or the code
+- **A misconfigured rule** (a wrong points value discovered mid-season): ruleset versions are frozen once used (3.2), so nothing can be silently edited. An admin publishes a **correction version** and explicitly re-points the affected past events to it. That's audited, and it re-scores those events. *This adds one admin action to Part 3's freeze rule. It stops silent edits, not deliberate, visible corrections.*
+- **A bug in the scoring code:** the fix bumps `engine_version`, which changes every fingerprint. An admin first runs a **dry run** across the season. The diff summary shows how many teams' points would change, and by how much. The live re-score runs only after the admin approves. Players then get a correction notice that names the reason.
+
+### 4.10 Indexes beyond keys
+- `asset_score_lines (game_id, session_id)`: the per-session replace and the team view join.
+- `team_adjustment_lines (game_id, event_id)` and `(team_id, event_id)`: batch recompute and one team's explanation.
+- `team_event_totals (game_id, event_id, global_rank)` and `(team_id, event_sequence)`.
+- `league_memberships (team_id) WHERE left_at IS NULL`: "my leagues" and the 50-league cap.
+- `league_memberships (league_id) WHERE left_at IS NULL`: standings.
+- `league_standings (league_id, rank)`.
+- `scoring_runs (game_id, session_id) WHERE is_current`.
+
+### 4.11 Scenario check
+| Scenario | Real example or source | How it's handled |
+|---|---|---|
+| Provisional scores after each session | Official FAQ | Each scored session triggers a run; totals are `provisional` until the event is final (4.4) |
+| Stewards' penalty changes the race order | Common (2.13) | New effective results, a new run, then adjustments, totals, ranks and leagues recomputed, then a correction notice (4.8) |
+| Correction to an event after later events | Late appeals | Running totals and ranks are recomputed from that event forward (4.8 step 3) |
+| Correction after prices moved | HLD §5.5 | Points change; prices don't (3.5) |
+| Admin override added or revoked | 2.6 | The fingerprint changes, so a re-score; the same input twice is skipped |
+| Two corrections a minute apart | Plausible | The later run supersedes the earlier one; no interleaved writes (4.1) |
+| Substitute driver not in the pool | Tsunoda 2026 rounds 12–14, before being priced | Scored inside the constructor's aggregate via `subject_driver_id` (4.2) |
+| Pool driver absent | Hadjar 2026 (verified) | Penalty lines with no result row (4.2) |
+| Final Fix | Official FAQ | The race's base lines use the Final Fix lineup; earlier sessions use the locked one; Boost moves (4.3) |
+| Autopilot with tied top scorers | Plausible | The original Boost stays if tied, otherwise the higher-priced driver (4.3) |
+| No Negative per category, penalty still applies | Official FAQ | Add-back lines per category; the transfer penalty isn't floored (4.3) |
+| x3 Boost plus regular Boost | Official FAQ | Separate lines on different drivers (4.3) |
+| Teams tied on points | Decided | Earliest to reach, then a shared rank (4.4) |
+| Running total dips, then recovers | Negative weeks | "First at or above", not "first equal" (4.4) |
+| Mini-league from mid-season | Decided | The range is in event sequences; points count only that range, for every member (4.5, 4.6) |
+| Team joins a league late | Common | It ranks on the league's range regardless of join date (4.6) |
+| Team leaves and rejoins a league | Common | New membership row; history kept (4.6) |
+| User changes favorite team | Common | Auto membership moves (4.6) |
+| Constructor rebrand | Sauber → Audi | Auto league keyed by constructor ID (4.5) |
+| Team retired mid-season | 3.6 | Off league tables; history kept (4.7) |
+| Huge public league | A 100k-team league | Materialized table, paged by `(league_id, rank)` (4.7) |
+| Join code guessing | Abuse | Long random codes plus a rate limit (4.5) |
+| Session voided after scoring | 3.9 | Exception changes the fingerprint; the run writes no lines for that session (4.1) |
+| Event cancelled before lock | 2026 Bahrain and Saudi (verified) | No rows; running totals carry on (4.4) |
+| A rule was misconfigured | Plausible | Correction version, explicitly re-pointed and audited (4.9) |
+| Scoring code bug | Plausible | Dry run, then approve, then live re-score with notices (4.9) |
+| Spoilers via scores | HLD §7.3 | `points_by_session` lets the UI show only watched sessions; ranks are gated the same way (4.4) |
+| Replay of 2026 | HLD §12 | The same pipeline under the simulated clock |
+
+**Known limits:**
+- League rank history isn't stored, only computed on demand (4.7). If a "rank over time" chart becomes a popular page, storing snapshots per event is additive.
+- Head-to-head leagues aren't modelled (decided non-goal). If ever wanted, adding them would be additive: a fixtures table reading `team_event_totals`.
+
+### 4.12 Scale
+| Table | Beta (1k teams) | Established (25k) | Big (250k) | Notes |
+|---|---|---|---|---|
+| asset_score_lines | ~20k/season | same | same | About 33 assets × about 5 rules × about 120 scored sessions. Doesn't grow with users |
+| team_adjustment_lines | ~120k/season | ~3M | ~30M | About 5 per team per event. Partition by game if needed (0.7) |
+| team_event_totals | ~24k/season | ~600k | ~6M | One per team per event |
+| league_memberships | ~5k | ~125k | ~1.25M | About 5 user leagues per team; the global league is implicit |
+| league_standings | ~5k | ~125k | ~1.25M | Current tables only |
+| scoring_runs | ~hundreds/season | same | same | Includes `inputs`, about 5 KB each |
+
+**Storage at beta:** tens of MB for this part, within the free tier's 1 GB with plenty of room.
+
+**Hot reads:**
+- **My team's breakdown:** two small indexed lookups plus a join of 7 assets.
+- **League page:** a page of `league_standings` by rank.
+- **Global top 100 and my rank:** index lookups on `team_event_totals`.
+
+None of these grows with the user count. Public league pages are cached at the CDN and revalidated after each scoring run (HLD §11.4).
+
+### 4.13 Change test
+| Foreseeable change | Kind of change |
+|---|---|
+| New scoring rule or new points values | Config (3.2); re-scored by the pipeline |
+| New chip effect | Code: a new `line_type` value plus its calculation; config for the chip |
+| New tiebreak rule | Code in one ranking function, plus a ruleset param; standings rebuilt |
+| Rank-history charts | Additive: a snapshot table per event |
+| Head-to-head leagues | Additive (4.11) |
+| Weekly awards ("team of the week") | Additive: computed from `team_event_totals` |
+| Moving to stored team lines (option A) if ever needed | Additive: materialize the view into a table |
 | Per-league scoring | **Redesign**; excluded by your decision (0.8) |
 
 ---
