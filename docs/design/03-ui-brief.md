@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** Look and feel decided 2026-10-27. Wave 1 (design system) is drafted. Wave 2 (team builder, session thread, spoiler states) is drafted for your review.
+**Status:** Look and feel decided 2026-10-27. Waves 1 and 2 are drafted. Wave 3 (home, weekend hub, points breakdown, leagues, prices, desktop shell) is drafted for your review.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
@@ -183,4 +183,37 @@ The screens are on the canvas [Gridlocked wave 2](https://claude.ai/artifact/6ff
 - **Live chat** is flat, newest at the bottom, with no bottom nav. Send waits out slow mode, and there's no live timing.
 - **Discussion** replies indent up to 3 levels, then "Continue thread". Results are a link, not shown inline, so the thread itself stays spoiler-light.
 - **"Show it" versus "Mark as watched":** Show it reveals just this item. Mark as watched reveals that session everywhere. The hidden thread explains the difference in two lines.
+
+## Wave 3: weekend and game (drafted 2026-10-27)
+The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF1XbqGJnSS9SwGRh1pHD) (private to you). It uses the same design system and rules as wave 2. The sample week is before round 19, the Mexico City Grand Prix, with points from round 18. Numbers, usernames and results are illustrative.
+
+| Row | Boards |
+|---|---|
+| Home and the race weekend | Home in race week · Weekend hub before lock (your time or track time) · Session row states (a reference: scheduled, TBC, live, delayed, red flag, hidden, watched, ended early, cancelled) |
+| Points breakdown | One weekend, by session, with a correction note · Driver points line by line (sheet) |
+| Leagues | My leagues (yours and automatic) · Standings with the tiebreak explained · Create a league (mini-league range) · Join with a code (sheet) |
+| Prices | Price changes (going up / going down, your team value) · How prices work (worked example) |
+| Desktop | League standings with the side menu: the desktop app shell |
+| Dark theme | Home |
+
+**What you can click (Play):**
+- From Home: the weekend, your season (which opens the breakdown) and leagues.
+- In the breakdown: Antonelli's row opens his line-by-line sheet.
+- In Leagues: Join and Create.
+- In Prices: "How prices work".
+- Tabs switch on every screen that has them.
+
+**Calls I made, to check:**
+- **Home** keeps to about 5 blocks: the next weekend, the lock countdown, your season, 3 leagues and 2 hot threads. Everything else is one tap away.
+- **The weekend hub** shows session times in your time by default, with a Track switch. Qualifying carries a "Locks team" badge.
+- **The breakdown** splits by session using tabs:
+  - one row per driver or team, with one number and a plain reason ("P3 · gained 3 places");
+  - boosts and the transfer penalty in their own section;
+  - a correction explained in one sentence at the top.
+- **Standings** show the tiebreak in words under the table, rather than as a symbol. Your row is outlined.
+- **Mini-leagues** are made by choosing "Some races" in Create, with From/To rounds. The team you enter is chosen at create or join time, since you can have up to 3.
+- **Prices:**
+  - "How prices work" uses a worked example marked "Example numbers", because the real constants are calibrated before launch (DM 3.5);
+  - team value is shown in words ("up $1.0M since last race").
+- **Desktop:** the side menu replaces the bottom nav, with the same items plus Notifications. Tables become real tables, and a side card sums up your position. It stacks to one column at phone width.
 
