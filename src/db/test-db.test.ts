@@ -19,14 +19,18 @@ describe("createTestDb", () => {
     }
   });
 
-  it("allows creating btree_gist and ltree in each database", async () => {
+  it("migrates btree_gist into each database and allows creating ltree", async () => {
     const a = await createTestDb();
     const b = await createTestDb();
     try {
       for (const t of [a, b]) {
-        await t.client.exec(
-          "create extension btree_gist; create extension ltree;",
+        // btree_gist comes from the reference_constraints migration.
+        const before = await t.client.query<{ extname: string }>(
+          "select extname from pg_extension where extname = 'btree_gist'",
         );
+        expect(before.rows).toEqual([{ extname: "btree_gist" }]);
+
+        await t.client.exec("create extension if not exists ltree;");
         const { rows } = await t.client.query<{ extname: string }>(
           "select extname from pg_extension where extname in ('btree_gist','ltree') order by 1",
         );
