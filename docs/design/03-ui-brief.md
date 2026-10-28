@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** All five waves are drafted (2026-10-27). Waves 1–4 have been reviewed as they went. Wave 5 (staff screens) is drafted for your review. Approving it completes phase 3.
+**Status:** Approved 2026-10-27 (phase 3 of 5 complete). The design system and all five waves are in Claude Design and linked below.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
