@@ -60,7 +60,7 @@ This is the roadmap for phase 5, the build. It splits the work into milestones t
 | Environment | What | When it exists |
 |---|---|---|
 | Local | Next.js dev server and PGlite. No cloud accounts needed | M0 |
-| Staging | Vercel preview deploys plus their own free Neon project (HLD §11.4) | M1, on approval |
+| Staging | Its own free Neon project, `gridlocked-staging` in AWS US East 1 (HLD §11.4), plus Vercel preview deploys | Neon from M1 (approved 2026-10-28); Vercel from M2 |
 | Production | Vercel Hobby plus the production Neon project | M9, on approval |
 
 ## Milestones
@@ -90,18 +90,17 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Approval needed:** none. Everything is local or on GitHub.
 - **Plan:** [plans/M0-foundations.md](../plans/M0-foundations.md).
 
-### M1 — Spike: chat, cron and the free-tier budget (target 13 Nov; throwaway)
-- **Goal:** prove or disprove HLD §11.2 before we depend on it.
+### M1 — Spike: the scheduler tick and the free-tier budget (target 13 Nov; throwaway)
+- **Goal:** prove or disprove the scheduling half of HLD §11.2 and §4.5 before we depend on it.
+- **Changed 2026-10-28:** live chat was taken out of the spike. Neon's default of 100 concurrent function invocations per account, where each open WebSocket counts as one, ruled it out for launch (HLD decision 19). Chat-mode threads refresh instead, and M7 measures that on staging. The Vercel project moved to M2, since nothing in the spike needs a preview deploy.
 - **Scope:**
-  - a Neon Function chat gateway (WebSocket, Postgres polling fan-out) with about 500 simulated clients;
-  - a cron-triggered job;
-  - a due-times file read without waking the database (HLD §4.5): this is where the file's home gets decided;
-  - measured compute-hours, transfer and function usage.
-- **Exit:** a short written result. Either it fits the free tier, or we fall back to Ably or to refreshing threads (HLD §11.4). The spike's code is deleted, and only the `RealtimeChannel` interface decision carries on.
-- **Approval needed:**
-  - a Neon project for staging, Free plan;
-  - a Vercel project, Hobby, linked to the repo for preview deploys.
-- **Can run in parallel with M0.**
+  - a cron-triggered Neon Function, run every minute, that reads the due-times file and wakes Postgres only when something is due (HLD §4.5): this is where the file's home gets decided;
+  - a small job table with uniqueness keys, so a duplicate tick can't double-act;
+  - the hourly safety tick that checks the job table directly;
+  - measured database compute-hours, Function capacity-hours and invocations, Object Storage use and transfer, extrapolated to a month and a race weekend.
+- **Exit:** a short written result in `docs/spikes/M1-scheduler.md`. Either the tick fits the free tier as designed, or we change the design. The spike's code is deleted; the result and any design changes carry on.
+- **Approval given (2026-10-28):** the `gridlocked-staging` Neon project, Free plan, AWS US East 1.
+- **Plan:** [plans/M1-spike.md](../plans/M1-spike.md).
 
 ### M2 — Reference data and the results pipeline (target 27 Nov)
 - **Goal:** real 2026 data flows in, and it's trusted and correctable.
@@ -121,7 +120,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Exit:**
   - the whole 2026 season imports from stored snapshots;
   - a live 2026 weekend (Qatar, 29 Nov, or Abu Dhabi, 6 Dec) is ingested end to end in staging, with no admin action needed on a clean weekend.
-- **Approval needed:** none new.
+- **Approval needed:** a Vercel project, Hobby, linked to the repo for preview deploys against `gridlocked-staging` (moved from M1 on 2026-10-28). You install Vercel's GitHub app.
 
 ### M3 — Fantasy core (target 11 Dec)
 - **Goal:** teams can be built, locked and changed exactly by the rules.
@@ -205,7 +204,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Goal:** race weekends feel alive.
 - **Scope:**
   - DM Part 5: categories, threads, nested posts, votes, search (if you approve it at this milestone), watch marks;
-  - live chat through the `RealtimeChannel` interface (M1's result) and the 30-day archive;
+  - chat-mode threads that refresh every few seconds through the `RealtimeChannel` interface, cached per thread on the CDN (HLD decision 19), and the 30-day archive;
+  - a staging load test that the CDN absorbs a race start's refreshes within Vercel Hobby's limits;
   - reports, the moderation queue and filters;
   - notifications, broadcasts, Web Push and the email outbox;
   - UI waves 2 and 4.
@@ -237,7 +237,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 ### M9 — Hardening and closed beta (beta 15 Feb – 5 Mar)
 - **Goal:** prove it on real people with replayed 2026 weekends.
 - **Scope:**
-  - load tests: the race-end spike and chat fan-out;
+  - load tests: the race-end spike and chat-mode refreshes;
   - the free-tier budget test (HLD §12.7);
   - an accessibility audit and a security review;
   - Sentry and usage alerts;

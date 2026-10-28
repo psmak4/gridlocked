@@ -180,7 +180,7 @@ The screens are on the canvas [Gridlocked wave 2](https://claude.ai/artifact/6ff
   - Hadjar shows "Out this race" (his real 2026 absence in rounds 12–14).
 - **Chips** live in one sheet with a sentence each. Late Call shows "Opens after qualifying" until it can be used.
 - **After lock,** prices are replaced by a hidden qualifying score. The action becomes "Play Late Call".
-- **Live chat** is flat, newest at the bottom, with no bottom nav. Send waits out slow mode, and there's no live timing.
+- **Live chat** is flat, newest at the bottom, with no bottom nav. Send waits out slow mode, and there's no live timing. New messages arrive every few seconds rather than instantly (HLD decision 19, 2026-10-28), so the screen doesn't promise "live" speed.
 - **Discussion** replies indent up to 3 levels, then "Continue thread". Results are a link, not shown inline, so the thread itself stays spoiler-light.
 - **"Show it" versus "Mark as watched":** Show it reveals just this item. Mark as watched reveals that session everywhere. The hidden thread explains the difference in two lines.
 

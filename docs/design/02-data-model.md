@@ -1270,7 +1270,7 @@ erDiagram
 **`chat_messages`**
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid PK | UUIDv7. The chat gateway polls "messages after the last ID I sent", so time ordering is the cursor (HLD §11.2) |
+| id | uuid PK | UUIDv7. Chat-mode refreshes read a thread's latest messages, and clients skip IDs they've already shown, so time ordering is the cursor (HLD §11.2, decision 19) |
 | thread_id | uuid FK | |
 | session_id | uuid FK | Spoiler scope |
 | author_user_id | uuid FK → users | |
@@ -1429,7 +1429,7 @@ It's cheap enough to include at launch. If it's deferred, adding it later is pur
 | Event week starts | Every race weekend | Planned jobs create session threads with generic titles (5.3, 2.10) |
 | Session delayed or moved | Rain delays; Suzuka 2019 | Chat window recalculated from session times; nothing stored to flip (5.3) |
 | Red flag runs long | Common | `suspended` keeps chat open (5.3, 1.4) |
-| Chat flood at lights out | Every race start | Slow mode plus per-trust limits in the gateway and on insert. Time-ordered IDs make polling cheap (5.5) |
+| Chat flood at lights out | Every race start | Slow mode plus per-trust limits on send and on insert; refreshes are cached per thread on the CDN (HLD decision 19). Time-ordered IDs make polling cheap (5.5) |
 | User hasn't watched yet | Core feature | Generic titles, hidden results, comments and chat, hidden fantasy scores, spoiler-safe notifications until the session is marked or the 7 days end (5.7) |
 | Spoiler in a user's thread title | "Verstappen wins!" posted 5 min after the flag | The title check warns and flags it; unrevealed users see "Spoiler thread"; moderators retitle (5.3) |
 | Post edited after being reported | Common evasion | The queue item's content snapshot plus revisions (5.4, 5.9) |

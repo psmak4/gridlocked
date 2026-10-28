@@ -82,7 +82,7 @@ The two halves strengthen each other. Fantasy gives people a reason to come back
 One TypeScript codebase, one database, with clear module boundaries. A single small team gets the most out of this shape: one deploy, one set of types, transactions across modules. The boundaries let us split out a service later if one part ever needs it. Two pieces run outside the web app's request/response path:
 
 - **Jobs:** the scheduler, poller, scorer and finalizer. They are triggered by cron or by events and must be idempotent.
-- **Realtime gateway:** keeps live chat connections open during sessions.
+- **Realtime gateway (later, not at launch):** would keep live chat connections open during sessions. At launch, chat-mode threads refresh every few seconds instead (§11.2).
 
 Both import the same domain modules as the web app; they are entry points, not separate apps.
 
@@ -479,11 +479,11 @@ This table was written before the free-tier review. Its Netlify column is now Ve
 - **Vercel (Hobby plan, free)** hosts the Next.js app: SSR pages, API routes and the CDN.
 - **Neon** hosts:
   - Postgres;
-  - a **Neon Function** for the session chat gateway (WebSocket, with Postgres fan-out by polling, which keeps scale-to-zero);
   - **Neon cron triggers** for the scheduler tick and long jobs. Neon Functions can run long and sit next to the data, which keeps scoring off Vercel's function time limits. This also means Vercel's cron limits don't matter to us.
-- The chat client and server talk through a small `RealtimeChannel` interface. If the Neon Function approach disappoints in an early spike, we swap in Ably (Option B) without touching features. Ably's free plan caps out at 200 simultaneous connections, so as a free fallback it only suits a small beta.
+- **Live chat over WebSockets is out of launch (decided 2026-10-28).** Neon allows **100 concurrent function invocations per account** by default, shared across all projects, and each open WebSocket or SSE stream is one invocation for as long as it stays open. A race start would hit `429`s at about 100 people. Instead, a session thread in chat mode **refreshes every few seconds over plain HTTP**. Everyone in a thread fetches the same URL for the current 3-second window (the thread's latest messages), and the client keeps only the ones it hasn't shown yet. Because the URL is shared, Vercel's CDN can cache it for those few seconds, so a crowd shares one database read instead of each person costing one. The chat-mode screens, `chat_messages` table and 30-day archive don't change.
+- The chat client still talks through a small `RealtimeChannel` interface, with "refresh" as its first implementation. Neon Functions (if the limit is raised or the audience grows) or Ably (free up to 200 connections) can be swapped in later without touching features.
 - **Vercel Hobby is for non-commercial, personal use only.** That fits launch, since Gridlocked launches non-commercial (§16). **Before the first ad goes live, the app must move to Vercel Pro** ($20/month per developer seat), or to another host that allows commercial use.
-- **First implementation step (with your approval):** a throwaway spike on a Neon branch. Run chat for about 500 simulated clients plus a cron-triggered job, and measure the Neon Function and database usage it consumes against the free allowances (§11.4).
+- **First implementation step (approved 2026-10-28):** a throwaway spike in a staging Neon project. It runs the scheduler tick as a cron-triggered Neon Function reading the due-times file (§4.5), and measures the Function, storage and database usage it consumes against the free allowances (§11.4). It no longer tests live chat.
 
 If you'd rather avoid newer services entirely, **Option C** is the simplest proven alternative: one Node server at a fixed few dollars a month.
 
@@ -534,7 +534,7 @@ Going over a free limit never sends a bill; the service stops instead. The failu
 6. **Cap Neon's autoscaling at the smallest size (0.25 CU)** on the free plan. Otherwise a spike scales the compute up and burns the allowance several times faster.
 7. **Watch usage.** An admin dashboard and alerts show Neon compute-hours, transfer, Vercel usage and email count against their limits, with a warning at about 70% of each. That gives a few days' notice to upgrade before anything stops.
 
-**Live chat is the feature most at risk.** It stays in launch scope, but the spike (§11.2) measures whether race-day chat fits the Neon Functions allowance, and the budget once Realtime's free beta ends. If it doesn't fit, the fallback is session threads that refresh every few seconds, with live chat added once there's an audience or a budget.
+**Live chat was the feature most at risk, and it's now the fallback (decided 2026-10-28).** Session threads in chat mode refresh every few seconds instead of holding a WebSocket open (§11.2). The refresh still costs Vercel invocations, so it must be cached per thread on the CDN: about 500 people refreshing every 3 seconds for a 2-hour race is about 1.2M uncached requests, more than Hobby's 1M a month, but only about 2,400 if every refresh in a 3-second window shares one cached response. M7 measures this on staging.
 
 Sources: [Neon pricing](https://neon.com/pricing), [Neon plans](https://neon.com/docs/introduction/plans), [Neon Realtime FAQ](https://neon.com/docs/realtime/overview), [Resend pricing](https://resend.com/pricing).
 
@@ -569,7 +569,7 @@ Sources: [Neon pricing](https://neon.com/pricing), [Neon plans](https://neon.com
    - Scripted scenarios: the rounds 12–14 substitution, all sprint weekends, a late stewards' penalty (injected), and a provider outage (injected).
 4. **Cross-check against the official game (manual, internal only):** for sampled 2026 races, compare our per-driver points with official per-driver points after subtracting the excluded categories.
 5. **E2E (Playwright, mobile viewport):** sign-up, team building, lock, the chip flows, joining a league, the spoiler flow, and posting and reporting.
-6. **Load:** a race-end spike (score page reads) and chat fan-out at a few hundred to a few thousand concurrent clients.
+6. **Load:** a race-end spike (score page reads) and chat-mode refreshes at a few hundred to a few thousand concurrent clients, checking the CDN absorbs them (§11.4).
 7. **Free-tier budget:** replay a full race weekend in staging and measure Neon compute-hours, transfer, function usage, Vercel usage and emails against the free limits (§11.4). Do the same for a quiet week, to check that the scheduler leaves the database asleep (§4.5).
 
 **Timeline note:** the 2026 season ends early December. There's no live 2027 data until about mid-March, so the replay harness *is* our integration environment. A closed beta in February can run on replayed 2026 weekends.
@@ -637,12 +637,12 @@ Sources: [Neon pricing](https://neon.com/pricing), [Neon plans](https://neon.com
 
 ## 14. Decision log
 
-All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change to 2 came from the cost and monetization discussion later that day. "Yours" means you chose it; "My call" means you had no preference, or it was a detail you left to me, so check those while reading.
+All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change to 2 came from the cost and monetization discussion later that day. Decision 19 and the second change to 2 came from M1 planning on 2026-10-28. "Yours" means you chose it; "My call" means you had no preference, or it was a detail you left to me, so check those while reading.
 
 | # | Decision | Outcome | By |
 |---|---|---|---|
 | 1 | Product name | Working name **"Gridlocked"**, pending the checks in §13.1 | Yours |
-| 2 | Hosting | **Vercel Hobby** (web) + Neon (Postgres, Functions for chat, cron triggers for jobs). This is Option A's architecture with Netlify swapped out after the free-tier comparison (§11.3). Realtime sits behind an interface, with Ably as the fallback; spike first (§11.2). Moves to Vercel Pro before any ads | My call (Option A); Vercel swap recommended by me and recorded at your request |
+| 2 | Hosting | **Vercel Hobby** (web) + Neon (Postgres, Functions for jobs, cron triggers). Live chat over Neon Functions was dropped from launch on 2026-10-28 (decision 19). This is Option A's architecture with Netlify swapped out after the free-tier comparison (§11.3). Realtime sits behind an interface, with Ably as the fallback; spike first (§11.2). Moves to Vercel Pro before any ads | My call (Option A); Vercel swap recommended by me and recorded at your request |
 | 3 | Framework | **Next.js** (App Router) | Yours |
 | 4 | Better Auth hosting | **Self-hosted** in our app | Yours |
 | 5 | Sign-in methods | **Email + password, magic link, Discord**. No Google or Apple at launch | Yours |
@@ -661,6 +661,7 @@ All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change 
 | 16 | Launch scope | **As proposed** in §15, with your league choices moved into launch. Updated for the free tier: Web Push moved into launch, email limited to account messages | Yours (free-tier update recorded at your request) |
 | 17 | Running cost | **Free tiers at launch**, with the changes in §11.4; about $20–40/month once a busy community outgrows them | Yours (goal); the mechanics are my call |
 | 18 | Monetization | **Advertising, not paid memberships.** Launch non-commercial; ads only after the data, legal, hosting and consent gates in §16.3. Provider permission emails on hold | Yours |
+| 19 | Live chat at launch | **No WebSockets.** Chat-mode session threads refresh every few seconds over HTTP, cached per thread on the CDN. Reason: Neon's default limit of 100 concurrent function invocations per account, where each open WebSocket counts as one (§11.2). The `RealtimeChannel` interface stays for a later swap | Yours (2026-10-28) |
 
 ## 15. Launch scope (for 2027 opener; decided 2026-10-27)
 **Must have:**
@@ -671,7 +672,7 @@ All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change 
   - teams, lock, transfers, all chips, prices, scoring and the ledger breakdown;
   - leagues: global, public and private, plus automatic favorite-constructor, favorite-driver and country leagues, and mini-leagues;
 - forum basics (categories, threads, nested posts, votes);
-- auto session threads with live chat and discussion modes;
+- auto session threads with chat mode (refreshing every few seconds, decision 19) and discussion mode;
 - results posts and spoiler protection;
 - trust levels, rate limits, filters, reports and the mod queue;
 - in-app and **Web Push** notifications, plus email for account messages only (§10);
