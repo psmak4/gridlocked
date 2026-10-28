@@ -528,7 +528,7 @@ This is kept apart from `results`, because practice isn't scored and its data co
 | parent_job_id | uuid FK → jobs, nullable | For fan-out (below) |
 | created_at, started_at, finished_at | timestamptz | |
 
-- **How a job is claimed:** `UPDATE … WHERE id = (SELECT … WHERE status='pending' AND run_at <= now() ORDER BY run_at FOR UPDATE SKIP LOCKED LIMIT 1)`. Two workers, or two overlapping ticks, can never take the same job.
+- **How a job is claimed:** `UPDATE … WHERE id = (SELECT … WHERE status='pending' AND run_at <= $now ORDER BY run_at FOR UPDATE SKIP LOCKED LIMIT 1)`, with `$now` from the entry point's clock (HLD decision 20). Two workers, or two overlapping ticks, can never take the same job.
 - **Calendar-driven work is planned ahead.** When an event is created or its times change, its jobs are written as `pending` rows with future `run_at`: open threads, flip chat modes, lock reminders, start polling, finalizer checks. A time change **updates `run_at`** of the matching pending job through its `dedupe_key`; nothing is deleted and recreated. The scheduler's due-times file is just "the next few `run_at` values" (HLD §4.5).
 - **Fan-out is batched.** "Notify everyone in league X" or "score is final for 250k teams" is a parent job that spawns child jobs, each handling about 1,000 users or teams. No single job grows with the user count, and a failed batch retries alone.
 - **Retention:** `succeeded` jobs are pruned after 30 days. `dead` jobs are kept until an admin clears them.
@@ -788,7 +788,7 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 - **Budget:** the cost at this event's prices fits within the team's purchasing power (3.8). A `limitless` version skips this check.
 - **Only complete lineups can be saved.** Drafts live in the browser. That removes the "half a team at lock" case entirely.
 
-**The clock function (`app_now()`).** It returns `now()` in production. On a replay branch, where a `simulated_clock` setting exists, it returns the simulated time. This keeps HLD rule 6 (one injectable clock) true inside the database too. A production database never has the setting.
+**The clock function (`app_now()`).** It returns `now()` in production. On a replay branch, where a `simulated_clock` setting exists, it returns the simulated time. This keeps HLD rule 6 (one injectable clock) true inside the database too. A production database never has the setting. **Decided 2026-10-28 (HLD decision 20):** application SQL takes `$now` from the entry point's clock, and `app_now()` is the backstop inside triggers. In replay, the entry point reads `app_now()` once, so both see the same instant.
 
 **The locked lineup for event E** is the latest `regular` or `limitless` version for E with `saved_at < lock_at`. If there's none, it's the team's base lineup carried forward. It's deterministic, so it can be recomputed at any time with the same answer (HLD §3.3 rule 3).
 

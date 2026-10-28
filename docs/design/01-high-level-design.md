@@ -159,7 +159,13 @@ flowchart LR
 3. **Correctness never depends on a job running on time.** A late cron run must not let anyone change a lineup after lock, and must not score the wrong lineup (§5.2).
 4. **Every job is idempotent and safe to re-run.** Scoring a session twice gives the same ledger.
 5. **Everything an admin changes is audited.** Who, what, when, why, and the before/after values.
-6. **One clock abstraction.** All "now" checks go through an injectable clock, so the 2026 replay harness can simulate a whole season (§12).
+6. **One clock abstraction.** All "now" checks go through an injectable clock, so the 2026 replay harness can simulate a whole season (§12). **How the app and the database agree (decided 2026-10-28, decision 20):**
+   - Each entry point settles "now" **once**, and everything below it uses that instant through `fixedClock`. An entry point is a page request, an API call, a cron tick or a job run.
+   - SQL that needs the time takes it as a `$now` parameter, never `now()`.
+   - In production, the entry point uses real time, or the trigger's `scheduled_at` for a cron tick, with no extra query.
+   - Only a replay deployment, flagged by `CLOCK_MODE=replay`, reads `app_now()` once at the entry point. The replay harness moves time by updating `settings.simulated_clock`.
+   - Database triggers, such as the lock check, keep `app_now()` as the enforcement backstop.
+   - A production deployment refuses to run if a `simulated_clock` row exists, so a stray row can't freeze the real clock.
 
 ---
 
@@ -637,7 +643,7 @@ Sources: [Neon pricing](https://neon.com/pricing), [Neon plans](https://neon.com
 
 ## 14. Decision log
 
-All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change to 2 came from the cost and monetization discussion later that day. Decision 19 and the second change to 2 came from M1 planning on 2026-10-28. "Yours" means you chose it; "My call" means you had no preference, or it was a detail you left to me, so check those while reading.
+All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change to 2 came from the cost and monetization discussion later that day. Decisions 19–20 and the second change to 2 came from M1 and M2 planning on 2026-10-28. "Yours" means you chose it; "My call" means you had no preference, or it was a detail you left to me, so check those while reading.
 
 | # | Decision | Outcome | By |
 |---|---|---|---|
@@ -662,6 +668,7 @@ All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change 
 | 17 | Running cost | **Free tiers at launch**, with the changes in §11.4; about $20–40/month once a busy community outgrows them | Yours (goal); the mechanics are my call |
 | 18 | Monetization | **Advertising, not paid memberships.** Launch non-commercial; ads only after the data, legal, hosting and consent gates in §16.3. Provider permission emails on hold | Yours |
 | 19 | Live chat at launch | **No WebSockets.** Chat-mode session threads refresh every few seconds over HTTP, cached per thread on the CDN. Reason: Neon's default limit of 100 concurrent function invocations per account, where each open WebSocket counts as one (§11.2). The `RealtimeChannel` interface stays for a later swap | Yours (2026-10-28) |
+| 20 | One clock across app and database | **Resolve "now" once per entry point** and pass it down; SQL takes `$now`. Production uses real time; only `CLOCK_MODE=replay` reads `app_now()`. Triggers keep `app_now()` as the backstop, and production refuses to run with a `simulated_clock` row (§3.3 rule 6) | Yours (2026-10-28) |
 
 ## 15. Launch scope (for 2027 opener; decided 2026-10-27)
 **Must have:**
