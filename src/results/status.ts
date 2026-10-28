@@ -75,7 +75,10 @@ async function reconcileValidationItems(
         await tx
           .update(reviewItems)
           .set({ details, version: sql`${reviewItems.version} + 1` })
-          .where(eq(reviewItems.id, open.id));
+          // Only while open: an admin may have resolved it since we read it.
+          .where(
+            and(eq(reviewItems.id, open.id), eq(reviewItems.status, "open")),
+          );
       }
       continue;
     }
@@ -111,7 +114,9 @@ async function reconcileValidationItems(
           resolvedAt: now,
           version: sql`${reviewItems.version} + 1`,
         })
-        .where(eq(reviewItems.id, item.id));
+        .where(
+          and(eq(reviewItems.id, item.id), eq(reviewItems.status, "open")),
+        );
     }
   }
 }
@@ -126,8 +131,14 @@ async function reconcileValidationItems(
  * - otherwise it is `provisional`.
  * A `final` session is never touched here. Returns the resulting status.
  *
- * Call it after each normalization, and after an override changes what the
- * session's effective results say.
+ * Callers (the poll and finalize jobs, and the override actions) must call it
+ * after every normalization and after every override change (`addOverride`,
+ * `revokeOverride`): neither moves the status itself, so a session whose
+ * effective results changed keeps its old status until this runs.
+ *
+ * A session that is `provisional` or `under_review` and loses rows is not
+ * sent back to `awaiting`: each missing driver opens a blocking
+ * `missing_driver` item and the session is `under_review`.
  *
  * Provider data after a manual entry (DM 2.6): when the session's source is
  * `manual` and a provider snapshot has been normalized, a blocking
@@ -156,7 +167,25 @@ export async function advanceStatus(
       .for("update");
     if (state!.status === "final") return "final";
 
-    const problems = await validateSession(tx, sessionId);
+    const validated = await validateSession(tx, sessionId);
+    // Only a session that has not had its results yet may be merely
+    // incomplete. One that was provisional or under review and has lost rows
+    // (a suppress, a revoked manual insert) is a surprise: each missing driver
+    // is a blocking finding, never a silent drop back to awaiting.
+    const incomplete = validated.find((p) => p.kind === "incomplete");
+    const problems =
+      incomplete && state!.status !== "awaiting"
+        ? [
+            ...validated,
+            ...(incomplete.details.missingDriverIds as string[]).map(
+              (driverId): Problem => ({
+                kind: "missing_driver",
+                severity: "blocking",
+                details: { driverId, afterResults: true },
+              }),
+            ),
+          ]
+        : validated;
     await reconcileValidationItems(tx, now, sessionId, ctx, problems);
 
     if (state!.source === "manual" && state!.currentSnapshotId !== null) {
@@ -192,7 +221,7 @@ export async function advanceStatus(
       .limit(1);
     const next: SessionResultStatus = blocking
       ? "under_review"
-      : problems.some((p) => p.kind === "incomplete")
+      : incomplete
         ? "awaiting"
         : "provisional";
 
