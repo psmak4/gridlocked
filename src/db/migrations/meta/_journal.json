@@ -36,6 +36,20 @@
       "when": 1793197575647,
       "tag": "0004_lazy_tenebrous",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793197874028,
+      "tag": "0005_slow_speed_demon",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793197890683,
+      "tag": "0006_results_rules",
+      "breakpoints": true
     }
   ]
 }

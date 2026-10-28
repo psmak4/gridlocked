@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
@@ -15,6 +15,7 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { createdAt, oneOf, updatedAt } from "./helpers";
 
 // Reference data (DM Part 1): the real-world calendar and line-up. No game
 // logic lives here. IDs are UUIDv7 values supplied by the app (`newId()`), so
@@ -66,23 +67,6 @@ export const PROVIDER_ENTITY_TYPES = [
   "driver",
   "constructor",
 ] as const;
-
-/**
- * `column in ('a', 'b', ...)` for a CHECK, from the same list the TS type uses.
- * The values are inlined as literals: a CHECK cannot hold bind parameters. They
- * are compile-time constants from the lists above, never user input.
- */
-function oneOf(column: AnyPgColumn, values: readonly string[]): SQL {
-  const list = sql.raw(
-    values.map((v) => `'${v.replaceAll("'", "''")}'`).join(", "),
-  );
-  return sql`${column} in (${list})`;
-}
-
-const createdAt = () =>
-  timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
-const updatedAt = () =>
-  timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
 /** DM 1.1 */
 export const seasons = pgTable(
