@@ -96,6 +96,23 @@ async function main() {
     return;
   }
 
+  // `--empty=23` records the "not published yet" answer for a round that has
+  // not run: Jolpica returns an empty Races list, not an error.
+  const empty = process.argv.find((a) => a.startsWith("--empty="));
+  if (empty) {
+    const round = empty.slice("--empty=".length);
+    const mr = await record(
+      `/2026/${round}/results.json`,
+      `2026/r${pad(round)}-results-empty.json`,
+    );
+    if ((mr.RaceTable?.Races?.length ?? 0) !== 0) {
+      throw new Error(`round ${round} already has results`);
+    }
+    console.log(`done: ${calls} calls`);
+    await t.close();
+    return;
+  }
+
   const calendar = await record("/2026.json", "2026.json", {
     expectRaces: true,
   });

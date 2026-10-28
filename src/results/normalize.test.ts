@@ -136,15 +136,27 @@ describe("normalizeSession", () => {
       expect(tenth.row.sessionKind).toBe("qualifying");
     });
 
-    it("stores no rows for a body whose results are not out yet", async () => {
+    it("writes nothing for an empty body, then logs no changes when the results arrive", async () => {
       const sessionId = await sessionIdFor(t.db, 1, "race");
-      const body = loadBody("jolpica/2026/r01-results.json");
-      body.MRData.RaceTable.Races[0]!.Results = [];
-      const { snapshotId, outcome } = await run(sessionId, "race", body, T1);
+      const empty = loadBody("jolpica/2026/r01-results.json");
+      empty.MRData.RaceTable.Races[0]!.Results = [];
+      const first = await run(sessionId, "race", empty, T1);
 
-      expect(outcome).toEqual({ changed: 0 });
+      expect(first.outcome).toEqual({ changed: 0 });
       expect(await stored(sessionId)).toEqual([]);
-      expect((await state(sessionId))!.currentSnapshotId).toBe(snapshotId);
+      expect((await state(sessionId))?.currentSnapshotId ?? null).toBeNull();
+      expect(await reviews(sessionId)).toEqual([]);
+
+      const real = await run(
+        sessionId,
+        "race",
+        loadBody("jolpica/2026/r01-results.json"),
+        T2,
+      );
+      expect(real.outcome).toEqual({ changed: 0 });
+      expect(await stored(sessionId)).toHaveLength(22);
+      expect(await changes(sessionId)).toEqual([]);
+      expect((await state(sessionId))!.currentSnapshotId).toBe(real.snapshotId);
     });
   });
 
@@ -232,34 +244,28 @@ describe("normalizeSession", () => {
       ]);
     });
 
-    it("logs a driver that appears or disappears as a row change", async () => {
+    it("logs a driver that appears (staged publication) as a row change", async () => {
       const sessionId = await sessionIdFor(t.db, 1, "race");
-      const first = loadBody("jolpica/2026/r01-results.json");
-      await run(sessionId, "race", first, T1);
+      const partial = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(partial, "Results").pop();
+      await run(sessionId, "race", partial, T1);
+      expect(await stored(sessionId)).toHaveLength(21);
 
-      const second = loadBody("jolpica/2026/r01-results.json");
-      const dropped = rowsOf(second, "Results").pop()!;
-      await run(sessionId, "race", second, T2);
+      const full = await run(
+        sessionId,
+        "race",
+        loadBody("jolpica/2026/r01-results.json"),
+        T2,
+      );
 
-      let log = await changes(sessionId);
+      expect(full.outcome).toEqual({ changed: 1 });
+      const log = await changes(sessionId);
       expect(log).toHaveLength(1);
       expect(log[0]!.change).toMatchObject({
         field: "row",
-        oldValue: "present",
-        newValue: "absent",
+        oldValue: "absent",
+        newValue: "present",
       });
-      expect(await stored(sessionId)).toHaveLength(21);
-
-      // And back again.
-      rowsOf(second, "Results").push(dropped);
-      await run(sessionId, "race", first, T3);
-      log = await changes(sessionId);
-      expect(
-        log.map((l) => [l.change.field, l.change.oldValue, l.change.newValue]),
-      ).toEqual([
-        ["row", "absent", "present"],
-        ["row", "present", "absent"],
-      ]);
       expect(await stored(sessionId)).toHaveLength(22);
     });
 
@@ -287,6 +293,84 @@ describe("normalizeSession", () => {
         oldValue: "2",
         newValue: "1",
       });
+    });
+  });
+
+  describe("results that disappear", () => {
+    async function seeded() {
+      const sessionId = await sessionIdFor(t.db, 1, "race");
+      const a = await run(
+        sessionId,
+        "race",
+        loadBody("jolpica/2026/r01-results.json"),
+        T1,
+      );
+      return { sessionId, a, before: await stored(sessionId) };
+    }
+
+    it("holds an empty body over existing results behind a blocking item", async () => {
+      const { sessionId, a, before } = await seeded();
+
+      const empty = loadBody("jolpica/2026/r01-results.json");
+      empty.MRData.RaceTable.Races[0]!.Results = [];
+      const b = await run(sessionId, "race", empty, T2);
+
+      expect(b.outcome).toEqual({ changed: 0 });
+      expect(await stored(sessionId)).toEqual(before);
+      expect(await changes(sessionId)).toEqual([]);
+      expect((await state(sessionId))!.currentSnapshotId).toBe(a.snapshotId);
+      const items = await reviews(sessionId);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "results_disappeared",
+        severity: "blocking",
+        status: "open",
+        dedupeKey: `normalize:${sessionId}:${b.snapshotId}`,
+        createdAt: T2,
+      });
+      const details = items[0]!.details as {
+        missingDriverIds: string[];
+      };
+      expect(details).toMatchObject({
+        snapshotId: b.snapshotId,
+        previousSnapshotId: a.snapshotId,
+        previousRows: 22,
+      });
+      expect(new Set(details.missingDriverIds)).toEqual(
+        new Set(before.map((r) => r.row.driverId)),
+      );
+    });
+
+    it("holds a body that drops one driver", async () => {
+      const { sessionId, a, before } = await seeded();
+
+      const partial = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(partial, "Results").pop();
+      const b = await run(sessionId, "race", partial, T2);
+
+      expect(b.outcome).toEqual({ changed: 0 });
+      expect(await stored(sessionId)).toEqual(before);
+      expect(await changes(sessionId)).toEqual([]);
+      expect((await state(sessionId))!.currentSnapshotId).toBe(a.snapshotId);
+      const items = await reviews(sessionId);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "results_disappeared",
+        severity: "blocking",
+      });
+      expect(
+        (items[0]!.details as { missingDriverIds: string[] }).missingDriverIds,
+      ).toEqual([before.find((r) => r.row.position === 22)!.row.driverId]);
+    });
+
+    it("opens no second item when the same snapshot is run again", async () => {
+      const { sessionId } = await seeded();
+      const empty = loadBody("jolpica/2026/r01-results.json");
+      empty.MRData.RaceTable.Races[0]!.Results = [];
+      await run(sessionId, "race", empty, T2);
+      await run(sessionId, "race", empty, T3);
+
+      expect(await reviews(sessionId)).toHaveLength(1);
     });
   });
 

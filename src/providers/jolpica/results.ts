@@ -85,11 +85,11 @@ function classify(positionText: string): Classification | null {
   }
 }
 
-/** `m:ss.sss` -> milliseconds, or null when it is not in that form. */
+/** `m:ss.sss` (minutes optional) -> milliseconds, or null when it is not in that form. */
 function lapTimeMs(text: string): number | null {
-  const m = /^(\d+):(\d{2})\.(\d{3})$/.exec(text);
+  const m = /^(?:(\d+):)?(\d{1,2})\.(\d{3})$/.exec(text);
   if (!m) return null;
-  return Number(m[1]) * 60_000 + Number(m[2]) * 1000 + Number(m[3]);
+  return Number(m[1] ?? 0) * 60_000 + Number(m[2]) * 1000 + Number(m[3]);
 }
 
 const validationFailed = (problem: string): ParseFailure => ({
@@ -112,13 +112,17 @@ function findRows(kind: SessionKind, body: unknown): unknown[] | undefined {
     .object({
       MRData: z.object({
         RaceTable: z.object({
-          Races: z.array(z.record(z.string(), z.unknown())).min(1),
+          Races: z.array(z.record(z.string(), z.unknown())),
         }),
       }),
     })
     .safeParse(body);
   if (!parsed.success) return undefined;
-  const rows = parsed.data.MRData.RaceTable.Races[0]![key];
+  const races = parsed.data.MRData.RaceTable.Races;
+  // Jolpica's answer for a session that has no results yet is an empty race
+  // list, not an error (recorded: tests/fixtures/jolpica/2026/r23-results-empty.json).
+  if (races.length === 0) return [];
+  const rows = races[0]![key];
   return Array.isArray(rows) ? rows : undefined;
 }
 

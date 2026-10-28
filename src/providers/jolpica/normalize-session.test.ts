@@ -98,7 +98,7 @@ describe("normalizeJolpicaSession", () => {
       kind: "unknown_driver",
       severity: "blocking",
       status: "open",
-      dedupeKey: `unmapped:${sessionId}:jolpica:hulkenberg`,
+      dedupeKey: `unmapped:${sessionId}:jolpica:driver:hulkenberg`,
       createdAt: T1,
     });
     expect(items[0]!.details).toMatchObject({
@@ -133,7 +133,7 @@ describe("normalizeJolpicaSession", () => {
     expect(items[0]).toMatchObject({
       kind: "unknown_constructor",
       severity: "blocking",
-      dedupeKey: `unmapped:${sessionId}:jolpica:audi`,
+      dedupeKey: `unmapped:${sessionId}:jolpica:constructor:audi`,
     });
   });
 

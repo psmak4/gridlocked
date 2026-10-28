@@ -97,7 +97,7 @@ export async function normalizeJolpicaSession(
           eventId: ctx.eventId,
           sessionId,
           details: { provider: PROVIDER, entityType, key, snapshotId },
-          dedupeKey: `unmapped:${sessionId}:${PROVIDER}:${key}`,
+          dedupeKey: `unmapped:${sessionId}:${PROVIDER}:${entityType}:${key}`,
         });
       }
     });

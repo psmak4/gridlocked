@@ -92,6 +92,15 @@ describe("parseJolpicaResults: qualifying", () => {
     });
   });
 
+  it("reads a time with no minutes part", () => {
+    const edited = withRows(
+      "jolpica/2026/r18-qualifying.json",
+      "QualifyingResults",
+      (rows) => rows.map((r, i) => (i === 0 ? { ...r, Q1: "59.123" } : r)),
+    );
+    expect(ok(parseJolpicaResults("qualifying", edited))[0]!.q1Ms).toBe(59123);
+  });
+
   it("fails on a time that is not m:ss.sss", () => {
     const edited = withRows(
       "jolpica/2026/r18-qualifying.json",
@@ -290,10 +299,7 @@ describe("parseJolpicaResults: a body we cannot use", () => {
     });
   });
 
-  it("fails when the race is missing", () => {
-    expect(
-      parseJolpicaResults("race", { MRData: { RaceTable: { Races: [] } } }),
-    ).toMatchObject({ ok: false, problem: "missing results" });
+  it("fails when the body is not a Jolpica race table", () => {
     expect(parseJolpicaResults("race", {})).toMatchObject({
       ok: false,
       problem: "missing results",
@@ -303,6 +309,29 @@ describe("parseJolpicaResults: a body we cannot use", () => {
 
   it("fails when the body holds the other kind's results", () => {
     expect(parseJolpicaResults("sprint", body)).toMatchObject({
+      ok: false,
+      problem: "missing results",
+    });
+  });
+
+  it("returns no rows for Jolpica's real not-published-yet answer (Races: [])", () => {
+    const empty = readFixture("jolpica/2026/r23-results-empty.json");
+    expect((empty as { MRData: { total: string } }).MRData.total).toBe("0");
+    for (const kind of [
+      "race",
+      "sprint",
+      "qualifying",
+      "sprint_qualifying",
+    ] as const) {
+      expect(parseJolpicaResults(kind, empty)).toEqual({ ok: true, rows: [] });
+    }
+  });
+
+  it("still fails for a present race with no results key", () => {
+    const body = {
+      MRData: { RaceTable: { Races: [{ season: "2026", round: "23" }] } },
+    };
+    expect(parseJolpicaResults("race", body)).toMatchObject({
       ok: false,
       problem: "missing results",
     });
