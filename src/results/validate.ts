@@ -9,10 +9,14 @@ import type { SessionKind } from "./types";
 // `results`, so an admin's correction is validated like provider data. It only
 // reports: opening review items and moving the status is `advanceStatus`.
 
-/** Session kinds that score, and so have results to validate. */
+/**
+ * Session kinds that score, and so have results to validate: the official game
+ * scores Qualifying, Sprint and Race (HLD §6). Sprint qualifying is not
+ * scored, so like practice it has no results requirement here and the
+ * finalizer does not wait for it.
+ */
 export const SCORED_KINDS: readonly SessionKind[] = [
   "qualifying",
-  "sprint_qualifying",
   "sprint",
   "race",
 ];

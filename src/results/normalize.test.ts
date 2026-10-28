@@ -470,4 +470,53 @@ describe("normalizeSession", () => {
       expect(item!.eventId).not.toBeNull();
     });
   });
+
+  describe("a final session", () => {
+    it("is never written to: the response is refused with a warning", async () => {
+      const sessionId = await sessionIdFor(t.db, 1, "race");
+      const first = await run(
+        sessionId,
+        "race",
+        loadBody("jolpica/2026/r01-results.json"),
+        T1,
+      );
+      await t.db
+        .update(sessionResultState)
+        .set({ status: "final", finalizedAt: T1 })
+        .where(eq(sessionResultState.sessionId, sessionId));
+      const before = await stored(sessionId);
+
+      const late = loadBody("jolpica/2026/r01-results.json");
+      const [a, b] = rowsOf(late, "Results");
+      for (const key of ["position", "positionText"]) {
+        [a![key], b![key]] = [b![key], a![key]];
+      }
+      const second = await run(sessionId, "race", late, T2);
+
+      expect(second.outcome).toEqual({ changed: 0 });
+      expect(await stored(sessionId)).toEqual(before);
+      expect(await changes(sessionId)).toEqual([]);
+      expect((await state(sessionId))!.currentSnapshotId).toBe(
+        first.snapshotId,
+      );
+      const items = await reviews(sessionId);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "normalize_after_final",
+        severity: "warning",
+        status: "open",
+        dedupeKey: `normalize_after_final:${sessionId}:${second.snapshotId}`,
+      });
+
+      // The same snapshot again does not pile up a second warning.
+      await normalizeSession(
+        t.db,
+        T3,
+        sessionId,
+        second.snapshotId,
+        await parsedFor(t.db, "race", late),
+      );
+      expect(await reviews(sessionId)).toHaveLength(1);
+    });
+  });
 });

@@ -1,0 +1,52 @@
+import { and, asc, eq } from "drizzle-orm";
+import { events, seasons } from "@/db/schema";
+import type { Db } from "@/db/types";
+import { syncEventEntries } from "@/reference/sync-event-entries";
+import { planEventJobs } from "./plan-event";
+import { syncCalendarKey, syncCalendarPayload } from "./kinds";
+import type { CalendarSyncSource } from "./ports";
+import { enqueue, type JobsDb } from "./queue";
+import type { JobHandler } from "./runner";
+
+/**
+ * Enqueues the season's calendar sync for the UTC day of `now`, due now. A
+ * second call on the same day finds the same job (dedupe key
+ * `sync_calendar:<season>:<yyyy-mm-dd>`).
+ */
+export function enqueueCalendarSync(db: JobsDb, now: Date, season: number) {
+  return enqueue(db, {
+    kind: "sync_calendar",
+    dedupeKey: syncCalendarKey(season, now.toISOString().slice(0, 10)),
+    runAt: now,
+    payload: { season },
+  });
+}
+
+/**
+ * The `sync_calendar` handler (HLD §4.5): fetch the season's calendar, drivers
+ * and constructors and apply them (through the port), then for every event
+ * still to be run (`scheduled`: not cancelled, not completed) copy the seats
+ * onto its entries and plan its jobs. Both steps are idempotent, so a run
+ * that finds nothing new changes nothing; a session time that moved moves its
+ * pending jobs.
+ */
+export function createSyncCalendarHandler(
+  source: CalendarSyncSource,
+): JobHandler {
+  return async (job, ctx) => {
+    const db = ctx.db as Db;
+    const { season } = syncCalendarPayload.parse(job.payload);
+    await source.sync(db, ctx.clock, season, job.id);
+
+    const todo = await db
+      .select({ id: events.id })
+      .from(events)
+      .innerJoin(seasons, eq(seasons.id, events.seasonId))
+      .where(and(eq(seasons.year, season), eq(events.status, "scheduled")))
+      .orderBy(asc(events.round));
+    for (const { id } of todo) {
+      await syncEventEntries(db, id, ctx.clock.now());
+      await planEventJobs(db, id);
+    }
+  };
+}

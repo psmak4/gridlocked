@@ -13,6 +13,7 @@ const dbTests = [
   "src/providers/http/client.test.ts",
   "src/providers/jolpica/normalize-session.test.ts",
   "src/providers/openf1/participants.test.ts",
+  "src/providers/pipeline/**/*.test.{ts,tsx}",
   "src/providers/openf1/roster-check.e2e.test.ts",
 ];
 

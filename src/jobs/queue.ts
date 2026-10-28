@@ -8,7 +8,10 @@ import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { jobs } from "@/db/schema";
 import { newId } from "@/lib/ids";
 
-/** Narrowed to a union of known kinds in Task 10. */
+/**
+ * The queue is generic. The pipeline's own kinds are the union in `kinds.ts`;
+ * handler maps keyed by them are assignable to `Record<JobKind, JobHandler>`.
+ */
 export type JobKind = string;
 
 export type Job = typeof jobs.$inferSelect;
