@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** Look and feel decided 2026-10-27. Waves 1 and 2 are drafted. Wave 3 (home, weekend hub, points breakdown, leagues, prices, desktop shell) is drafted for your review.
+**Status:** Look and feel decided 2026-10-27. Waves 1–3 are drafted. Wave 4 (forum, notifications, sign-up and onboarding, profile and settings) is drafted for your review. Wave 5 (staff screens) is last.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
@@ -216,4 +216,40 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
   - "How prices work" uses a worked example marked "Example numbers", because the real constants are calibrated before launch (DM 3.5);
   - team value is shown in words ("up $1.0M since last race").
 - **Desktop:** the side menu replaces the bottom nav, with the same items plus Notifications. Tables become real tables, and a side card sums up your position. It stacks to one column at phone width.
+
+## Wave 4: community and account (drafted 2026-10-27)
+The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.
+
+| Row | Boards |
+|---|---|
+| Forum | Categories · Threads in a category (pinned weekend threads, a hidden spoiler thread) · New thread (spoiler title check) · Report (sheet) |
+| Notifications | The list (unread, grouped replies, spoiler-safe scores, a correction, moderation) · Turn on push (sheet) |
+| Sign-up and onboarding | Choose a way in · Sign up with email · Check your email (with the "busy day" queue message) · Favorites · Spoiler choice |
+| Profile and settings | Profile (trust level in plain words) · Settings · Delete account |
+| Dark theme | Thread list |
+
+**What you can click (Play):**
+- Forum to thread list to "New thread", or "…" opens Report.
+- The bell opens Notifications, and the push card opens the push sheet.
+- Sign-up runs through email, check-email, favorites and spoilers, then finishes.
+- Profile opens Settings, and Settings opens Delete account.
+- Tabs, team picks, report reasons and spoiler options all switch.
+
+**Calls I made, to check:**
+- **Sign-up leads with Discord.** It's the primary button because it doesn't use the 100-a-day email allowance. Email and magic link come second and third.
+  - The sign-up screen also uses the cover's heat-and-checker artwork, a deliberate exception to "one heat block per screen" for this brand moment.
+- **Age** is a single "I'm 16 or older" checkbox. Terms, privacy and community rules are accepted together.
+  - The bot check is a placeholder box for the Cloudflare Turnstile widget.
+- **"Check your email"** lets people look around and build a team before confirming. Posting and chat wait for confirmation. On busy days it says emails are queued and offers Discord.
+- **Onboarding** is 2 short steps after the account: favorites (team, driver, optional country), then spoilers ("Hide results until I've watched" is preselected, with a live example).
+- **The spoiler title check** warns when a new thread's title may give away a result and offers "Contains spoilers for qualifying" (on by default once warned).
+- **Trust levels** show as a plain name ("Member") with one sentence on what it allows and how to reach the next level. The numbers stay internal.
+- **Delete account** spells out your choice of "always anonymize":
+  - posts stay as "deleted user";
+  - teams leave leagues;
+  - leagues you run stay open;
+  - personal data is erased.
+
+  It offers a data download first, needs your username typed, and confirms by email.
+- **Switches** use native checkboxes for now. The design system has no Switch component yet, which is a gap to fill: adding one is additive and doesn't change these screens.
 
