@@ -1,0 +1,198 @@
+{
+  "season": 2026,
+  "note": "Race seats derived from the recorded 2026 round 1 race results (driver, constructor, car number), valid from the season's first event start date, plus the Dutch GP swap from DM 1.8 (Lawson rb -> red_bull, Tsunoda -> rb, Hadjar's race seat closes), valid from 2026-08-21. Rounds 12-14 agree with the swap (same 22 driver, constructor and number triples). Round 18 does not: it shows Hadjar back at red_bull and Lawson at rb, with no Tsunoda. The date of that reversal is not in the recorded data, so it is not modelled here. Keys are Jolpica driver and constructor ids.",
+  "seats": [
+    {
+      "driver": "colapinto",
+      "constructor": "alpine",
+      "carNumber": 43,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "gasly",
+      "constructor": "alpine",
+      "carNumber": 10,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "alonso",
+      "constructor": "aston_martin",
+      "carNumber": 14,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "stroll",
+      "constructor": "aston_martin",
+      "carNumber": 18,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "bortoleto",
+      "constructor": "audi",
+      "carNumber": 5,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "hulkenberg",
+      "constructor": "audi",
+      "carNumber": 27,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "bottas",
+      "constructor": "cadillac",
+      "carNumber": 77,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "perez",
+      "constructor": "cadillac",
+      "carNumber": 11,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "hamilton",
+      "constructor": "ferrari",
+      "carNumber": 44,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "leclerc",
+      "constructor": "ferrari",
+      "carNumber": 16,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "bearman",
+      "constructor": "haas",
+      "carNumber": 87,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "ocon",
+      "constructor": "haas",
+      "carNumber": 31,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "norris",
+      "constructor": "mclaren",
+      "carNumber": 1,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "piastri",
+      "constructor": "mclaren",
+      "carNumber": 81,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "antonelli",
+      "constructor": "mercedes",
+      "carNumber": 12,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "russell",
+      "constructor": "mercedes",
+      "carNumber": 63,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "arvid_lindblad",
+      "constructor": "rb",
+      "carNumber": 41,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "lawson",
+      "constructor": "rb",
+      "carNumber": 30,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": "2026-08-20"
+    },
+    {
+      "driver": "hadjar",
+      "constructor": "red_bull",
+      "carNumber": 6,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": "2026-08-20"
+    },
+    {
+      "driver": "max_verstappen",
+      "constructor": "red_bull",
+      "carNumber": 3,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "albon",
+      "constructor": "williams",
+      "carNumber": 23,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "sainz",
+      "constructor": "williams",
+      "carNumber": 55,
+      "role": "race",
+      "validFrom": "2026-03-06",
+      "validTo": null
+    },
+    {
+      "driver": "lawson",
+      "constructor": "red_bull",
+      "carNumber": 30,
+      "role": "race",
+      "validFrom": "2026-08-21",
+      "validTo": null
+    },
+    {
+      "driver": "tsunoda",
+      "constructor": "rb",
+      "carNumber": 22,
+      "role": "race",
+      "validFrom": "2026-08-21",
+      "validTo": null
+    }
+  ]
+}
