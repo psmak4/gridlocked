@@ -1,13 +1,25 @@
 import { eq } from "drizzle-orm";
 import { seasons } from "@/db/schema";
 import type { ParticipantsSource } from "@/jobs/ports";
-import type { ProviderClient } from "../http/client";
+import type { ProviderClient, ProviderRequest } from "../http/client";
 import {
   linkOpenF1Sessions,
   openF1SessionKey,
   parseOpenF1Drivers,
   storeParticipants,
 } from "../openf1/participants";
+
+/** The season's session list, which links our sessions to OpenF1's. */
+export const openF1SessionsRequest = (year: number): ProviderRequest => ({
+  endpoint: "/sessions",
+  params: { year: String(year) },
+});
+
+/** Who took part in one OpenF1 session. */
+export const openF1DriversRequest = (sessionKey: number): ProviderRequest => ({
+  endpoint: "/drivers",
+  params: { session_key: String(sessionKey) },
+});
 
 /**
  * The pipeline's practice-participants port over OpenF1 (HLD §8.2). Links our
@@ -32,9 +44,10 @@ export function createOpenF1ParticipantsSource(
           .from(seasons)
           .where(eq(seasons.id, session.seasonId));
         if (!season) throw new Error(`no season ${session.seasonId}`);
+        const sessionsRequest = openF1SessionsRequest(season.year);
         const list = await client.get(
-          "/sessions",
-          { year: String(season.year) },
+          sessionsRequest.endpoint,
+          sessionsRequest.params,
           { jobId, seasonId: session.seasonId, eventId: session.eventId },
         );
         await linkOpenF1Sessions(db, now, list.body);
@@ -45,9 +58,10 @@ export function createOpenF1ParticipantsSource(
           );
         }
       }
+      const driversRequest = openF1DriversRequest(key);
       const drivers = await client.get(
-        "/drivers",
-        { session_key: String(key) },
+        driversRequest.endpoint,
+        driversRequest.params,
         ctx,
       );
       await storeParticipants(
