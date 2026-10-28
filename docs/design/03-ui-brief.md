@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** Look and feel decided 2026-10-27. Wave 1 (design system) is next.
+**Status:** Look and feel decided 2026-10-27. Wave 1 (design system) is drafted for your review.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
@@ -123,3 +123,35 @@ Every board also has Tweaks, for theme and team colors, so any look can be flipp
 - **Fewer things on screen:** at most about 7 items before a "see more". Detail lives one tap away, for example the points breakdown, not the team screen.
 - **Bold team colors are kept as tints,** with a solid badge for identity, and never more than one strong color per row. Big blocks of the hot accent are kept for the single most important thing on a screen, such as the countdown or the Save button.
 - **Contrast and size:** body text at least 15 px, numbers at least 16 px, and WCAG AA contrast in both themes, including text on team-color tints.
+
+## Wave 1: design system (drafted 2026-10-27)
+The system is in Claude Design as [Gridlocked](https://claude.ai/artifact/PUXqoEEV5XrSJtsfELx7b9) (private to you). It holds:
+- **Tokens:**
+  - 17 colors in dark (first and fallback) and light;
+  - 3 font families from Google Fonts: Anton for display, Barlow for text, Barlow Semi Condensed for numbers;
+  - 11 text styles;
+  - 6 spacing steps, 4 radii and 1 shadow.
+
+  Every color pairing is checked for WCAG AA in both themes, including text on team tints for all 11 teams of 2026.
+- **Brand book:**
+  - voice and copy rules;
+  - the "keeping it simple" rules;
+  - color, type, spacing and shape;
+  - team colors (bold tints, auto-contrast badges);
+  - spoilers, iconography and accessibility.
+- **14 components with live previews:**
+  - Button, Badge, TeamBadge, AssetRow;
+  - CountdownBlock, BudgetMeter, PointsPill;
+  - Tabs, BottomNav;
+  - SpoilerCover, TextField, Sheet, Toast, EmptyState.
+
+**Calls I made, to check:**
+- Dark is the first theme and the fallback.
+- One heat block per screen.
+- Team tints are 22% in dark and 12% in light. 12% is what keeps light-mode text at AA on the reddest teams.
+- The spoiler cover **replaces** content rather than blurring it.
+- Toasts disappear after 4 seconds.
+- The countdown ticks every second only in the last 10 minutes.
+
+**Not in wave 1:** the screens themselves (wave 2 onward), a logo (it waits for the trademark check), and the desktop side menu (wave 3).
+
