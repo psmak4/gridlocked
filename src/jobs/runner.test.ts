@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { createTestDb } from "../../tests/helpers/test-db";
+import { jobs } from "@/db/schema";
+import { simulatedClock } from "@/lib/clock";
+import { enqueue } from "./queue";
+import { runDue, type JobHandler } from "./runner";
+
+const T0 = new Date("2026-03-01T10:00:00.000Z");
+const OPTS = { maxJobs: 10, leaseMs: 5 * 60_000 };
+
+describe("runDue", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  beforeEach(async () => {
+    t = await createTestDb();
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  const job = (
+    dedupeKey: string,
+    extra: { kind?: string; runAt?: Date } = {},
+  ) =>
+    enqueue(t.db, {
+      kind: extra.kind ?? "k",
+      dedupeKey,
+      runAt: extra.runAt ?? T0,
+      payload: { dedupeKey },
+    });
+
+  async function row(id: string) {
+    const [r] = await t.db.select().from(jobs).where(eq(jobs.id, id));
+    return r!;
+  }
+
+  it("runs due jobs, passes the job and context, and completes them", async () => {
+    const clock = simulatedClock(T0);
+    const a = await job("a");
+    const seen: string[] = [];
+    const handler: JobHandler = async (j, ctx) => {
+      expect(ctx.db).toBe(t.db);
+      expect(ctx.clock).toBe(clock);
+      seen.push(j.id);
+    };
+    const res = await runDue(t.db, clock, { k: handler }, OPTS);
+    expect(res).toEqual({ ran: 1, failed: 0 });
+    expect(seen).toEqual([a.id]);
+    expect((await row(a.id)).status).toBe("succeeded");
+  });
+
+  it("does not run jobs that are not yet due", async () => {
+    await job("a", { runAt: new Date(T0.getTime() + 1) });
+    const res = await runDue(
+      t.db,
+      simulatedClock(T0),
+      { k: async () => {} },
+      OPTS,
+    );
+    expect(res).toEqual({ ran: 0, failed: 0 });
+  });
+
+  it("stops after maxJobs", async () => {
+    await job("a");
+    await job("b");
+    await job("c");
+    const res = await runDue(
+      t.db,
+      simulatedClock(T0),
+      { k: async () => {} },
+      { ...OPTS, maxJobs: 2 },
+    );
+    expect(res).toEqual({ ran: 2, failed: 0 });
+    const left = await runDue(
+      t.db,
+      simulatedClock(T0),
+      { k: async () => {} },
+      OPTS,
+    );
+    expect(left).toEqual({ ran: 1, failed: 0 });
+  });
+
+  it("records a handler error as failed, never throws, and retries after the backoff", async () => {
+    const clock = simulatedClock(T0);
+    const a = await job("a");
+    let calls = 0;
+    const handler: JobHandler = async () => {
+      calls++;
+      if (calls === 1) throw new Error("provider down");
+    };
+    const first = await runDue(t.db, clock, { k: handler }, OPTS);
+    expect(first).toEqual({ ran: 0, failed: 1 });
+    expect(await row(a.id)).toMatchObject({
+      status: "failed",
+      lastError: "provider down",
+    });
+
+    // Still inside the 1 minute backoff: nothing is due.
+    clock.advance(30_000);
+    expect(await runDue(t.db, clock, { k: handler }, OPTS)).toEqual({
+      ran: 0,
+      failed: 0,
+    });
+
+    clock.advance(30_000);
+    const second = await runDue(t.db, clock, { k: handler }, OPTS);
+    expect(second).toEqual({ ran: 1, failed: 0 });
+    expect((await row(a.id)).status).toBe("succeeded");
+    expect(calls).toBe(2);
+  });
+
+  it("does not loop on a job it just failed (backoff is in the future)", async () => {
+    await job("a");
+    const res = await runDue(
+      t.db,
+      simulatedClock(T0),
+      {
+        k: async () => {
+          throw new Error("x");
+        },
+      },
+      OPTS,
+    );
+    expect(res).toEqual({ ran: 0, failed: 1 });
+  });
+
+  it("fails a job with no handler for its kind", async () => {
+    const a = await job("a", { kind: "mystery" });
+    const res = await runDue(t.db, simulatedClock(T0), {}, OPTS);
+    expect(res).toEqual({ ran: 0, failed: 1 });
+    expect(await row(a.id)).toMatchObject({
+      status: "failed",
+      lastError: "no handler for kind mystery",
+    });
+  });
+
+  it("records a non-Error throw as a string", async () => {
+    const a = await job("a");
+    await runDue(
+      t.db,
+      simulatedClock(T0),
+      {
+        k: async () => {
+          throw "plain string";
+        },
+      },
+      OPTS,
+    );
+    expect((await row(a.id)).lastError).toBe("plain string");
+  });
+
+  it("does not treat Object.prototype names as handlers", async () => {
+    const a = await job("a", { kind: "toString" });
+    const res = await runDue(t.db, simulatedClock(T0), {}, OPTS);
+    expect(res).toEqual({ ran: 0, failed: 1 });
+    expect((await row(a.id)).lastError).toBe("no handler for kind toString");
+  });
+});
