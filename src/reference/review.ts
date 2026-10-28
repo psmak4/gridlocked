@@ -17,6 +17,7 @@ export async function openReviewItem(
     seasonId: string;
     eventId?: string | null;
     sessionId?: string | null;
+    driverId?: string | null;
     details: Record<string, unknown>;
     dedupeKey: string;
   },
@@ -30,6 +31,7 @@ export async function openReviewItem(
       seasonId: item.seasonId,
       eventId: item.eventId ?? null,
       sessionId: item.sessionId ?? null,
+      driverId: item.driverId ?? null,
       details: item.details,
       dedupeKey: item.dedupeKey,
       createdAt: now,
