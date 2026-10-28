@@ -250,6 +250,10 @@
 - [ ] **Step 1:** Open this task's PR with a deliberately failing assertion added to `src/lib/money.test.ts`. Expected: the `checks` job fails at `pnpm test`.
 - [ ] **Step 2:** Remove the failing assertion and push. Expected: `checks` passes. The PR shows green, merges and closes its issue, which is the M0 exit criterion.
 - [ ] **Step 3:** Commit (squash on merge): `ci: add GitHub Actions checks`.
+- [ ] **Step 4: Make CI required.**
+  - Add `checks` as a required status check to the repo's **Protect main** ruleset: `gh api repos/psmak4/gridlocked/rulesets`, then a PUT adding a `required_status_checks` rule with context `checks`.
+  - Turn on CodeQL default setup for JavaScript/TypeScript: `gh api -X PATCH repos/psmak4/gridlocked/code-scanning/default-setup -f state=configured`.
+  - Expected: the next PR shows `checks` and CodeQL as required.
 
 ## Done when
 - Tasks 1–8 are merged through PRs with green CI.

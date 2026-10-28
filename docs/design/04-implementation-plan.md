@@ -15,7 +15,7 @@ This is the roadmap for phase 5, the build. It splits the work into milestones t
 ### GitHub
 | Thing | Use |
 |---|---|
-| **Repository** | `psmak4/gridlocked`, private. The working name is pending the trademark check (HLD §13.1). A rename later is cheap and GitHub redirects old links |
+| **Repository** | `psmak4/gridlocked`, **public** since 2026-10-27, with no license, so all rights are reserved. The working name is pending the trademark check (HLD §13.1). A rename later is cheap and GitHub redirects old links |
 | **Milestones** | One per build milestone below, each with a target date |
 | **Epic issues** | One per milestone (label `type:epic`). It holds the goal, scope and exit criteria, with the milestone's task issues attached as **sub-issues** |
 | **Task issues** | One per task in a milestone's detailed plan (label `type:task`). Each has acceptance criteria, the tests that prove it, and a link to its plan section. They're written when the milestone's plan is written |
@@ -25,7 +25,18 @@ This is the roadmap for phase 5, the build. It splits the work into milestones t
 
 ### Workflow (decided 2026-10-27)
 - **A branch and a pull request per issue.** Branches are named `m0/3-clock`: the milestone, the issue number and a slug. The PR says `Closes #3`, CI must pass, and then it's merged with a squash.
-- **On a free account,** private repos can't enforce protected branches. So "PR + green CI before merge" is a working rule, not a setting. Upgrading to GitHub Pro (or going public) turns it into a rule.
+- **`main` is protected by the "Protect main" ruleset (public repo, 2026-10-27):**
+  - changes only through a pull request, squash-merged;
+  - linear history, no force-pushes, no deletion, review threads resolved;
+  - no required approvals, since there's one maintainer;
+  - CI's `checks` becomes a required status check in M0 Task 8.
+- **Repo security settings:**
+  - secret scanning with push protection;
+  - Dependabot alerts and security updates (plus weekly version updates in `.github/dependabot.yml`);
+  - private vulnerability reporting (see `SECURITY.md`);
+  - Actions tokens read-only by default;
+  - workflow runs from outside contributors' PRs need approval;
+  - CodeQL turns on in M0 Task 8, once there's code to scan.
 - **Phase gates still apply.** Each milestone starts only on your approval. Anything that creates cloud resources (Neon, Vercel, Resend, Sentry, Cloudflare Turnstile, Discord app) is listed under that milestone's **Approval needed**. Nothing is created before you say yes to that list.
 
 ### Definition of done (every task)
