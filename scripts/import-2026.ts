@@ -9,10 +9,15 @@
  *   DATABASE_URL=postgres://... pnpm tsx scripts/import-2026.ts
  *
  * Without `--dry-run` it needs DATABASE_URL and refuses to run without it.
- * Safe to run again: a second run changes nothing. The clock is the shared
- * one (CLOCK_MODE, default system), resolved once here.
+ * Safe to run again: a second run of the import changes nothing. It is meant
+ * for an empty or staging database: one that has polled live data (any
+ * `provider_requests` row) is refused unless `--force` is given, because the
+ * recorded bodies would overwrite newer results. Unknown arguments are
+ * refused too, so a mistyped `--dry-run` can't reach a real database. The
+ * clock is the shared one (CLOCK_MODE, default system), resolved once here.
  */
 import { fileURLToPath } from "node:url";
+import { sql } from "drizzle-orm";
 import type { Db } from "@/db/types";
 import { clockModeFromEnv, resolveClock } from "@/lib/resolve-clock";
 import { importSeason2026 } from "@/providers/import/import-season";
@@ -48,8 +53,18 @@ async function connect(
   };
 }
 
+const KNOWN_ARGS = new Set(["--dry-run", "--force"]);
+
 async function main() {
-  const dryRun = process.argv.includes("--dry-run");
+  const args = process.argv.slice(2);
+  const unknown = args.filter((a) => !KNOWN_ARGS.has(a));
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown argument ${unknown.join(", ")}: use --dry-run and/or --force`,
+    );
+  }
+  const dryRun = args.includes("--dry-run");
+  const force = args.includes("--force");
   const url = process.env.DATABASE_URL;
   if (!dryRun && !url) {
     throw new Error(
@@ -59,6 +74,16 @@ async function main() {
 
   const target = dryRun ? await createTestDb() : await connect(url as string);
   try {
+    if (!force) {
+      const polled = (await (target.db as Db).execute(
+        sql`select 1 from provider_requests limit 1`,
+      )) as { rows: unknown[] };
+      if (polled.rows.length > 0) {
+        throw new Error(
+          "this database has polled live data (provider_requests is not empty): the import would overwrite newer results. Use --force to import anyway",
+        );
+      }
+    }
     const clock = await resolveClock({
       mode: clockModeFromEnv(process.env),
       db: target.db as never,
