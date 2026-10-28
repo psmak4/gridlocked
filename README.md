@@ -23,6 +23,16 @@ pnpm lint          # ESLint, zero warnings allowed
 pnpm typecheck     # tsc --noEmit
 pnpm format:check  # Prettier (use `pnpm format` to fix)
 pnpm build         # production build
+pnpm test          # Vitest unit and database tests (in-memory PGlite)
+pnpm e2e           # Playwright end-to-end tests
+pnpm db:generate   # generate a migration after editing src/db/schema
+pnpm db:drift      # fail if the schema and src/db/migrations disagree
+```
+
+Before the first `pnpm e2e`, install the browser once:
+
+```sh
+pnpm exec playwright install chromium
 ```
 
 ## Docs
