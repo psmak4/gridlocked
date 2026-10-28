@@ -1,12 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import {
-  circuits,
-  events,
-  providerIds,
-  reviewItems,
-  seasons,
-  sessions,
-} from "@/db/schema";
+import { circuits, events, providerIds, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { Clock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
@@ -19,6 +12,8 @@ import type {
   SessionKind,
   SyncReport,
 } from "./calendar-types";
+import { openReviewItem } from "./review";
+import { ensureSeason } from "./season";
 import { kebab, normalizeEventName, uniqueSlug } from "./slugs";
 import { syncEventEntries } from "./sync-event-entries";
 
@@ -117,23 +112,8 @@ export async function syncCalendar(
     const durations = await getSetting(tx, "session_durations");
 
     // --- The season ------------------------------------------------------
-    let [seasonRow] = await tx
-      .select()
-      .from(seasons)
-      .where(eq(seasons.year, season));
-    if (!seasonRow) {
-      [seasonRow] = await tx
-        .insert(seasons)
-        .values({
-          id: newId(),
-          year: season,
-          status: "upcoming",
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
-    }
-    const seasonId = seasonRow!.id;
+    const seasonRow = await ensureSeason(tx, season, now);
+    const seasonId = seasonRow.id;
 
     // --- What we already have --------------------------------------------
     const eventRows = await tx
@@ -303,21 +283,12 @@ export async function syncCalendar(
       details: Record<string, unknown>;
       dedupeKey: string;
     }) => {
-      const rows = await tx
-        .insert(reviewItems)
-        .values({
-          id: newId(),
-          kind: item.kind,
-          severity: "warning",
-          seasonId,
-          eventId: item.eventId ?? null,
-          details: { ...item.details, snapshotId: source.snapshotId },
-          dedupeKey: item.dedupeKey,
-          createdAt: now,
-        })
-        .onConflictDoNothing()
-        .returning({ id: reviewItems.id });
-      reviewCount += rows.length;
+      const opened = await openReviewItem(tx, now, {
+        ...item,
+        seasonId,
+        details: { ...item.details, snapshotId: source.snapshotId },
+      });
+      if (opened) reviewCount += 1;
     };
 
     // Events an uncertain item points at stay as they are, and are not also

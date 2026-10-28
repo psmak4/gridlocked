@@ -79,13 +79,29 @@ async function main() {
     return first;
   }
 
+  const pad = (round: number | string) => String(round).padStart(2, "0");
+
+  // `--rounds=15,16,17` records only those 2026 race results (a later top-up).
+  const extra = process.argv.find((a) => a.startsWith("--rounds="));
+  if (extra) {
+    for (const round of extra.slice("--rounds=".length).split(",")) {
+      await record(
+        `/2026/${round}/results.json`,
+        `2026/r${pad(round)}-results.json`,
+        { expectRaces: true },
+      );
+    }
+    console.log(`done: ${calls} calls`);
+    await t.close();
+    return;
+  }
+
   const calendar = await record("/2026.json", "2026.json", {
     expectRaces: true,
   });
   await record("/2026/drivers.json", "2026/drivers.json");
   await record("/2026/constructors.json", "2026/constructors.json");
 
-  const pad = (round: number | string) => String(round).padStart(2, "0");
   const today = systemClock.now().toISOString().slice(0, 10);
   const races = calendar.RaceTable?.Races ?? [];
   const sprint = races.find(
@@ -128,7 +144,7 @@ async function main() {
     expectRaces: true,
   });
   // The rounds around the Lawson / Tsunoda / Hadjar swap.
-  for (const round of [12, 13, 14]) {
+  for (const round of [12, 13, 14, 15, 16, 17]) {
     const file = `2026/r${pad(round)}-results.json`;
     if (doneResults.has(file)) continue;
     await record(`/2026/${round}/results.json`, file, { expectRaces: true });

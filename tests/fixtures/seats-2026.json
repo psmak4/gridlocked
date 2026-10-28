@@ -1,6 +1,6 @@
 {
   "season": 2026,
-  "note": "Race seats derived from the recorded 2026 round 1 race results (driver, constructor, car number), valid from the season's first event start date, plus the Dutch GP swap from DM 1.8 (Lawson rb -> red_bull, Tsunoda -> rb, Hadjar's race seat closes), valid from 2026-08-21. Rounds 12-14 agree with the swap (same 22 driver, constructor and number triples). Round 18 does not: it shows Hadjar back at red_bull and Lawson at rb, with no Tsunoda. The date of that reversal is not in the recorded data, so it is not modelled here. Keys are Jolpica driver and constructor ids.",
+  "note": "Race seats derived from the recorded 2026 race results (driver, constructor, car number). Round 1 gives the 22 base seats, valid from the season's first event start date. The Dutch GP swap (DM 1.8) runs from its first session date, 2026-08-21: Lawson rb -> red_bull, Tsunoda -> rb, Hadjar's race seat closes; rounds 12-14 agree. The swap reverts from the Azerbaijan GP (round 15, first session 2026-09-24, race 2026-09-26): results for rounds 15-18 show Hadjar at red_bull #6 and Lawson at rb #30 with no Tsunoda, so the swap seats close on 2026-09-23 and the original pairings reopen from 2026-09-24. Every recorded round (1, 12-18) matches exactly. Keys are Jolpica driver and constructor ids.",
   "seats": [
     {
       "driver": "colapinto",
@@ -184,7 +184,7 @@
       "carNumber": 30,
       "role": "race",
       "validFrom": "2026-08-21",
-      "validTo": null
+      "validTo": "2026-09-23"
     },
     {
       "driver": "tsunoda",
@@ -192,6 +192,22 @@
       "carNumber": 22,
       "role": "race",
       "validFrom": "2026-08-21",
+      "validTo": "2026-09-23"
+    },
+    {
+      "driver": "hadjar",
+      "constructor": "red_bull",
+      "carNumber": 6,
+      "role": "race",
+      "validFrom": "2026-09-24",
+      "validTo": null
+    },
+    {
+      "driver": "lawson",
+      "constructor": "rb",
+      "carNumber": 30,
+      "role": "race",
+      "validFrom": "2026-09-24",
       "validTo": null
     }
   ]

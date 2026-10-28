@@ -59,17 +59,41 @@ function seatsOn(date: string) {
   );
 }
 
+const RECORDED_ROUNDS = ["01", "12", "13", "14", "15", "16", "17", "18"];
+
 describe("tests/fixtures/seats-2026.json", () => {
-  it.each(["01", "12", "13", "14"])(
-    "matches the recorded round %s results",
+  it.each(RECORDED_ROUNDS)(
+    "matches the recorded round %s results exactly",
     (round) => {
       const results = triples(round);
       expect(seatsOn(results.date)).toEqual(results.set);
     },
   );
 
-  it("has 24 seats: 22 from round 1 and the two the Dutch GP swap opens", () => {
-    expect(seats).toHaveLength(24);
+  it.each(RECORDED_ROUNDS)(
+    "has an active race seat for every round %s result row",
+    (round) => {
+      const results = triples(round);
+      const active = seatsOn(results.date);
+      const unseated = [...results.set].filter((row) => !active.has(row));
+      expect(unseated).toEqual([]);
+    },
+  );
+
+  it("has 26 seats: 22 from round 1, two for the Dutch GP swap and two for its reversal", () => {
+    expect(seats).toHaveLength(26);
     expect(seats.every((s) => s.role === "race")).toBe(true);
+  });
+
+  it("dates the reversal from the first session of round 15", () => {
+    const hadjar = seats.filter((s) => s.driver === "hadjar");
+    expect(hadjar.map((s) => [s.constructor, s.validFrom, s.validTo])).toEqual([
+      ["red_bull", "2026-03-06", "2026-08-20"],
+      ["red_bull", "2026-09-24", null],
+    ]);
+    const tsunoda = seats.filter((s) => s.driver === "tsunoda");
+    expect(tsunoda.map((s) => [s.constructor, s.validFrom, s.validTo])).toEqual(
+      [["rb", "2026-08-21", "2026-09-23"]],
+    );
   });
 });
