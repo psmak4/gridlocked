@@ -10,6 +10,7 @@ const dbTests = [
   "src/reference/**/*.test.{ts,tsx}",
   "src/results/**/*.test.{ts,tsx}",
   "src/providers/snapshots.test.ts",
+  "src/providers/import/**/*.test.{ts,tsx}",
   "src/providers/http/client.test.ts",
   "src/providers/jolpica/normalize-session.test.ts",
   "src/providers/openf1/participants.test.ts",

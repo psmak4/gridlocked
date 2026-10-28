@@ -7,6 +7,12 @@ import { storeSnapshot } from "../snapshots";
 
 export type ProviderName = "jolpica" | "openf1";
 
+/** A question for a provider: an endpoint and its query parameters. */
+export interface ProviderRequest {
+  endpoint: string;
+  params: Record<string, string>;
+}
+
 export interface ProviderCallContext {
   jobId?: string;
   seasonId?: string;
