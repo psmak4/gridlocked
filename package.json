@@ -19,7 +19,8 @@
   "dependencies": {
     "next": "16.4.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "uuidv7": "^1.2.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
