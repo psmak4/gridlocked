@@ -44,9 +44,12 @@ export const jobs = pgTable(
     /** A lease: when it runs out, another worker may take the job. */
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     lastError: text("last_error"),
-    /** The job that spawned this one, for fan-out. */
+    /**
+     * The job that spawned this one, for fan-out. A diagnostic pointer: SET
+     * NULL, so a succeeded parent can be pruned while a dead child stays.
+     */
     parentJobId: uuid("parent_job_id").references((): AnyPgColumn => jobs.id, {
-      onDelete: "restrict",
+      onDelete: "set null",
     }),
     createdAt: createdAt(),
     startedAt: timestamp("started_at", { withTimezone: true }),

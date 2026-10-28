@@ -1,5 +1,5 @@
 {
-  "id": "17791cb2-887d-44ad-acb0-0497437fe228",
+  "id": "a183750c-ae19-4613-ae76-39ba8d6a61d5",
   "prevId": "258624b5-b551-45b2-901f-902b8f7ceb85",
   "version": "7",
   "dialect": "postgresql",
@@ -1316,7 +1316,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1452,7 +1452,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1895,6 +1895,14 @@
         "result_overrides_fields_object_check": {
           "name": "result_overrides_fields_object_check",
           "value": "jsonb_typeof(\"result_overrides\".\"fields\") = 'object'"
+        },
+        "result_overrides_insert_fields_check": {
+          "name": "result_overrides_insert_fields_check",
+          "value": "\"result_overrides\".\"kind\" <> 'insert' or \"result_overrides\".\"fields\" ?& array['constructor_id', 'car_number', 'classification', 'provider_status', 'provider_position_text']"
+        },
+        "result_overrides_fields_not_empty_check": {
+          "name": "result_overrides_fields_not_empty_check",
+          "value": "\"result_overrides\".\"kind\" = 'suppress' or \"result_overrides\".\"fields\" <> '{}'::jsonb"
         }
       },
       "isRLSEnabled": false
@@ -2570,7 +2578,148 @@
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
+  "views": {
+    "public.effective_results": {
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "driver_id": {
+          "name": "driver_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "session_kind": {
+          "name": "session_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "constructor_id": {
+          "name": "constructor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "car_number": {
+          "name": "car_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "classification": {
+          "name": "classification",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_status": {
+          "name": "provider_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_position_text": {
+          "name": "provider_position_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grid": {
+          "name": "grid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pit_lane_start": {
+          "name": "pit_lane_start",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "laps": {
+          "name": "laps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "time_ms": {
+          "name": "time_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fastest_lap_rank": {
+          "name": "fastest_lap_rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fastest_lap_ms": {
+          "name": "fastest_lap_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "q1_ms": {
+          "name": "q1_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "q2_ms": {
+          "name": "q2_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "q3_ms": {
+          "name": "q3_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "official_points": {
+          "name": "official_points",
+          "type": "numeric(4, 1)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "overridden": {
+          "name": "overridden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "override_reason": {
+          "name": "override_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "name": "effective_results",
+      "schema": "public",
+      "isExisting": true,
+      "materialized": false
+    }
+  },
   "_meta": {
     "columns": {},
     "schemas": {},

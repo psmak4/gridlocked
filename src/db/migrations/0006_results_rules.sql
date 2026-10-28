@@ -26,14 +26,20 @@ CREATE TRIGGER "results_set_session_kind"
 
 -- The blocking-review guard (DM 2.9): a session's status can't become
 -- 'provisional' or 'final' while it has an open blocking review item. Checked
--- on insert, and on update only when the status actually changes, so other
--- column updates (poll_attempts, version) on a provisional session still work.
+-- on insert, and on update only when the status or the session_id changes (so a
+-- final row can't be re-keyed onto a session with an open blocking item), so
+-- other column updates (poll_attempts, version) on a provisional session still
+-- work.
 -- Callers make the status change in the same transaction as their own check.
 CREATE FUNCTION "session_result_state_guard_blocking"() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW."status" IN ('provisional', 'final')
-     AND (TG_OP = 'INSERT' OR OLD."status" IS DISTINCT FROM NEW."status")
+     AND (
+       TG_OP = 'INSERT'
+       OR OLD."status" IS DISTINCT FROM NEW."status"
+       OR OLD."session_id" IS DISTINCT FROM NEW."session_id"
+     )
      AND EXISTS (
        SELECT 1 FROM "review_items"
        WHERE "session_id" = NEW."session_id"
@@ -50,7 +56,7 @@ END;
 $$;
 --> statement-breakpoint
 CREATE TRIGGER "session_result_state_guard_blocking"
-  BEFORE INSERT OR UPDATE OF "status" ON "session_result_state"
+  BEFORE INSERT OR UPDATE OF "status", "session_id" ON "session_result_state"
   FOR EACH ROW EXECUTE FUNCTION "session_result_state_guard_blocking"();
 --> statement-breakpoint
 

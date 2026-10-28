@@ -600,6 +600,37 @@ describe("ingestion and results schema (DM Part 2)", () => {
       expect(await t.db.select().from(resultOverrides)).toHaveLength(3);
     });
 
+    it("rejects an insert missing a required field, and accepts a complete one", async () => {
+      const sessionId = await insertSession("race");
+      const complete = {
+        constructor_id: constructorId,
+        car_number: 4,
+        classification: "classified",
+        provider_status: "Finished",
+        provider_position_text: "1",
+      };
+      const missing: Record<string, unknown> = { ...complete };
+      delete missing.constructor_id;
+      await expectPgError(
+        override(sessionId, driverA, "insert", missing),
+        CHECK_VIOLATION,
+      );
+      await override(sessionId, driverA, "insert", complete);
+    });
+
+    it("rejects an empty patch or insert, and accepts a suppress with {}", async () => {
+      const sessionId = await insertSession("race");
+      await expectPgError(
+        override(sessionId, driverA, "patch", {}),
+        CHECK_VIOLATION,
+      );
+      await expectPgError(
+        override(sessionId, driverA, "insert", {}),
+        CHECK_VIOLATION,
+      );
+      await override(sessionId, driverA, "suppress", {});
+    });
+
     it("rejects an unknown kind, and fields that are not a JSON object", async () => {
       const sessionId = await insertSession("race");
       await expectPgError(
@@ -737,6 +768,36 @@ describe("ingestion and results schema (DM Part 2)", () => {
       expect(row).toMatchObject({ status: "provisional", pollAttempts: 3 });
     });
 
+    it("refuses re-keying a provisional or final row onto a session with an open blocking item", async () => {
+      const clean = await sessionWithState("under_review");
+      await setStatus(clean, "final");
+      const blocked = await insertSession("sprint");
+      await openItem(blocked, "blocking");
+
+      await expectPgError(
+        t.db
+          .update(sessionResultState)
+          .set({ sessionId: blocked })
+          .where(eq(sessionResultState.sessionId, clean)),
+        INTEGRITY_CONSTRAINT_VIOLATION,
+        "open blocking review item",
+      );
+    });
+
+    it("allows re-keying a final row onto a session with no open blocking item", async () => {
+      const clean = await sessionWithState("under_review");
+      await setStatus(clean, "final");
+      const other = await insertSession("sprint");
+      await openItem(other, "warning");
+
+      await t.db
+        .update(sessionResultState)
+        .set({ sessionId: other })
+        .where(eq(sessionResultState.sessionId, clean));
+      const [row] = await t.db.select().from(sessionResultState);
+      expect(row).toMatchObject({ sessionId: other, status: "final" });
+    });
+
     it("also guards an insert that starts at provisional or final", async () => {
       const sessionId = await insertSession("race");
       await openItem(sessionId, "blocking");
@@ -862,6 +923,41 @@ describe("ingestion and results schema (DM Part 2)", () => {
         startedAt: null,
         finishedAt: null,
       });
+    });
+
+    it("sets job pointers to null when the referenced job is deleted", async () => {
+      await job("notify_league", "league:2");
+      const [parent] = await t.db.select().from(jobs);
+      const childId = newId();
+      await t.db.insert(jobs).values({
+        id: childId,
+        kind: "notify_batch",
+        dedupeKey: "league:2:0",
+        payload: {},
+        runAt: NOW,
+        status: "succeeded",
+        maxAttempts: 3,
+        parentJobId: parent?.id,
+      });
+      const requestId = newId();
+      await t.db.insert(providerRequests).values({
+        id: requestId,
+        provider: "jolpica",
+        endpoint: "/x",
+        params: {},
+        requestedAt: NOW,
+        durationMs: 1,
+        outcome: "unchanged",
+        jobId: parent?.id,
+      });
+
+      await t.db.delete(jobs).where(eq(jobs.id, parent!.id));
+
+      const [child] = await t.db.select().from(jobs);
+      expect(child?.id).toBe(childId);
+      expect(child?.parentJobId).toBeNull();
+      const [request] = await t.db.select().from(providerRequests);
+      expect(request?.jobId).toBeNull();
     });
 
     it("has a partial index for due pending jobs", async () => {

@@ -126,8 +126,12 @@ export const providerRequests = pgTable(
       onDelete: "restrict",
     }),
     error: text("error"),
-    /** Which job made the call. */
-    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "restrict" }),
+    /**
+     * Which job made the call. A diagnostic pointer on 30-day operational
+     * data, so pruning a job just clears it (SET NULL, unlike the RESTRICT
+     * used for facts).
+     */
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
   },
   (t) => [
     check(
@@ -309,6 +313,17 @@ export const resultOverrides = pgTable(
     check(
       "result_overrides_fields_object_check",
       sql`jsonb_typeof(${t.fields}) = 'object'`,
+    ),
+    // An insert builds a whole row, so it must carry every NOT NULL column
+    // that `effective_results` cannot fill in itself.
+    check(
+      "result_overrides_insert_fields_check",
+      sql`${t.kind} <> 'insert' or ${t.fields} ?& array['constructor_id', 'car_number', 'classification', 'provider_status', 'provider_position_text']`,
+    ),
+    // A patch or insert that sets nothing is a mistake. Only a suppress is empty.
+    check(
+      "result_overrides_fields_not_empty_check",
+      sql`${t.kind} = 'suppress' or ${t.fields} <> '{}'::jsonb`,
     ),
     // At most one active override per driver per session. Its leading column
     // also serves the DM 2.12 index on (session_id) WHERE revoked_at IS NULL.

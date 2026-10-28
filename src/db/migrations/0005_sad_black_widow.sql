@@ -73,7 +73,9 @@ CREATE TABLE "result_overrides" (
 	"revoked_by" uuid,
 	"version" integer DEFAULT 1 NOT NULL,
 	CONSTRAINT "result_overrides_kind_check" CHECK ("result_overrides"."kind" in ('patch', 'insert', 'suppress')),
-	CONSTRAINT "result_overrides_fields_object_check" CHECK (jsonb_typeof("result_overrides"."fields") = 'object')
+	CONSTRAINT "result_overrides_fields_object_check" CHECK (jsonb_typeof("result_overrides"."fields") = 'object'),
+	CONSTRAINT "result_overrides_insert_fields_check" CHECK ("result_overrides"."kind" <> 'insert' or "result_overrides"."fields" ?& array['constructor_id', 'car_number', 'classification', 'provider_status', 'provider_position_text']),
+	CONSTRAINT "result_overrides_fields_not_empty_check" CHECK ("result_overrides"."kind" = 'suppress' or "result_overrides"."fields" <> '{}'::jsonb)
 );
 --> statement-breakpoint
 CREATE TABLE "results" (
@@ -149,9 +151,9 @@ CREATE TABLE "session_result_state" (
 	CONSTRAINT "session_result_state_source_check" CHECK ("session_result_state"."source" in ('provider', 'manual'))
 );
 --> statement-breakpoint
-ALTER TABLE "jobs" ADD CONSTRAINT "jobs_parent_job_id_jobs_id_fk" FOREIGN KEY ("parent_job_id") REFERENCES "public"."jobs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "jobs" ADD CONSTRAINT "jobs_parent_job_id_jobs_id_fk" FOREIGN KEY ("parent_job_id") REFERENCES "public"."jobs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "provider_requests" ADD CONSTRAINT "provider_requests_snapshot_id_raw_snapshots_id_fk" FOREIGN KEY ("snapshot_id") REFERENCES "public"."raw_snapshots"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "provider_requests" ADD CONSTRAINT "provider_requests_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "provider_requests" ADD CONSTRAINT "provider_requests_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "raw_snapshots" ADD CONSTRAINT "raw_snapshots_season_id_seasons_id_fk" FOREIGN KEY ("season_id") REFERENCES "public"."seasons"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "raw_snapshots" ADD CONSTRAINT "raw_snapshots_event_id_events_id_fk" FOREIGN KEY ("event_id") REFERENCES "public"."events"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "raw_snapshots" ADD CONSTRAINT "raw_snapshots_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
