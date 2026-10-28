@@ -143,6 +143,42 @@ describe("roster sync", () => {
       expect(await t.db.select().from(drivers)).toHaveLength(list.length);
     });
 
+    it("keeps a stored value the provider now omits, and still takes ones it sends", async () => {
+      const list = loadDrivers2026();
+      await syncD(list);
+      // An admin filled in what Jolpica lacks for a reserve driver.
+      await t.db
+        .update(drivers)
+        .set({
+          nationality: "Italian",
+          code: "ARO",
+          permanentNumber: 77,
+          dateOfBirth: "2004-01-01",
+        })
+        .where(eq(drivers.slug, "paul-aron"));
+      // Jolpica sends none of them, and a new code for another driver.
+      const report = await syncD(
+        list.map((d) => (d.key === "albon" ? { ...d, code: "ALX" } : d)),
+      );
+
+      expect(report).toMatchObject({ updated: 1, changed: 1 });
+      const [aron] = await t.db
+        .select()
+        .from(drivers)
+        .where(eq(drivers.slug, "paul-aron"));
+      expect(aron).toMatchObject({
+        nationality: "Italian",
+        code: "ARO",
+        permanentNumber: 77,
+        dateOfBirth: "2004-01-01",
+      });
+      const [albon] = await t.db
+        .select()
+        .from(drivers)
+        .where(eq(drivers.slug, "albon"));
+      expect(albon!.code).toBe("ALX");
+    });
+
     it("leaves display_name alone and never deletes a driver the list drops", async () => {
       const list = loadDrivers2026();
       await syncD(list);
@@ -277,6 +313,26 @@ describe("roster sync", () => {
         .from(constructorSeasons)
         .where(eq(constructorSeasons.constructorId, before!.id));
       expect(entry).toMatchObject({ shortName: "AUD", color: "#123456" });
+    });
+
+    it("keeps a stored nationality the provider omits", async () => {
+      const list = loadConstructors2026();
+      await syncC(list);
+      await t.db
+        .update(constructors)
+        .set({ nationality: "Swiss" })
+        .where(eq(constructors.slug, "audi"));
+
+      const report = await syncC(
+        list.map((c) => (c.key === "audi" ? { ...c, nationality: "" } : c)),
+      );
+
+      expect(report.changed).toBe(0);
+      const [row] = await t.db
+        .select()
+        .from(constructors)
+        .where(eq(constructors.slug, "audi"));
+      expect(row!.nationality).toBe("Swiss");
     });
 
     it("adds a season entry for a constructor already known from another season", async () => {

@@ -68,7 +68,7 @@ describe("syncEventEntries", () => {
     const id = await eventId("Australian Grand Prix");
     expect(await lineUp(id)).toEqual(new Map());
 
-    const report = await syncEventEntries(t.db, id);
+    const report = await syncEventEntries(t.db, id, clock.now());
 
     expect(report).toEqual({ inserted: 22, updated: 0, removed: 0 });
     const entries = await lineUp(id);
@@ -87,8 +87,8 @@ describe("syncEventEntries", () => {
     await setup();
     const before = await eventId("Hungarian Grand Prix");
     const dutch = await eventId("Dutch Grand Prix");
-    await syncEventEntries(t.db, before);
-    await syncEventEntries(t.db, dutch);
+    await syncEventEntries(t.db, before, clock.now());
+    await syncEventEntries(t.db, dutch, clock.now());
 
     const hungary = await lineUp(before);
     expect(hungary.get("lawson")?.constructor).toBe("rb");
@@ -111,9 +111,9 @@ describe("syncEventEntries", () => {
   it("is safe to run again", async () => {
     await setup();
     const id = await eventId("Dutch Grand Prix");
-    await syncEventEntries(t.db, id);
+    await syncEventEntries(t.db, id, clock.now());
 
-    expect(await syncEventEntries(t.db, id)).toEqual({
+    expect(await syncEventEntries(t.db, id, clock.now())).toEqual({
       inserted: 0,
       updated: 0,
       removed: 0,
@@ -124,7 +124,7 @@ describe("syncEventEntries", () => {
   it("never overwrites an admin or results entry", async () => {
     const { driverIds, constructorIds } = await setup();
     const id = await eventId("Dutch Grand Prix");
-    await syncEventEntries(t.db, id);
+    await syncEventEntries(t.db, id, clock.now());
     // An admin moves Verstappen to another number, and adds Hadjar back.
     await t.db
       .update(eventEntries)
@@ -146,7 +146,7 @@ describe("syncEventEntries", () => {
       })
       .where(eq(eventEntries.driverId, driverIds.get("norris")!));
 
-    const report = await syncEventEntries(t.db, id);
+    const report = await syncEventEntries(t.db, id, clock.now());
 
     expect(report).toEqual({ inserted: 0, updated: 0, removed: 0 });
     const entries = await lineUp(id);
@@ -166,7 +166,7 @@ describe("syncEventEntries", () => {
   it("updates a seat copy when the seat changes, and drops one that no longer applies", async () => {
     const { driverIds, constructorIds } = await setup();
     const id = await eventId("Dutch Grand Prix");
-    await syncEventEntries(t.db, id);
+    await syncEventEntries(t.db, id, clock.now());
     // A corrected seat: Tsunoda's number changes, Lawson's new seat is removed.
     await t.db
       .update(seatAssignments)
@@ -199,7 +199,7 @@ describe("syncEventEntries", () => {
       .set({ validTo: "2026-11-19" })
       .where(eq(seatAssignments.driverId, driverIds.get("max_verstappen")!));
 
-    await syncEventEntries(t.db, id);
+    await syncEventEntries(t.db, id, clock.now());
 
     expect((await lineUp(id)).has("max-verstappen")).toBe(true);
   });
@@ -217,14 +217,39 @@ describe("syncEventEntries", () => {
     });
     const id = await eventId("Australian Grand Prix");
 
-    await syncEventEntries(t.db, id);
+    await syncEventEntries(t.db, id, clock.now());
 
     expect((await lineUp(id)).has("tsunoda")).toBe(false);
   });
 
+  it("requires a now, so replay mode never reads the database clock", async () => {
+    // Type-level: omitting `now` must not compile.
+    const omitted = (id: string) =>
+      // @ts-expect-error now is required
+      syncEventEntries(t.db, id);
+    expect(omitted).toBeTypeOf("function");
+  });
+
+  it("stamps new rows with the now it is given", async () => {
+    await setup();
+    const id = await eventId("Australian Grand Prix");
+    const at = new Date("2030-01-01T00:00:00.000Z");
+
+    await syncEventEntries(t.db, id, at);
+
+    const [row] = await t.db
+      .select()
+      .from(eventEntries)
+      .where(eq(eventEntries.eventId, id));
+    expect(row!.createdAt).toEqual(at);
+    expect(row!.updatedAt).toEqual(at);
+  });
+
   it("throws for an event that does not exist", async () => {
     await setup();
-    await expect(syncEventEntries(t.db, newId())).rejects.toThrow(/no event/);
+    await expect(syncEventEntries(t.db, newId(), clock.now())).rejects.toThrow(
+      /no event/,
+    );
   });
 
   it("is run for each event the calendar sync creates", async () => {

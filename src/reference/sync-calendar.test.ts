@@ -352,6 +352,113 @@ describe("syncCalendar", () => {
     });
   });
 
+  describe("a session missing from the provider", () => {
+    it("keeps the session and opens session_missing_from_provider once", async () => {
+      await sync(loadCalendar2026());
+      const event = await eventByName("Australian Grand Prix");
+      const fp3 = (await sessionsOf(event.id)).find((s) => s.kind === "fp3")!;
+      const beforeSessions = await t.db.select().from(sessions);
+      const list = loadCalendar2026();
+      list[0]!.sessions = list[0]!.sessions.filter((s) => s.kind !== "fp3");
+
+      const report = await sync(list);
+
+      expect(report).toEqual({
+        created: 0,
+        updated: 0,
+        unchanged: 23,
+        reviewItems: 1,
+        changed: 0,
+      });
+      expect(await t.db.select().from(sessions)).toEqual(beforeSessions);
+      const items = await reviews();
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "session_missing_from_provider",
+        severity: "warning",
+        status: "open",
+        eventId: event.id,
+        sessionId: fp3.id,
+        dedupeKey: `session_missing:${fp3.id}`,
+      });
+
+      expect((await sync(list)).reviewItems).toBe(0);
+      expect(await reviews()).toHaveLength(1);
+    });
+
+    it("does not flag a cancelled session", async () => {
+      await sync(loadCalendar2026());
+      const event = await eventByName("Australian Grand Prix");
+      await t.db
+        .update(sessions)
+        .set({ status: "cancelled" })
+        .where(and(eq(sessions.eventId, event.id), eq(sessions.kind, "fp3")));
+      const list = loadCalendar2026();
+      list[0]!.sessions = list[0]!.sessions.filter((s) => s.kind !== "fp3");
+
+      expect((await sync(list)).reviewItems).toBe(0);
+    });
+  });
+
+  describe("an admin lock when the lock session changes", () => {
+    it("keeps the admin's lock_at, moves the link and opens lock_session_changed", async () => {
+      await sync(loadCalendar2026());
+      const event = await eventByName("Chinese Grand Prix");
+      const rows = await sessionsOf(event.id);
+      const sprintQuali = rows.find((s) => s.kind === "sprint_qualifying")!;
+      const quali = rows.find((s) => s.kind === "qualifying")!;
+      expect(event.lockSessionId).toBe(sprintQuali.id);
+      const adminLock = new Date("2026-03-13T06:00:00Z");
+      await t.db
+        .update(events)
+        .set({ lockAt: adminLock, lockAtSource: "admin" })
+        .where(eq(events.id, event.id));
+
+      // The format flips: the lock moves from sprint qualifying to qualifying.
+      const list = loadCalendar2026();
+      list.find((e) => e.name === "Chinese Grand Prix")!.format = "standard";
+      const report = await sync(list);
+
+      expect(report).toMatchObject({ updated: 1, reviewItems: 1 });
+      const after = await eventByName("Chinese Grand Prix");
+      expect(after.lockSessionId).toBe(quali.id);
+      expect(after.lockAt).toEqual(adminLock);
+      expect(after.lockAtSource).toBe("admin");
+      const items = await reviews();
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "lock_session_changed",
+        severity: "warning",
+        eventId: event.id,
+        dedupeKey: `lock_session_changed:${event.id}`,
+      });
+      expect(items[0]!.details).toMatchObject({
+        from: sprintQuali.id,
+        to: quali.id,
+        lockAt: adminLock.toISOString(),
+      });
+
+      // Nothing more on a repeat run.
+      const again = await sync(list);
+      expect(again).toMatchObject({ changed: 0, reviewItems: 0 });
+    });
+
+    it("opens no item when the default lock follows a new lock session", async () => {
+      await sync(loadCalendar2026());
+      const list = loadCalendar2026();
+      list.find((e) => e.name === "Chinese Grand Prix")!.format = "standard";
+
+      const report = await sync(list);
+
+      expect(report.reviewItems).toBe(0);
+      const event = await eventByName("Chinese Grand Prix");
+      const quali = (await sessionsOf(event.id)).find(
+        (s) => s.kind === "qualifying",
+      )!;
+      expect(event.lockAt).toEqual(quali.scheduledStart);
+    });
+  });
+
   describe("an uncertain match (Review Focus 5)", () => {
     it("opens uncertain_event_match and changes nothing when name and circuit both change", async () => {
       await sync(loadCalendar2026());

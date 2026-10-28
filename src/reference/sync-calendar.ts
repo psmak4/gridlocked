@@ -280,6 +280,7 @@ export async function syncCalendar(
     const openReview = async (item: {
       kind: string;
       eventId?: string | null;
+      sessionId?: string | null;
       details: Record<string, unknown>;
       dedupeKey: string;
     }) => {
@@ -563,6 +564,23 @@ export async function syncCalendar(
         }
       }
 
+      // A session the provider no longer lists keeps its row; an admin
+      // decides (DM 1.3 applies the same rule to events).
+      for (const [key, row] of rowsByKey) {
+        if (sessionIds.has(key) || row.status === "cancelled") continue;
+        await openReview({
+          kind: "session_missing_from_provider",
+          eventId,
+          sessionId: row.id,
+          dedupeKey: `session_missing:${row.id}`,
+          details: {
+            kind: row.kind,
+            sequence: row.sequence,
+            scheduledStart: row.scheduledStart.toISOString(),
+          },
+        });
+      }
+
       // The lock: the link to its session is always kept; `lock_at` follows
       // that session unless an admin set it.
       const kind = lockKind(event);
@@ -574,6 +592,20 @@ export async function syncCalendar(
       const lockPatch: Partial<typeof events.$inferInsert> = {};
       if (lock && current!.lockSessionId !== lock.id) {
         lockPatch.lockSessionId = lock.id;
+        // An admin's `lock_at` stays, but it no longer belongs to the same
+        // session, so an admin should look.
+        if (lockAtSource === "admin" && current!.lockSessionId !== null) {
+          await openReview({
+            kind: "lock_session_changed",
+            eventId,
+            dedupeKey: `lock_session_changed:${eventId}`,
+            details: {
+              from: current!.lockSessionId,
+              to: lock.id,
+              lockAt: current!.lockAt.toISOString(),
+            },
+          });
+        }
       }
       if (lockAtSource === "default") {
         const fallback = event.sessions.reduce((a, b) =>

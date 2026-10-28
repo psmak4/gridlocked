@@ -32,6 +32,17 @@ function teamColor(season: number, teamCode: string | null): string | null {
   return teamColors2026[teamCode] ?? null;
 }
 
+/** A provider value that says nothing: omitted fields arrive as null or "". */
+const isBlank = (v: unknown) => v === null || v === "";
+
+/**
+ * The value to store: the provider's when it sent one, else what is stored.
+ * A stored value is never replaced by an omitted one.
+ */
+function keep<T>(stored: T, provided: T): T {
+  return isBlank(provided) && !isBlank(stored) ? stored : provided;
+}
+
 /**
  * Upserts drivers (DM 1.5). `display_name` is an admin's and is never touched.
  * Drivers are not per season, so `season` only names the run.
@@ -75,7 +86,8 @@ export async function syncDrivers(
       if (row) {
         const patch: Partial<typeof fields> = {};
         for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
-          if (row[k] !== fields[k]) Object.assign(patch, { [k]: fields[k] });
+          const next = keep(row[k], fields[k]);
+          if (row[k] !== next) Object.assign(patch, { [k]: next });
         }
         if (Object.keys(patch).length === 0) {
           unchanged += 1;
@@ -161,10 +173,11 @@ export async function syncConstructors(
         : [];
 
       if (row) {
-        if (row.name !== c.name || row.nationality !== c.nationality) {
+        const nationality = keep(row.nationality, c.nationality);
+        if (row.name !== c.name || row.nationality !== nationality) {
           await tx
             .update(constructors)
-            .set({ name: c.name, nationality: c.nationality, updatedAt: now })
+            .set({ name: c.name, nationality, updatedAt: now })
             .where(eq(constructors.id, row.id));
           changed = true;
         }

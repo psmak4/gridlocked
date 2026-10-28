@@ -37,13 +37,14 @@ function localDate(at: Date, timeZone: string): string {
  * A `'seat'` entry whose seat no longer applies is removed, since it is only
  * a copy. Safe to run again.
  *
- * `now` stamps `updated_at` on rows this call changes; new rows take the
- * column default. Callers inside a sync pass the sync's `now`.
+ * `now` is required and stamps the rows this call writes: nothing here may
+ * read the database clock, so replay mode stays in control of time (HLD
+ * decision 20). Callers inside a sync pass the sync's `now`.
  */
 export async function syncEventEntries(
   db: Db,
   eventId: string,
-  now?: Date,
+  now: Date,
 ): Promise<EventEntriesReport> {
   return db.transaction(async (tx) => {
     const [event] = await tx
@@ -96,7 +97,8 @@ export async function syncEventEntries(
           constructorId: seat.constructorId,
           carNumber: seat.carNumber,
           source: "seat",
-          ...(now ? { createdAt: now, updatedAt: now } : {}),
+          createdAt: now,
+          updatedAt: now,
         });
         report.inserted += 1;
       } else if (
@@ -109,7 +111,7 @@ export async function syncEventEntries(
           .set({
             constructorId: seat.constructorId,
             carNumber: seat.carNumber,
-            ...(now ? { updatedAt: now } : {}),
+            updatedAt: now,
           })
           .where(
             and(
