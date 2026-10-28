@@ -58,10 +58,10 @@ export const jobs = pgTable(
   (t) => [
     unique("jobs_kind_dedupe_key_unique").on(t.kind, t.dedupeKey),
     check("jobs_status_check", oneOf(t.status, JOB_STATUSES)),
-    // The claim query and the due-times file.
+    // The claim query (pending and failed rows) and the due-times file.
     index("jobs_run_at_pending_idx")
       .on(t.runAt)
-      .where(sql`${t.status} = 'pending'`),
+      .where(sql`${t.status} in ('pending', 'failed')`),
     // Pruning and the admin "stuck or dead jobs" view.
     index("jobs_status_finished_at_idx").on(t.status, t.finishedAt),
   ],

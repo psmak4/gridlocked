@@ -3,7 +3,7 @@
  * takes `now` as a parameter (HLD decision 20); nothing here reads the time
  * or calls SQL `now()`.
  */
-import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { jobs } from "@/db/schema";
 import { newId } from "@/lib/ids";
@@ -76,8 +76,10 @@ export async function enqueue(
 
 /**
  * Takes one due job in a single statement. Due means `pending` or `failed`
- * with `run_at <= now`, or `running` with an expired lease (a worker died).
- * `FOR UPDATE SKIP LOCKED` means two workers can never take the same job.
+ * with `run_at <= now`, or `running` with an expired lease (a worker died)
+ * and attempts left. `FOR UPDATE SKIP LOCKED` means two workers can never
+ * take the same job. A job whose lease expired at `max_attempts` is never
+ * reclaimed; `reapExpired` dead-letters it.
  */
 export async function claimNext(
   db: JobsDb,
@@ -90,10 +92,14 @@ export async function claimNext(
     .where(
       or(
         and(inArray(jobs.status, ["pending", "failed"]), lte(jobs.runAt, now)),
-        and(eq(jobs.status, "running"), lte(jobs.lockedUntil, now)),
+        and(
+          eq(jobs.status, "running"),
+          lte(jobs.lockedUntil, now),
+          lt(jobs.attempts, jobs.maxAttempts),
+        ),
       ),
     )
-    .orderBy(asc(jobs.runAt))
+    .orderBy(asc(jobs.runAt), asc(jobs.id))
     .limit(1)
     .for("update", { skipLocked: true });
 
@@ -110,52 +116,91 @@ export async function claimNext(
   return claimed ?? null;
 }
 
-export async function complete(
-  db: JobsDb,
-  id: string,
-  now: Date,
-): Promise<void> {
-  await db
+/**
+ * Dead-letters `running` jobs whose lease expired with no attempts left (the
+ * worker died on its last try, so `fail` never ran). Returns how many.
+ */
+export async function reapExpired(db: JobsDb, now: Date): Promise<number> {
+  const reaped = await db
     .update(jobs)
-    .set({ status: "succeeded", finishedAt: now, lockedUntil: null })
-    .where(eq(jobs.id, id));
+    .set({
+      status: "dead",
+      lastError: "lease expired after max attempts",
+      lockedUntil: null,
+      finishedAt: now,
+    })
+    .where(
+      and(
+        eq(jobs.status, "running"),
+        lte(jobs.lockedUntil, now),
+        gte(jobs.attempts, jobs.maxAttempts),
+      ),
+    )
+    .returning({ id: jobs.id });
+  return reaped.length;
 }
 
 /**
- * Records a failed attempt. The job goes back to `failed` and is retried at
- * `now + backoff(attempts)`; once `attempts >= max_attempts` it is `dead`.
+ * Marks a claimed job succeeded. Fenced on the claimed `attempts`: returns
+ * false (and changes nothing) if the job is no longer running under that
+ * claim, e.g. its lease expired and another worker re-claimed it.
+ */
+export async function complete(
+  db: JobsDb,
+  job: Pick<Job, "id" | "attempts">,
+  now: Date,
+): Promise<boolean> {
+  const rows = await db
+    .update(jobs)
+    .set({ status: "succeeded", finishedAt: now, lockedUntil: null })
+    .where(
+      and(
+        eq(jobs.id, job.id),
+        eq(jobs.status, "running"),
+        eq(jobs.attempts, job.attempts),
+      ),
+    )
+    .returning({ id: jobs.id });
+  return rows.length > 0;
+}
+
+/**
+ * Records a failed attempt of a claimed job. The job goes back to `failed`
+ * and is retried at `now + backoff(attempts)`; once `attempts >=
+ * max_attempts` it is `dead`. Fenced like `complete`: returns false and
+ * changes nothing if the claim was lost.
  */
 export async function fail(
   db: JobsDb,
-  id: string,
+  job: Job,
   now: Date,
   error: string,
-): Promise<void> {
-  const [job] = await db
-    .select({ attempts: jobs.attempts, maxAttempts: jobs.maxAttempts })
-    .from(jobs)
-    .where(eq(jobs.id, id));
-  if (!job) throw new Error(`fail: job ${id} not found`);
-
-  if (job.attempts >= job.maxAttempts) {
-    await db
-      .update(jobs)
-      .set({
-        status: "dead",
-        lastError: error,
-        lockedUntil: null,
-        finishedAt: now,
-      })
-      .where(eq(jobs.id, id));
-    return;
-  }
-  await db
+): Promise<boolean> {
+  const dead = job.attempts >= job.maxAttempts;
+  const rows = await db
     .update(jobs)
-    .set({
-      status: "failed",
-      lastError: error,
-      lockedUntil: null,
-      runAt: new Date(now.getTime() + backoffMs(job.attempts)),
-    })
-    .where(eq(jobs.id, id));
+    .set(
+      dead
+        ? {
+            status: "dead",
+            lastError: error,
+            lockedUntil: null,
+            finishedAt: now,
+          }
+        : {
+            status: "failed",
+            lastError: error,
+            lockedUntil: null,
+            runAt: new Date(now.getTime() + backoffMs(job.attempts)),
+          },
+    )
+    .where(
+      and(
+        eq(jobs.id, job.id),
+        eq(jobs.status, "running"),
+        eq(jobs.attempts, job.attempts),
+      ),
+    )
+    .returning({ id: jobs.id });
+  return rows.length > 0;
 }
