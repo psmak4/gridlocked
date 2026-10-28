@@ -17,6 +17,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
+    "db:drift": "drizzle-kit generate && git diff --exit-code -- src/db/migrations && test -z \"$(git status --porcelain -- src/db/migrations)\"",
     "e2e": "playwright test"
   },
   "dependencies": {

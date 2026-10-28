@@ -45,6 +45,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Schema drift
+        run: pnpm db:drift
+
       - name: Unit and database tests
         run: pnpm test
 
