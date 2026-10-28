@@ -60,7 +60,7 @@ This is the roadmap for phase 5, the build. It splits the work into milestones t
 | Environment | What | When it exists |
 |---|---|---|
 | Local | Next.js dev server and PGlite. No cloud accounts needed | M0 |
-| Staging | Its own free Neon project, `gridlocked-staging` in AWS US East 1 (HLD §11.4), plus Vercel preview deploys | Neon from M1 (approved 2026-10-28); Vercel from M2 |
+| Staging | Its own free Neon project, `gridlocked-staging` in AWS US East 1 (HLD §11.4), plus Vercel preview deploys | Neon from M1 (approved 2026-10-28); Vercel from M5 |
 | Production | Vercel Hobby plus the production Neon project | M9, on approval |
 
 ## Milestones
@@ -120,7 +120,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Exit:**
   - the whole 2026 season imports from stored snapshots;
   - a live 2026 weekend (Qatar, 29 Nov, or Abu Dhabi, 6 Dec) is ingested end to end in staging, with no admin action needed on a clean weekend.
-- **Approval needed:** a Vercel project, Hobby, linked to the repo for preview deploys against `gridlocked-staging` (moved from M1 on 2026-10-28). You install Vercel's GitHub app.
+- **Approval needed:** a Neon API key for `gridlocked-staging` and its database URL, stored as GitHub Actions secrets, so CI can run migrations and deploy the staging jobs (Task 12 of the plan). The Vercel project moved again, to M5, the first milestone with pages to preview (2026-10-28).
+- **Plan:** [plans/M2-reference-and-results.md](../plans/M2-reference-and-results.md).
 
 ### M3 — Fantasy core (target 11 Dec)
 - **Goal:** teams can be built, locked and changed exactly by the rules.
@@ -184,7 +185,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Approval needed:**
   - a Resend account, Free;
   - a Cloudflare Turnstile site key, free;
-  - a Discord application, for OAuth.
+  - a Discord application, for OAuth;
+  - a Vercel project, Hobby, linked to the repo for preview deploys against `gridlocked-staging` (moved here from M1 and M2 on 2026-10-28). You install Vercel's GitHub app.
 
 ### M6 — Fantasy screens (target 22 Jan)
 - **Goal:** the game is playable on a phone.
