@@ -38,19 +38,22 @@ function expectBlock(
 
 describe("tokens.css matches tokens.ts", () => {
   it("light values are in the :root / light block", () => {
-    expectBlock(declarationsOf(':root, [data-theme="light"]'), palette.light);
+    const block = declarationsOf(':root, [data-theme="light"]');
+    expectBlock(block, palette.light);
+    expect(block.get("color-scheme")).toBe("light");
   });
 
   it("dark values are in the [data-theme=dark] block", () => {
-    expectBlock(declarationsOf('[data-theme="dark"]'), palette.dark);
+    const block = declarationsOf('[data-theme="dark"]');
+    expectBlock(block, palette.dark);
+    expect(block.get("color-scheme")).toBe("dark");
   });
 
   it("dark values are in the prefers-color-scheme block", () => {
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{/);
-    expectBlock(
-      declarationsOf(':root:not([data-theme="light"])'),
-      palette.dark,
-    );
+    const block = declarationsOf(':root:not([data-theme="light"])');
+    expectBlock(block, palette.dark);
+    expect(block.get("color-scheme")).toBe("dark");
   });
 
   it("defines space, radius and font variables", () => {

@@ -1,5 +1,6 @@
 :root,
 [data-theme="light"] {
+  color-scheme: light;
   --surface: #ffffff;
   --surface-raised: #f1f1f7;
   --surface-sunken: #e1e1ec;
@@ -20,6 +21,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --surface: #0b0b1e;
   --surface-raised: #17173a;
   --surface-sunken: #2a2a55;
@@ -41,6 +43,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --surface: #0b0b1e;
     --surface-raised: #17173a;
     --surface-sunken: #2a2a55;

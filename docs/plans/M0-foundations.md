@@ -165,7 +165,7 @@
 - [ ] **Step 2:** Run `pnpm test src/db`. Expected: FAIL.
 - [ ] **Step 3:** Add `drizzle-orm`, `drizzle-kit` and `@electric-sql/pglite`. Define `settings`, run `pnpm db:generate`, and write `0001_app_now.sql` as a `plpgsql` function.
 - [ ] **Step 4:** Implement `createTestDb` with Drizzle's `migrate` from `drizzle-orm/pglite/migrator`.
-- [ ] **Step 5:** Run `pnpm test src/db`. Expected: PASS. Run `pnpm db:check`. Expected: no drift.
+- [ ] **Step 5:** Run `pnpm test src/db`. Expected: PASS. Run `pnpm db:drift`. Expected: no drift.
 - [ ] **Step 6:** Commit: `feat: add Drizzle with PGlite tests, settings table and app_now()`.
 
 ### Task 6: Design tokens, contrast guard and Tailwind theme
