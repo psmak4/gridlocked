@@ -1,0 +1,36 @@
+name: Task
+description: One task from a milestone plan. One branch and one PR.
+labels: ["type:task"]
+body:
+  - type: input
+    id: plan
+    attributes:
+      label: Plan section
+      description: Link to the task in docs/plans/
+      placeholder: docs/plans/M0-foundations.md#task-2-unit-tests-and-the-injectable-clock
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What this delivers
+      description: One or two sentences, in plain words.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests that prove it
+      description: The failing tests written first, by name.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Tests written first, failing without the change
+        - [ ] CI green (format, lint, typecheck, unit, build, E2E)
+        - [ ] Docs or decisions updated if anything changed
+    validations:
+      required: true

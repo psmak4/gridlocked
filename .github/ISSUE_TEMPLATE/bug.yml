@@ -1,0 +1,34 @@
+name: Bug
+description: Something behaves differently from the design docs or the rules.
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the session, team or page if it matters. Never paste personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+      description: Point to the HLD, DM or UI brief section if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: dropdown
+    id: scoring
+    attributes:
+      label: Does it affect points, prices or standings?
+      options:
+        - "No"
+        - "Yes: needs a dry run before any re-score"
+    validations:
+      required: true

@@ -1,0 +1,30 @@
+name: Spike
+description: Time-boxed throwaway experiment that answers one question.
+labels: ["type:spike"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+      description: What decision does this unblock?
+    validations:
+      required: true
+  - type: input
+    id: timebox
+    attributes:
+      label: Time box
+      placeholder: 2 days
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: What a clear answer looks like
+      description: Measurements or outcomes that decide it either way.
+    validations:
+      required: true
+  - type: textarea
+    id: cloud
+    attributes:
+      label: Cloud resources needed
+      description: Each one needs explicit approval before it's created.
