@@ -10,18 +10,32 @@ const migrationsFolder = fileURLToPath(
   new URL("../../src/db/migrations", import.meta.url),
 );
 
+// One migrated template database per Vitest worker (module state is
+// per-worker), built lazily on first use. Booting + migrating is the slow part;
+// cloning it is cheap. It lives for the worker's lifetime and is never closed.
+let template: Promise<PGlite> | undefined;
+
+function getTemplate(): Promise<PGlite> {
+  template ??= (async () => {
+    const client = new PGlite({ extensions: { btree_gist, ltree } });
+    await migrate(drizzle(client, { schema }), { migrationsFolder });
+    return client;
+  })();
+  return template;
+}
+
 /**
- * A fresh, fully migrated in-memory Postgres. The btree_gist and ltree
- * extensions are loaded (available to `create extension`), not created.
- * Callers must `close()` it.
+ * A fresh, fully migrated in-memory Postgres, cloned from the per-worker
+ * template. The btree_gist and ltree extensions are loaded (available to
+ * `create extension`), not created. Callers must `close()` it.
  */
 export async function createTestDb(): Promise<{
   db: PgliteDatabase<typeof schema>;
   client: PGlite;
   close(): Promise<void>;
 }> {
-  const client = new PGlite({ extensions: { btree_gist, ltree } });
+  // clone() is typed as PGliteInterface but returns a PGlite instance.
+  const client = (await (await getTemplate()).clone()) as PGlite;
   const db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder });
   return { db, client, close: () => client.close() };
 }
