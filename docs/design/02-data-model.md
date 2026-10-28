@@ -247,6 +247,8 @@ For the 2026 swap (HLD §8.1), effective from the Dutch GP (round 12, 2026-08-21
 - Tsunoda's seat moves to `rb`.
 - Hadjar's `race` seat closes.
 
+**The swap was reversed from round 15** (Azerbaijan, first session 2026-09-24; verified in the recorded 2026 results, M2 Task 6). Hadjar returns to `red_bull` (#6), Lawson to `rb` (#30), and Tsunoda has no race seat. So the swap's seats run 2026-08-21 to 2026-09-23. The seat fixture `tests/fixtures/seats-2026.json` follows the data, and a test checks it against every recorded race.
+
 **Constraint:** a driver can't hold two `race` seats in overlapping ranges. This is enforced with an exclusion constraint on `(driver_id, daterange(valid_from, valid_to))` for race seats. That needs the `btree_gist` extension, which Neon supports. A second exclusion constraint stops two race seats from using the same `car_number` at the same time.
 
 ### 1.9 `event_entries` (who is expected at this event)
