@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** Look and feel decided 2026-10-27. Waves 1–3 are drafted. Wave 4 (forum, notifications, sign-up and onboarding, profile and settings) is drafted for your review. Wave 5 (staff screens) is last.
+**Status:** All five waves are drafted (2026-10-27). Waves 1–4 have been reviewed as they went. Wave 5 (staff screens) is drafted for your review. Approving it completes phase 3.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
@@ -251,5 +251,42 @@ The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1z
   - personal data is erased.
 
   It offers a data download first, needs your username typed, and confirms by email.
-- **Switches** use native checkboxes for now. The design system has no Switch component yet, which is a gap to fill: adding one is additive and doesn't change these screens.
+- **Switches** use native checkboxes on these boards. The design system has since gained a Switch component (wave 5), which replaces them when the screens are built.
+
+## Wave 5: staff screens (drafted 2026-10-27)
+The screens are on the canvas [Gridlocked wave 5](https://claude.ai/artifact/1jEacvWbtfdQ1DNo9Yv52D) (private to you). They're desktop-first pages, 1440 wide, with a staff side menu. Each stacks to one column on a narrow screen.
+
+**Added to the design system:** a **Switch** component, for on/off settings and feature flags. It's in the system's Forms group with guidelines and a preview. It fills the gap noted in wave 4.
+
+| Row | Boards |
+|---|---|
+| Results and scoring | Review queue (team change, missing driver, event missing from the provider, uncertain event match, sources disagree) · Session results and corrections · Scoring fix dry run |
+| Moderation | Moderation queue (spoiler title, spam held by filter, abuse in chat, copyright) |
+| Season data | Calendar and lock times · Drivers, seats and availability · Price update |
+| Settings and history | Settings (feature flags, free-tier usage, results pipeline) · Audit log |
+
+**What you can click (Play):**
+- The side menu moves between all nine boards.
+- In both queues, picking an item swaps the detail panel.
+- Switches and tabs work.
+
+**Calls I made, to check:**
+- **One review queue for everything a human must decide.** Each item shows what was found, the evidence from each source, and what it holds up ("Scoring is held for Dutch GP qualifying and the race"). It also offers 2–3 plain actions, and a reason that goes into the audit log. The real 2026 cases are the examples:
+  - the Lawson/Tsunoda swap;
+  - Hadjar missing from the results;
+  - Bahrain removed from the calendar;
+  - the event moved to Sepang.
+- **Corrections** are shown as a layer on top of provider data. Each lists what changed and when, and needs a reason that players see. The screen says how many teams a re-score touches.
+- **The scoring fix dry run** comes before any re-score. It shows teams affected, events, the biggest change and league leaders who'd change, then the biggest changes by team, with **Approve and re-score** or **Discard**.
+- **Moderation** shows a snapshot of what was posted when it was first reported, the reports by reason, and the author's history. The note to the author is visible to them and can be appealed. "Keep it" closes the reports.
+- **Lock times** follow their session unless set by hand. The screen states the rule that a lock can never move into the past.
+- **Seats** are listed as date ranges ("21 Aug (rd 12) – 13 Sep (rd 14)"). Availability is edited per event and is clearly labelled warnings-only. Seats after round 14 aren't shown, because the mockup doesn't assume what happened next.
+- **Price update** shows each asset's inputs (last-3 average, what its price expects, how it did) next to the change, with **Publish prices**. It also states the carry-over rule if prices miss the lock.
+- **Settings:**
+  - Ads and notification emails are shown locked off, with the reason.
+  - The free-tier usage meters warn at 70% (HLD §11.4).
+  - The results pipeline timings are editable.
+- **The audit log** is read-only and filterable, and says it stores no emails or IPs.
+
+**Not designed (left to build time):** the rulesets editor, user lookup, and league admin. They reuse these same patterns: a table, a detail panel, a reason, and the audit log.
 
