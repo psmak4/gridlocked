@@ -25,7 +25,8 @@ function errorMessage(error: unknown): string {
 /**
  * Dead-letters exhausted expired leases, then claims and runs up to `maxJobs`
  * due jobs, one at a time. A handler error (or a missing handler) fails the
- * job with its backoff; it never throws out of here. `ran` counts jobs that
+ * job with its backoff and never escapes. A database error does propagate; the
+ * job then stays `running` until its lease expires. `ran` counts jobs that
  * succeeded, `failed` those that failed, and `lost` those whose result was
  * fenced out because another worker re-claimed the job.
  *
