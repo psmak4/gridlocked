@@ -8,8 +8,10 @@ const dbTests = [
   "src/jobs/**/*.test.{ts,tsx}",
   "src/settings/**/*.test.{ts,tsx}",
   "src/reference/**/*.test.{ts,tsx}",
+  "src/results/**/*.test.{ts,tsx}",
   "src/providers/snapshots.test.ts",
   "src/providers/http/client.test.ts",
+  "src/providers/jolpica/normalize-session.test.ts",
 ];
 
 export default defineConfig({
