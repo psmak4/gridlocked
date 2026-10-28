@@ -63,4 +63,24 @@ describe("app_now()", () => {
       "invalid simulated_clock setting",
     );
   });
+
+  it.each([
+    ['{"at":"now"}'],
+    ['{"at":"infinity"}'],
+    ['{"at":"2026-10-31 20:00:00"}'],
+    ['{"at":null}'],
+  ])("raises for %s", async (json) => {
+    await setClock(json);
+    await expect(t.client.query("select app_now()")).rejects.toThrow(
+      "invalid simulated_clock setting",
+    );
+  });
+
+  it("honours an explicit UTC offset", async () => {
+    await setClock('{"at":"2026-10-31T21:00:00+01:00"}');
+    const { rows } = await t.client.query<Ts>(
+      "select to_char(app_now() at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as t",
+    );
+    expect(rows[0]!.t).toBe("2026-10-31T20:00:00Z");
+  });
 });

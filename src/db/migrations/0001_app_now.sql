@@ -13,7 +13,12 @@ BEGIN
     RETURN now();
   END IF;
 
-  IF jsonb_typeof(clock) = 'object' AND jsonb_typeof(clock -> 'at') = 'string' THEN
+  -- `at` must be an ISO-8601 instant with an explicit UTC offset. This keeps
+  -- Postgres special inputs ('now', 'today', 'infinity', ...) and offset-less
+  -- timestamps (read in the session time zone) from slipping through the cast.
+  IF jsonb_typeof(clock) = 'object'
+     AND jsonb_typeof(clock -> 'at') = 'string'
+     AND (clock ->> 'at') ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$' THEN
     BEGIN
       RETURN (clock ->> 'at')::timestamptz;
     EXCEPTION WHEN OTHERS THEN
