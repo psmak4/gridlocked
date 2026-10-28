@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const dbTests = "src/db/**/*.test.{ts,tsx}";
+// Tests that create a test database run in the longer-timeout `db` project.
+const dbTests = ["src/db/**/*.test.{ts,tsx}", "src/jobs/**/*.test.{ts,tsx}"];
 
 export default defineConfig({
   resolve: {
@@ -17,7 +18,7 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
-          exclude: [dbTests],
+          exclude: dbTests,
         },
       },
       {
@@ -27,7 +28,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "db",
-          include: [dbTests],
+          include: dbTests,
           testTimeout: 30_000,
           hookTimeout: 30_000,
         },
