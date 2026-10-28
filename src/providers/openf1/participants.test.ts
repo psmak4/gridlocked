@@ -15,7 +15,9 @@ import {
   reviewItems,
   sessionParticipants,
 } from "@/db/schema";
+import { newId } from "@/lib/ids";
 import { storeSnapshot } from "../snapshots";
+import { OPENF1_TEAMS } from "./teams";
 import {
   linkOpenF1Sessions,
   openF1SessionKey,
@@ -279,10 +281,16 @@ describe("storeParticipants", () => {
     expect((await participants(fp2)).size).toBe(22);
   });
 
-  it("learns the team names, and follows a team that now disagrees", async () => {
-    const fp2 = await sessionIdFor(t.db, 13, "fp2");
-    await store(fp2, load("drivers-r13-fp2.json"));
-    const names = await t.db
+  it("takes the constructor from the team name, not the seat", async () => {
+    const fp3 = await sessionIdFor(t.db, 13, "fp3");
+    // OpenF1 shows Lawson (seat: red_bull) in a Racing Bulls car.
+    const body = load("drivers-r13-fp3.json");
+    body.find((r) => r.name_acronym === "LAW")!.team_name = "Racing Bulls";
+    await store(fp3, body);
+    expect((await participants(fp3)).get("lawson")).toBe("rb");
+    expect(await items()).toEqual([]);
+    // Nothing is learned into provider_ids.
+    const learned = await t.db
       .select()
       .from(providerIds)
       .where(
@@ -291,13 +299,73 @@ describe("storeParticipants", () => {
           eq(providerIds.entityType, "constructor"),
         ),
       );
-    expect(names.map((n) => n.providerKey)).toContain("Red Bull Racing");
+    expect(learned).toEqual([]);
+  });
 
-    // OpenF1 now shows Lawson (seat: red_bull) in a Racing Bulls car.
-    const fp3 = await sessionIdFor(t.db, 13, "fp3");
-    const body = load("drivers-r13-fp3.json");
-    body.find((r) => r.name_acronym === "LAW")!.team_name = "Racing Bulls";
-    await store(fp3, body);
-    expect((await participants(fp3)).get("lawson")).toBe("rb");
+  it("maps all eleven 2026 team names", () => {
+    const names = new Set<string>();
+    for (const f of [
+      "drivers-r12-fp1.json",
+      "drivers-r13-fp2.json",
+      "drivers-r15-fp2.json",
+    ]) {
+      for (const r of load(f)) names.add(r.team_name);
+    }
+    expect([...names].sort()).toEqual(Object.keys(OPENF1_TEAMS).sort());
+    expect(names.size).toBe(11);
+  });
+
+  it("opens an unknown_team warning and skips the row for an unmapped team", async () => {
+    const fp2 = await sessionIdFor(t.db, 13, "fp2");
+    const body = load("drivers-r13-fp2.json");
+    body.find((r) => r.name_acronym === "NOR")!.team_name = "Brawn GP";
+    body.find((r) => r.name_acronym === "PIA")!.team_name = "Brawn GP";
+    await store(fp2, body);
+    await store(fp2, body);
+
+    const map = await participants(fp2);
+    expect(map.size).toBe(20);
+    expect(map.has("norris")).toBe(false);
+    const open = await items();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      kind: "unknown_driver",
+      severity: "warning",
+      sessionId: fp2,
+      dedupeKey: `openf1_unknown_team:${fp2}:Brawn GP`,
+    });
+    expect(open[0]!.details).toMatchObject({
+      reason: "unknown_team",
+      teamName: "Brawn GP",
+    });
+  });
+
+  it("does not map a lone acronym match that has no seat this season", async () => {
+    const fp2 = await sessionIdFor(t.db, 13, "fp2");
+    await t.db.insert(drivers).values({
+      id: newId(),
+      slug: "old-timer",
+      givenName: "Old",
+      familyName: "Timer",
+      code: "OLD",
+      nationality: "n/a",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const body = load("drivers-r13-fp2.json");
+    body.push({
+      ...body[0]!,
+      driver_number: 99,
+      name_acronym: "OLD",
+      team_name: "McLaren",
+    });
+    await store(fp2, body);
+    expect((await participants(fp2)).size).toBe(22);
+    const open = await items();
+    expect(open).toHaveLength(1);
+    expect(open[0]!.details).toMatchObject({
+      reason: "no_driver",
+      driverNumber: 99,
+    });
   });
 });

@@ -96,7 +96,11 @@ describe("rosterCheck", () => {
     expect(problems[0]).toMatchObject({
       kind: "team_change",
       severity: "warning",
-      details: { driverId: herta, constructorId: rb, sessionId: fp3 },
+      details: {
+        driverId: herta,
+        constructorId: rb,
+        expectedConstructorId: null,
+      },
     });
 
     await rosterCheck(t.db, NOW, eventId);
@@ -131,7 +135,6 @@ describe("rosterCheck", () => {
         driverId: lawson,
         constructorId: rb,
         expectedConstructorId: redBull,
-        sessionId: fp2,
       },
     });
     const open = await items();
@@ -198,18 +201,122 @@ describe("rosterCheck", () => {
     expect(await rosterCheck(t.db, NOW, eventId)).toEqual([]);
   });
 
-  it("opens again after an admin dismissed the first item", async () => {
+  /** Sets every item of the event to `status` (an admin's decision). */
+  const decide = (status: "resolved" | "dismissed") =>
+    t.db
+      .update(reviewItems)
+      .set({ status, resolution: "admin decided" })
+      .where(eq(reviewItems.eventId, eventId));
+
+  it("does not ask again about a finding an admin already decided", async () => {
     const herta = await idFor(t.db, "driver", "colton_herta");
     const rb = await idFor(t.db, "constructor", "rb");
     await participate(fp2, { extra: [{ driverId: herta, constructorId: rb }] });
     await rosterCheck(t.db, NOW, eventId);
-    await t.db
-      .update(reviewItems)
-      .set({ status: "dismissed" })
-      .where(and(eq(reviewItems.eventId, eventId)));
+    await decide("dismissed");
     await rosterCheck(t.db, NOW, eventId);
-    const all = await items();
-    expect(all.map((i) => i.status).sort()).toEqual(["dismissed", "open"]);
+    expect((await items()).map((i) => i.status)).toEqual(["dismissed"]);
+
+    await decide("resolved");
+    await rosterCheck(t.db, NOW, eventId);
+    expect((await items()).map((i) => i.status)).toEqual(["resolved"]);
+  });
+
+  it("asks again when the decided finding has changed", async () => {
+    const herta = await idFor(t.db, "driver", "colton_herta");
+    const rb = await idFor(t.db, "constructor", "rb");
+    const mclaren = await idFor(t.db, "constructor", "mclaren");
+    await participate(fp2, { extra: [{ driverId: herta, constructorId: rb }] });
+    await rosterCheck(t.db, NOW, eventId);
+    await decide("dismissed");
+    await t.db
+      .update(sessionParticipants)
+      .set({ constructorId: mclaren })
+      .where(
+        and(
+          eq(sessionParticipants.sessionId, fp2),
+          eq(sessionParticipants.driverId, herta),
+        ),
+      );
+    await rosterCheck(t.db, NOW, eventId);
+    expect((await items()).map((i) => i.status).sort()).toEqual([
+      "dismissed",
+      "open",
+    ]);
+  });
+
+  it("resolves a missing_driver warning once the driver turns up", async () => {
+    const stroll = await idFor(t.db, "driver", "stroll");
+    const aston = await idFor(t.db, "constructor", "aston_martin");
+    await participate(fp2, { skip: [stroll] });
+    await rosterCheck(t.db, NOW, eventId);
+    expect((await items()).map((i) => i.status)).toEqual(["open"]);
+
+    const [row] = await t.db
+      .select()
+      .from(sessionParticipants)
+      .where(eq(sessionParticipants.sessionId, fp2))
+      .limit(1);
+    await t.db.insert(sessionParticipants).values({
+      ...row!,
+      driverId: stroll,
+      constructorId: aston,
+    });
+    const later = new Date("2026-09-05T13:00:00.000Z");
+    expect(await rosterCheck(t.db, later, eventId)).toEqual([]);
+
+    const [item] = await items();
+    expect(item).toMatchObject({
+      status: "resolved",
+      resolution: "auto: no longer detected",
+      resolvedAt: later,
+    });
+
+    // If it goes missing again, that is a new finding.
+    await t.db
+      .delete(sessionParticipants)
+      .where(eq(sessionParticipants.driverId, stroll));
+    await rosterCheck(t.db, later, eventId);
+    expect((await items()).map((i) => i.status).sort()).toEqual([
+      "open",
+      "resolved",
+    ]);
+  });
+
+  it("resolves a team_change warning that no longer applies", async () => {
+    const herta = await idFor(t.db, "driver", "colton_herta");
+    const rb = await idFor(t.db, "constructor", "rb");
+    await participate(fp2, { extra: [{ driverId: herta, constructorId: rb }] });
+    await rosterCheck(t.db, NOW, eventId);
+
+    // An admin adds him to the entries: the substitute is now expected.
+    await t.db.insert(eventEntries).values({
+      eventId,
+      driverId: herta,
+      constructorId: rb,
+      carNumber: 98,
+      source: "admin",
+    });
+    expect(await rosterCheck(t.db, NOW, eventId)).toEqual([]);
+    expect(await items()).toMatchObject([
+      { status: "resolved", resolution: "auto: no longer detected" },
+    ]);
+  });
+
+  it("keeps the details of an open item fresh", async () => {
+    const herta = await idFor(t.db, "driver", "colton_herta");
+    const rb = await idFor(t.db, "constructor", "rb");
+    const mclaren = await idFor(t.db, "constructor", "mclaren");
+    await participate(fp2, { extra: [{ driverId: herta, constructorId: rb }] });
+    await rosterCheck(t.db, NOW, eventId);
+    await t.db
+      .update(sessionParticipants)
+      .set({ constructorId: mclaren })
+      .where(eq(sessionParticipants.driverId, herta));
+    await rosterCheck(t.db, NOW, eventId);
+    const open = await items();
+    expect(open).toHaveLength(1);
+    expect(open[0]!.details).toMatchObject({ constructorId: mclaren });
   });
 
   it("throws for an event that does not exist", async () => {

@@ -1,7 +1,7 @@
 import { and, eq, like, sql } from "drizzle-orm";
 import { RESULT_STATES, reviewItems, sessionResultState } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { openReviewItem } from "@/reference/review";
+import { AUTO_RESOLUTION, canonical, openReviewItem } from "@/reference/review";
 import { getSessionContext } from "./session-context";
 import {
   problemSubject,
@@ -12,8 +12,6 @@ import {
 
 export type SessionResultStatus = (typeof RESULT_STATES)[number];
 
-const AUTO_RESOLUTION = "auto: no longer detected";
-
 /** Review kinds with their own name (DM 2.9); the rest are `validation_failed`. */
 const OWN_KIND = new Set([
   "unknown_driver",
@@ -21,18 +19,6 @@ const OWN_KIND = new Set([
   "team_change",
   "missing_driver",
 ]);
-
-/** JSON with sorted keys, so two details objects compare by content. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
 
 /**
  * Brings the session's validation review items in line with `problems`:

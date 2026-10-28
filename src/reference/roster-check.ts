@@ -6,7 +6,7 @@ import {
   sessions,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { openReviewItem } from "./review";
+import { reconcileWarnings, type Finding } from "./review";
 
 /** A roster finding. The same shape the results validator reports. */
 export interface RosterProblem {
@@ -20,14 +20,15 @@ const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * Compares who ran in FP2 and FP3 with the event's entries (HLD §8.2), and
- * opens a warning for each surprise:
+ * keeps one warning per surprise (see `reconcileWarnings`: an admin's decision
+ * on the same finding stands, and a finding that is gone is resolved):
  * - `team_change`: a participant whose constructor differs from their entry,
  *   or who has no entry at all (a possible substitute);
  * - `missing_driver`: an entered driver absent from every one of FP2 and FP3
  *   that has participants.
  * FP1 opens nothing: young-driver runs would be false positives. A session
  * with no participants yet is not judged. Reads only our tables. Returns every
- * finding, new or already open; a second call opens nothing new.
+ * finding, new or already open.
  */
 export async function rosterCheck(
   db: Db,
@@ -70,26 +71,11 @@ export async function rosterCheck(
       .where(eq(sessionParticipants.sessionId, id));
     if (participants.length > 0) judged.push({ sessionId: id, participants });
   }
-  if (judged.length === 0) return [];
-
-  const problems: RosterProblem[] = [];
-  const open = async (
-    problem: RosterProblem,
-    sessionId: string | null,
-    dedupeKey: string,
-  ) => {
-    problems.push(problem);
-    await openReviewItem(db, now, {
-      kind: problem.kind,
-      severity: "warning",
-      seasonId: event.seasonId,
-      eventId,
-      sessionId,
-      driverId: problem.details.driverId as string,
-      details: problem.details,
-      dedupeKey,
-    });
-  };
+  const problems: Array<{
+    problem: RosterProblem;
+    sessionId: string | null;
+    dedupeKey: string;
+  }> = [];
 
   // One finding per driver, however many sessions show it.
   const flagged = new Set<string>();
@@ -101,43 +87,58 @@ export async function rosterCheck(
       const entry = entryByDriver.get(p.driverId);
       if (entry && entry.constructorId === p.constructorId) continue;
       flagged.add(p.driverId);
-      await open(
-        {
+      problems.push({
+        problem: {
           kind: "team_change",
           severity: "warning",
           details: {
             driverId: p.driverId,
             constructorId: p.constructorId,
             expectedConstructorId: entry?.constructorId ?? null,
-            sessionId,
           },
         },
         sessionId,
-        `roster:${eventId}:team_change:${p.driverId}`,
-      );
+        dedupeKey: `roster:${eventId}:team_change:${p.driverId}`,
+      });
     }
   }
 
-  const ran = new Set(
-    judged.flatMap((j) => j.participants.map((p) => p.driverId)),
-  );
-  for (const entry of [...entries].sort((a, b) =>
-    byText(a.driverId, b.driverId),
-  )) {
-    if (ran.has(entry.driverId)) continue;
-    await open(
-      {
-        kind: "missing_driver",
-        severity: "warning",
-        details: {
-          driverId: entry.driverId,
-          constructorId: entry.constructorId,
-          sessionIds: judged.map((j) => j.sessionId),
-        },
-      },
-      null,
-      `roster:${eventId}:missing:${entry.driverId}`,
+  if (judged.length > 0) {
+    const ran = new Set(
+      judged.flatMap((j) => j.participants.map((p) => p.driverId)),
     );
+    for (const entry of [...entries].sort((a, b) =>
+      byText(a.driverId, b.driverId),
+    )) {
+      if (ran.has(entry.driverId)) continue;
+      problems.push({
+        problem: {
+          kind: "missing_driver",
+          severity: "warning",
+          details: {
+            driverId: entry.driverId,
+            constructorId: entry.constructorId,
+          },
+        },
+        sessionId: null,
+        dedupeKey: `roster:${eventId}:missing:${entry.driverId}`,
+      });
+    }
   }
-  return problems;
+
+  const findings: Finding[] = problems.map(
+    ({ problem, sessionId, dedupeKey }) => ({
+      kind: problem.kind,
+      seasonId: event.seasonId,
+      eventId,
+      sessionId,
+      driverId: problem.details.driverId as string,
+      details: problem.details,
+      dedupeKey,
+    }),
+  );
+  await db.transaction((tx) =>
+    reconcileWarnings(tx, now, `roster:${eventId}:`, findings),
+  );
+  return problems.map((p) => p.problem);
 }

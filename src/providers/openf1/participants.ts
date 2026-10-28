@@ -12,6 +12,7 @@ import {
 import type { Db } from "@/db/types";
 import { openReviewItem } from "@/reference/review";
 import { localDate } from "@/reference/sync-event-entries";
+import { OPENF1_TEAMS } from "./teams";
 
 // OpenF1's practice participants (HLD §8.2): who took part in a practice
 // session, and for which team. OpenF1 has no stable driver id, so a row is
@@ -153,7 +154,6 @@ export async function openF1SessionKey(
 
 interface Seat {
   driverId: string;
-  constructorId: string;
   code: string | null;
 }
 
@@ -161,15 +161,15 @@ interface Seat {
  * Replaces the session's participants with OpenF1's rows, in one transaction
  * (provider `openf1`, from the stored snapshot).
  *
- * A row is matched to a driver by car number through the seats active on the
- * session's date (race or reserve), unless the seat's driver code disagrees
- * with the acronym; then by `name_acronym` = `drivers.code`. Its constructor is
- * the seat's. The team name is learned the first time a seat-matched driver
- * shows it (`provider_ids`, entity type `constructor`); once known, it decides
- * the constructor, so a car that OpenF1 shows in another team's colors reaches
- * the roster check as a team change. A row that cannot be matched, or has no
- * constructor, opens an `unknown_driver` warning (practice is not scored) and
- * is left out.
+ * The seats only identify the driver: a row is matched by car number through
+ * the seats active on the session's date (race or reserve), unless the seat's
+ * driver code disagrees with the acronym; then by `name_acronym` =
+ * `drivers.code`, which maps only a driver with a seat this season. The
+ * constructor comes from OpenF1's `team_name` through the static `OPENF1_TEAMS`
+ * map, so a car shown in another team's colors reaches the roster check as a
+ * team change. A row with no driver, or with a team we have no mapping for
+ * (reason `unknown_team`), opens an `unknown_driver` warning (practice is not
+ * scored) and is left out.
  *
  * No rows at all means OpenF1 has nothing for the session yet, so what is
  * stored stays.
@@ -203,7 +203,6 @@ export async function storeParticipants(
       await tx
         .select({
           driverId: seatAssignments.driverId,
-          constructorId: seatAssignments.constructorId,
           carNumber: seatAssignments.carNumber,
           role: seatAssignments.role,
           code: drivers.code,
@@ -222,30 +221,14 @@ export async function storeParticipants(
         )
     ).sort((a, b) => Number(b.role === "race") - Number(a.role === "race"));
     const seatsByNumber = new Map<number, Seat[]>();
-    const seatByDriver = new Map<string, Seat>();
     for (const seat of active) {
       seatsByNumber.set(seat.carNumber, [
         ...(seatsByNumber.get(seat.carNumber) ?? []),
         seat,
       ]);
-      if (!seatByDriver.has(seat.driverId)) {
-        seatByDriver.set(seat.driverId, seat);
-      }
     }
 
-    const acronyms = [...new Set(rows.map((r) => r.acronym).filter(Boolean))];
-    const byCode = new Map<string, string[]>();
-    if (acronyms.length > 0) {
-      const found = await tx
-        .select({ id: drivers.id, code: drivers.code })
-        .from(drivers)
-        .where(inArray(drivers.code, acronyms));
-      for (const d of found) {
-        byCode.set(d.code!, [...(byCode.get(d.code!) ?? []), d.id]);
-      }
-    }
-    // A code is reused across eras: of several drivers, the ones with a seat
-    // this season.
+    // The acronym fallback only picks among drivers with a seat this season.
     const seasonDrivers = new Set(
       (
         await tx
@@ -254,87 +237,84 @@ export async function storeParticipants(
           .where(eq(seatAssignments.seasonId, ctx.seasonId))
       ).map((r) => r.id),
     );
+    const acronyms = [...new Set(rows.map((r) => r.acronym).filter(Boolean))];
+    const byCode = new Map<string, string[]>();
+    if (acronyms.length > 0) {
+      const found = await tx
+        .select({ id: drivers.id, code: drivers.code })
+        .from(drivers)
+        .where(inArray(drivers.code, acronyms));
+      for (const d of found) {
+        if (!seasonDrivers.has(d.id)) continue;
+        byCode.set(d.code!, [...(byCode.get(d.code!) ?? []), d.id]);
+      }
+    }
 
-    const teamIds = new Map(
+    // Our constructor ids for the Jolpica keys of the static team map.
+    const constructorIds = new Map(
       (
         await tx
-          .select({
-            name: providerIds.providerKey,
-            id: providerIds.entityId,
-          })
+          .select({ key: providerIds.providerKey, id: providerIds.entityId })
           .from(providerIds)
           .where(
             and(
-              eq(providerIds.provider, PROVIDER),
+              eq(providerIds.provider, "jolpica"),
               eq(providerIds.entityType, "constructor"),
+              inArray(providerIds.providerKey, Object.values(OPENF1_TEAMS)),
             ),
           )
-      ).map((r) => [r.name, r.id]),
+      ).map((r) => [r.key, r.id]),
     );
-
-    // Who each row is. By number first, then by acronym.
-    const matched = rows.map((row) => {
-      const bySeat = (seatsByNumber.get(row.driverNumber) ?? []).find(
-        (s) => !s.code || !row.acronym || s.code === row.acronym,
-      );
-      if (bySeat) return { row, driverId: bySeat.driverId, seat: bySeat };
-      const candidates = byCode.get(row.acronym) ?? [];
-      const known = candidates.filter((id) => seasonDrivers.has(id));
-      const picked =
-        candidates.length === 1
-          ? candidates[0]
-          : known.length === 1
-            ? known[0]
-            : undefined;
-      return {
-        row,
-        driverId: picked,
-        seat: picked ? seatByDriver.get(picked) : undefined,
-      };
-    });
-
-    // Learn team names from the seat-matched drivers first, so a driver with
-    // no seat can use them.
-    for (const { row, seat } of matched) {
-      if (!seat || !row.teamName || teamIds.has(row.teamName)) continue;
-      const inserted = await tx
-        .insert(providerIds)
-        .values({
-          provider: PROVIDER,
-          entityType: "constructor",
-          providerKey: row.teamName,
-          entityId: seat.constructorId,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoNothing()
-        .returning({ key: providerIds.providerKey });
-      if (inserted.length > 0) teamIds.set(row.teamName, seat.constructorId);
-    }
 
     const stored = new Map<
       string,
       { driverId: string; constructorId: string }
     >();
-    for (const { row, driverId, seat } of matched) {
-      const constructorId =
-        teamIds.get(row.teamName) ?? seat?.constructorId ?? undefined;
-      if (!driverId || !constructorId) {
-        await openReviewItem(tx, now, {
-          kind: "unknown_driver",
-          seasonId: ctx.seasonId,
-          eventId: ctx.eventId,
-          sessionId,
-          details: {
-            provider: PROVIDER,
-            driverNumber: row.driverNumber,
-            acronym: row.acronym,
-            teamName: row.teamName,
-            reason: driverId ? "no_constructor" : "no_driver",
-            snapshotId,
-          },
-          dedupeKey: `openf1_unknown:${sessionId}:${row.driverNumber}`,
-        });
+    const unknown = (
+      row: OpenF1Driver,
+      reason: "no_driver" | "unknown_team",
+      dedupeKey: string,
+    ) =>
+      openReviewItem(tx, now, {
+        kind: "unknown_driver",
+        seasonId: ctx.seasonId,
+        eventId: ctx.eventId,
+        sessionId,
+        details: {
+          provider: PROVIDER,
+          driverNumber: row.driverNumber,
+          acronym: row.acronym,
+          teamName: row.teamName,
+          reason,
+          snapshotId,
+        },
+        dedupeKey,
+      });
+
+    for (const row of rows) {
+      const bySeat = (seatsByNumber.get(row.driverNumber) ?? []).find(
+        (s) => !s.code || !row.acronym || s.code === row.acronym,
+      );
+      const candidates = byCode.get(row.acronym) ?? [];
+      const driverId =
+        bySeat?.driverId ??
+        (candidates.length === 1 ? candidates[0] : undefined);
+      if (!driverId) {
+        await unknown(
+          row,
+          "no_driver",
+          `openf1_unknown:${sessionId}:${row.driverNumber}`,
+        );
+        continue;
+      }
+      const key = OPENF1_TEAMS[row.teamName];
+      const constructorId = key ? constructorIds.get(key) : undefined;
+      if (!constructorId) {
+        await unknown(
+          row,
+          "unknown_team",
+          `openf1_unknown_team:${sessionId}:${row.teamName}`,
+        );
         continue;
       }
       if (!stored.has(driverId)) {
