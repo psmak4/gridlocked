@@ -2,6 +2,9 @@
 @import "../styles/tokens.css";
 
 @theme inline {
+  /* Drop Tailwind's default palette; only token colours exist. */
+  --color-*: initial;
+
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
