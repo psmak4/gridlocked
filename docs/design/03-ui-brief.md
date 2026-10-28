@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** Draft for your answers. No designs have been created yet.
+**Status:** Look and feel decided 2026-10-27. Wave 1 (design system) is next.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
@@ -109,10 +109,17 @@ You asked to see the options before choosing. They're on the canvas [Gridlocked 
 
 Every board also has Tweaks, for theme and team colors, so any look can be flipped either way.
 
-## Questions for you
-1. Which look?
-2. Dark-first, light-first, or follow the device?
-3. Team colors as accents or bold?
-4. Do the chip names work?
+## Decisions (2026-10-27, yours)
+| Question | Decision |
+|---|---|
+| Look | **B · Race-day energy:** bold condensed display type, a strong countdown block, chunky rounded cards, one hot accent plus a yellow for the budget and Boost |
+| Theme | **Follow the device.** Dark and light are designed to the same standard, with a manual switch in settings |
+| Team colors | **Bold:** rows tinted in team color, with a solid team badge. See row 3 of the canvas, which now includes B in both themes |
+| Chip names | **As proposed:** Strategist, Overdrive, Safety Car, Rebuild, Blank Cheque, Late Call. To be checked by your lawyer with the brand |
 
-Your answers will be recorded here.
+**Your guiding rule: "easy to read, not a busy dashboard."** Every screen in phase 3 is checked against it:
+- **One main number per row or card,** such as the price. Everything else is secondary and smaller, never a third column of figures.
+- **Plain words before numbers:** "1 of 2 free transfers", not "1/2 FT".
+- **Fewer things on screen:** at most about 7 items before a "see more". Detail lives one tap away, for example the points breakdown, not the team screen.
+- **Bold team colors are kept as tints,** with a solid badge for identity, and never more than one strong color per row. Big blocks of the hot accent are kept for the single most important thing on a screen, such as the countdown or the Save button.
+- **Contrast and size:** body text at least 15 px, numbers at least 16 px, and WCAG AA contrast in both themes, including text on team-color tints.
