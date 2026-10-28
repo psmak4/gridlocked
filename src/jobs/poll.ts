@@ -2,11 +2,11 @@ import { eq, sql } from "drizzle-orm";
 import { sessionResultState } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { openReviewItem } from "@/reference/review";
-import { advanceStatus } from "@/results/status";
+import { advanceStatus, type SessionResultStatus } from "@/results/status";
 import { validateSession } from "@/results/validate";
 import { getSetting } from "@/settings";
 import { pollAttemptKey, pollPayload, type PollPayload } from "./kinds";
-import type { ResultsSource } from "./ports";
+import { ProviderUnavailableError, type ResultsSource } from "./ports";
 import { enqueue } from "./queue";
 import type { JobHandler } from "./runner";
 import { loadSession, type SessionInfo } from "./session-info";
@@ -26,6 +26,10 @@ const HOUR_MS = 60 * MINUTE_MS;
  * session under review waits for an admin, a provisional one is re-checked by
  * the finalizer.
  *
+ * A provider outage (`ProviderUnavailableError`) counts as "still awaiting":
+ * nothing is recorded, the next attempt is enqueued as usual, and the window
+ * still ends in the give-up. Poll attempts never end the chain by failing.
+ *
  * Does nothing for a cancelled session or event, or a final session. Safe to
  * run twice for the same attempt: normalization of a snapshot already
  * applied writes nothing and the next attempt has a fixed dedupe key.
@@ -43,16 +47,30 @@ export function createPollHandler(source: ResultsSource): JobHandler {
       .where(eq(sessionResultState.sessionId, sessionId));
     if (before?.status === "final") return;
 
-    const fetched = await source.fetch(db, session, job.id);
-    await source.normalize(
-      db,
-      ctx.clock.now(),
-      session,
-      fetched.snapshotId,
-      fetched.body,
-    );
+    // A provider outage is "no news": nothing is recorded and polling goes on
+    // with the usual backoff until the window runs out. Any other error is a
+    // bug or a database failure and fails the job.
+    let status: SessionResultStatus;
+    try {
+      const fetched = await source.fetch(db, session, job.id);
+      await source.normalize(
+        db,
+        ctx.clock.now(),
+        session,
+        fetched.snapshotId,
+        fetched.body,
+      );
+      status = await advanceStatus(db, ctx.clock.now(), sessionId);
+    } catch (error) {
+      if (!(error instanceof ProviderUnavailableError)) throw error;
+      // The state row carries the attempt count and the give-up time.
+      await db
+        .insert(sessionResultState)
+        .values({ sessionId })
+        .onConflictDoNothing();
+      status = before?.status ?? "awaiting";
+    }
     const now = ctx.clock.now();
-    const status = await advanceStatus(db, now, sessionId);
 
     // `greatest`: a late duplicate of an older attempt cannot lower the count.
     await db

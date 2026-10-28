@@ -5,7 +5,7 @@ import { reconcileWarnings } from "@/reference/review";
 import { advanceStatus } from "@/results/status";
 import { SCORED_KINDS } from "@/results/validate";
 import { finalizePayload } from "./kinds";
-import type { ResultsSource } from "./ports";
+import { ProviderUnavailableError, type ResultsSource } from "./ports";
 import type { JobHandler } from "./runner";
 import { loadSession } from "./session-info";
 
@@ -25,6 +25,9 @@ const REFETCHED_KINDS = ["sprint", "race"] as const;
  * (`finalized_at` = now) and the event `completed`, in one transaction. If it
  * cannot, nothing changes and a `finalize_held:<event>` warning says why; the
  * warning closes itself once a later run of the check does finalize.
+ *
+ * A provider outage skips that session's re-fetch, not the check: the final
+ * check still finalizes on what is stored.
  *
  * Does nothing for a cancelled or completed event. A session that is already
  * final (an admin's call) is left exactly as it is.
@@ -60,15 +63,21 @@ export function createFinalizeHandler(source: ResultsSource): JobHandler {
         .where(eq(sessionResultState.sessionId, id));
       if (state?.status === "final") continue;
 
-      const fetched = await source.fetch(db, session, job.id);
-      if (fetched.snapshotId !== (state?.currentSnapshotId ?? null)) {
-        await source.normalize(
-          db,
-          ctx.clock.now(),
-          session,
-          fetched.snapshotId,
-          fetched.body,
-        );
+      // A failed re-fetch just skips this session's check: the next check (or
+      // the final one, on what is stored) goes on.
+      try {
+        const fetched = await source.fetch(db, session, job.id);
+        if (fetched.snapshotId !== (state?.currentSnapshotId ?? null)) {
+          await source.normalize(
+            db,
+            ctx.clock.now(),
+            session,
+            fetched.snapshotId,
+            fetched.body,
+          );
+        }
+      } catch (error) {
+        if (!(error instanceof ProviderUnavailableError)) throw error;
       }
       await advanceStatus(db, ctx.clock.now(), id);
     }

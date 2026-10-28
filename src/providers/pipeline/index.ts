@@ -1,8 +1,10 @@
 import { createFinalizeHandler } from "@/jobs/finalize";
 import { createPollHandler } from "@/jobs/poll";
 import { createRosterHandler } from "@/jobs/roster";
+import { createSyncCalendarHandler } from "@/jobs/sync-calendar";
 import type { JobHandler } from "@/jobs/runner";
 import type { ProviderClient } from "../http/client";
+import { createJolpicaCalendarSource } from "./jolpica-calendar";
 import { createJolpicaResultsSource } from "./jolpica-results";
 import { createOpenF1ParticipantsSource } from "./openf1-participants";
 
@@ -17,7 +19,7 @@ export interface PipelineDeps {
 }
 
 export type PipelineHandlers = Record<
-  "poll_session" | "finalize_check" | "roster_check",
+  "sync_calendar" | "poll_session" | "finalize_check" | "roster_check",
   JobHandler
 >;
 
@@ -29,6 +31,9 @@ export type PipelineHandlers = Record<
 export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
   const results = createJolpicaResultsSource(deps.jolpica);
   return {
+    sync_calendar: createSyncCalendarHandler(
+      createJolpicaCalendarSource(deps.jolpica),
+    ),
     poll_session: createPollHandler(results),
     finalize_check: createFinalizeHandler(results),
     roster_check: createRosterHandler(

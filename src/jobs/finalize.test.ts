@@ -15,6 +15,7 @@ import {
 import {
   events,
   jobs,
+  providerIds,
   resultChanges,
   reviewItems,
   sessionResultState,
@@ -297,6 +298,96 @@ describe("the finalize_check handler", () => {
     });
   });
 
+  describe("a sprint weekend", () => {
+    it("finalizes at +48 h with no admin action: sprint qualifying is not scored", async () => {
+      const { event, sessions: all } = await eventOfRound(t.db, 2);
+      const by = Object.fromEntries(all.map((s) => [s.kind, s]));
+      await seedEntriesFor(t.db, by.race!.id);
+      await planEventJobs(t.db, event.id);
+      pipeline.serve(
+        "/ergast/f1/2026/2/qualifying.json",
+        jolpicaFixture("r18-qualifying.json"),
+      );
+      pipeline.serve(
+        "/ergast/f1/2026/2/sprint.json",
+        jolpicaFixture("r02-sprint.json"),
+      );
+      pipeline.serve(
+        "/ergast/f1/2026/2/results.json",
+        jolpicaFixture("r02-results.json"),
+      );
+
+      const scored = [by.sprint!, by.qualifying!, by.race!].sort(
+        (a, b) => a.scheduledEnd.getTime() - b.scheduledEnd.getTime(),
+      );
+      for (const s of scored) await run(s.scheduledEnd);
+      for (const s of scored) {
+        expect((await state(s.id))!.status).toBe("provisional");
+      }
+      expect(await state(by.sprint_qualifying!.id)).toBeUndefined();
+
+      const done = after(by.race!.scheduledEnd, 48);
+      await run(done);
+      expect(await eventStatus(event.id)).toBe("completed");
+      for (const s of scored) {
+        expect(await state(s.id)).toMatchObject({
+          status: "final",
+          finalizedAt: done,
+        });
+      }
+      expect(
+        await t.db
+          .select()
+          .from(reviewItems)
+          .where(eq(reviewItems.eventId, event.id)),
+      ).toEqual([]);
+    });
+  });
+
+  describe("a provider outage", () => {
+    it("skips the failed re-fetch and still finalizes on what is stored", async () => {
+      const { event, race, quali } = await setup();
+      pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
+      let down = false;
+      pipeline.serve(RACE, () =>
+        down
+          ? new Response("unavailable", { status: 503 })
+          : jolpicaFixture("r18-results.json"),
+      );
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      down = true;
+
+      for (const h of [2, 6, 24]) {
+        expect(await run(after(race.scheduledEnd, h))).toEqual({
+          ran: 1,
+          failed: 0,
+          lost: 0,
+        });
+      }
+      expect(await eventStatus(event.id)).toBe("scheduled");
+      const done = after(race.scheduledEnd, 48);
+      expect(await run(done)).toEqual({ ran: 1, failed: 0, lost: 0 });
+      expect(await eventStatus(event.id)).toBe("completed");
+      expect(await state(race.id)).toMatchObject({
+        status: "final",
+        finalizedAt: done,
+      });
+    });
+
+    it("a network failure is skipped the same way", async () => {
+      const { race } = await setup({ polls: false });
+      pipeline.serve(RACE, () => {
+        throw new TypeError("fetch failed");
+      });
+      expect(await run(after(race.scheduledEnd, 2))).toEqual({
+        ran: 1,
+        failed: 0,
+        lost: 0,
+      });
+    });
+  });
+
   describe("skipping", () => {
     it("does nothing for a cancelled event", async () => {
       const { event, race } = await setup({ polls: false });
@@ -339,8 +430,9 @@ describe("the finalize_check handler", () => {
       expect(pipeline.calls).not.toContain(RACE);
     });
 
-    it("fails (for the runner's retry) when the provider errors", async () => {
+    it("still fails for the runner's retry on a programming error", async () => {
       const { race } = await setup({ polls: false });
+      await t.db.delete(providerIds);
       const res = await run(after(race.scheduledEnd, 2));
       expect(res).toEqual({ ran: 0, failed: 1, lost: 0 });
     });

@@ -61,3 +61,12 @@ export const finalizeKey = (eventId: string, afterHours: number) =>
   `finalize:${eventId}:+${afterHours}h`;
 export const rosterKey = (eventId: string, kind: RosterKind) =>
   `roster:${eventId}:${kind}`;
+
+export const syncCalendarPayload = z.object({
+  season: z.number().int().positive(),
+});
+export type SyncCalendarPayload = z.infer<typeof syncCalendarPayload>;
+
+/** One calendar sync per season per UTC day. */
+export const syncCalendarKey = (season: number, day: string) =>
+  `sync_calendar:${season}:${day}`;

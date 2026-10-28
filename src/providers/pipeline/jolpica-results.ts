@@ -3,6 +3,7 @@ import { providerIds } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { ResultsSource } from "@/jobs/ports";
 import type { ProviderClient } from "../http/client";
+import { asOutage } from "./failures";
 import { normalizeJolpicaSession } from "../jolpica/normalize-session";
 
 /** Jolpica's endpoint for each session kind it serves results for. */
@@ -43,15 +44,17 @@ export function createJolpicaResultsSource(
         throw new Error(`Jolpica has no results for a ${session.kind} session`);
       }
       const key = await eventKey(db, session.eventId);
-      const res = await client.get(
-        `/${key}/${endpoint}.json`,
-        { limit: "100" },
-        {
-          jobId,
-          seasonId: session.seasonId,
-          eventId: session.eventId,
-          sessionId: session.id,
-        },
+      const res = await asOutage(`Jolpica ${key} ${endpoint}`, () =>
+        client.get(
+          `/${key}/${endpoint}.json`,
+          { limit: "100" },
+          {
+            jobId,
+            seasonId: session.seasonId,
+            eventId: session.eventId,
+            sessionId: session.id,
+          },
+        ),
       );
       return { snapshotId: res.snapshotId, body: res.body };
     },

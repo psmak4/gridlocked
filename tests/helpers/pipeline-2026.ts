@@ -65,7 +65,10 @@ export function makePipeline(db: Db, clock: Clock) {
     calls.push(r);
     if (!routes.has(r)) return new Response("not found", { status: 404 });
     const served = routes.get(r);
+    // A function may throw (a network failure) or return a Response (an error
+    // status) instead of a body.
     const body = typeof served === "function" ? served() : served;
+    if (body instanceof Response) return body;
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { "content-type": "application/json" },

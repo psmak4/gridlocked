@@ -15,7 +15,7 @@ import {
 import { constructors, settings } from "@/db/schema";
 import { newId } from "@/lib/ids";
 import { addOverride } from "./overrides";
-import { validateSession, type Problem } from "./validate";
+import { SCORED_KINDS, validateSession, type Problem } from "./validate";
 
 describe("validateSession", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
@@ -360,6 +360,14 @@ describe("validateSession", () => {
       );
       expect(await validateSession(t.db, race)).toEqual([]);
       expect(await validateSession(t.db, quali)).toEqual([]);
+    });
+  });
+
+  describe("sprint qualifying", () => {
+    it("is not scored: it has no results to validate, like practice", async () => {
+      const sq = await sessionIdFor(t.db, 2, "sprint_qualifying");
+      expect(SCORED_KINDS).not.toContain("sprint_qualifying");
+      expect(await validateSession(t.db, sq)).toEqual([]);
     });
   });
 });

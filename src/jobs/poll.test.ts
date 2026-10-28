@@ -17,6 +17,7 @@ import {
   eventEntries,
   events,
   jobs,
+  providerIds,
   results,
   reviewItems,
   sessionResultState,
@@ -299,6 +300,97 @@ describe("the poll_session handler", () => {
     });
   });
 
+  describe("a provider outage", () => {
+    const down = () => new Response("unavailable", { status: 503 });
+    const refused = () => {
+      throw new TypeError("fetch failed");
+    };
+
+    it.each([
+      ["a 5xx", down],
+      ["a network failure", refused],
+    ])(
+      "three failures (%s) then success: the chain keeps going, results arrive, no give-up",
+      async (_name, fail) => {
+        const race = await startPoll(18, "race");
+        let calls = 0;
+        pipeline.serve("/ergast/f1/2026/18/results.json", () =>
+          ++calls <= 3 ? fail() : jolpicaFixture("r18-results.json"),
+        );
+
+        let at = race.scheduledEnd;
+        for (let i = 0; i < 4; i++) {
+          expect(await run(at)).toEqual({ ran: 1, failed: 0, lost: 0 });
+          const pending = (await pollJobs()).filter(
+            (j) => j.status === "pending",
+          );
+          if (i < 3) {
+            expect(pending.map((j) => j.dedupeKey)).toEqual([
+              pollAttemptKey(race.id, i + 1),
+            ]);
+            at = pending[0]!.runAt;
+          }
+        }
+        // +5, +15, +60 after the failures at 0, 5 and 20 minutes.
+        expect(at).toEqual(new Date(race.scheduledEnd.getTime() + 80 * MIN));
+        expect(await state(race.id)).toMatchObject({
+          status: "provisional",
+          pollAttempts: 4,
+          gaveUpAt: null,
+          nextPollAt: null,
+        });
+        expect(await items(race.id)).toEqual([]);
+        expect(
+          (await pollJobs()).filter((j) => j.status === "pending"),
+        ).toEqual([]);
+      },
+    );
+
+    it("failures until 24 h past the end: the poller gives up with poll_gave_up", async () => {
+      const race = await startPoll(18, "race");
+      pipeline.serve("/ergast/f1/2026/18/results.json", down);
+      let at = race.scheduledEnd;
+      for (let runs = 0; runs < 40; runs++) {
+        expect(await run(at)).toMatchObject({ failed: 0 });
+        const pending = (await pollJobs()).filter(
+          (j) => j.status === "pending",
+        );
+        if (pending.length === 0) break;
+        at = pending[0]!.runAt;
+      }
+
+      const gaveUpAt = new Date(race.scheduledEnd.getTime() + 1460 * MIN);
+      expect(clock.now()).toEqual(gaveUpAt);
+      expect(await state(race.id)).toMatchObject({
+        gaveUpAt,
+        status: "under_review",
+      });
+      const rows = await items(race.id);
+      expect(rows.filter((i) => i.kind === "poll_gave_up")).toHaveLength(1);
+      expect(rows.filter((i) => i.kind === "missing_driver")).toHaveLength(22);
+    });
+
+    it("writes nothing from a failed attempt", async () => {
+      const race = await startPoll(18, "race");
+      pipeline.serve("/ergast/f1/2026/18/results.json", down);
+      await run(race.scheduledEnd);
+      expect(
+        await t.db.select().from(results).where(eq(results.sessionId, race.id)),
+      ).toEqual([]);
+      expect((await state(race.id))!.currentSnapshotId).toBeNull();
+    });
+
+    it("an event with no Jolpica key is a programming error: it still fails the job", async () => {
+      const race = await startPoll(18, "race");
+      await t.db.delete(providerIds);
+      expect(await run(race.scheduledEnd)).toEqual({
+        ran: 0,
+        failed: 1,
+        lost: 0,
+      });
+    });
+  });
+
   describe("skipping and failing", () => {
     it("does nothing for a cancelled session", async () => {
       const race = await startPoll(18, "race", "r18-results.json");
@@ -338,19 +430,6 @@ describe("the poll_session handler", () => {
       await run(race.scheduledEnd);
       expect(pipeline.calls).toEqual([]);
       expect((await state(race.id))!.status).toBe("final");
-    });
-
-    it("a provider error fails the job for the runner's retry and changes nothing", async () => {
-      const race = await startPoll(18, "race"); // nothing served: 404
-      expect(await run(race.scheduledEnd)).toEqual({
-        ran: 0,
-        failed: 1,
-        lost: 0,
-      });
-      const [job] = await pollJobs();
-      expect(job).toMatchObject({ status: "failed", attempts: 1 });
-      expect(job!.lastError).toMatch(/404/);
-      expect(await state(race.id)).toBeUndefined();
     });
 
     it("fails a payload it cannot read", async () => {
