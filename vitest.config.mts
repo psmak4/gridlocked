@@ -12,6 +12,7 @@ const dbTests = [
   "src/providers/snapshots.test.ts",
   "src/providers/http/client.test.ts",
   "src/providers/jolpica/normalize-session.test.ts",
+  "src/providers/openf1/participants.test.ts",
 ];
 
 export default defineConfig({
