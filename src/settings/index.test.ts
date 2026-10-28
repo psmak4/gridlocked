@@ -59,4 +59,18 @@ describe("getSetting", () => {
       /provider_limits/,
     );
   });
+
+  it("returns a copy of the default, so a caller cannot change later results", async () => {
+    const first = await getSetting(t.db, "provider_limits");
+    first.jolpica.perSecond = 99;
+    const poll = await getSetting(t.db, "poll_schedule");
+    poll.backoffMinutes.push(999);
+
+    expect((await getSetting(t.db, "provider_limits")).jolpica.perSecond).toBe(
+      3,
+    );
+    expect((await getSetting(t.db, "poll_schedule")).backoffMinutes).toEqual([
+      5, 15, 60,
+    ]);
+  });
 });

@@ -30,6 +30,8 @@ export interface ProviderClientOptions {
   limiter: RateLimiter;
   /** Waits for `Retry-After`. The same `sleep` the limiter uses. */
   sleep: (ms: number) => Promise<void>;
+  /** Abort a request that has not finished after this long. Default 30 s. */
+  timeoutMs?: number;
 }
 
 /** A provider answered with a status we do not accept. */
@@ -45,6 +47,9 @@ export class ProviderHttpError extends Error {
 
 const MAX_RETRIES = 3;
 const DEFAULT_RETRY_AFTER_MS = 30_000;
+/** A longer `Retry-After` is not waited out: the call fails instead. */
+const MAX_RETRY_AFTER_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** `Retry-After` is seconds or an HTTP date. Anything else gets the default. */
 function retryAfterMs(header: string | null, now: Date): number {
@@ -70,6 +75,7 @@ function errorMessage(error: unknown): string {
  */
 export function createProviderClient(opts: ProviderClientOptions) {
   const { provider, baseUrl, db, clock, limiter, sleep } = opts;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function get(
     endpoint: string,
@@ -89,6 +95,11 @@ export function createProviderClient(opts: ProviderClientOptions) {
       await limiter.acquire();
       const requestedAt = clock.now();
 
+      // Set once the response (or the failure) is in, before any database work.
+      let durationMs = 0;
+      const elapsed = () =>
+        Math.max(0, clock.now().getTime() - requestedAt.getTime());
+
       const log = (entry: {
         statusCode: number | null;
         outcome: "new_snapshot" | "unchanged" | "error" | "rate_limited";
@@ -102,7 +113,7 @@ export function createProviderClient(opts: ProviderClientOptions) {
           params: normalized,
           requestedAt,
           statusCode: entry.statusCode,
-          durationMs: clock.now().getTime() - requestedAt.getTime(),
+          durationMs,
           outcome: entry.outcome,
           snapshotId: entry.snapshotId ?? null,
           error: entry.error ?? null,
@@ -114,9 +125,12 @@ export function createProviderClient(opts: ProviderClientOptions) {
       try {
         response = await opts.fetch(url, {
           headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(timeoutMs),
         });
         text = await response.text();
+        durationMs = elapsed();
       } catch (error) {
+        durationMs = elapsed();
         await log({
           statusCode: null,
           outcome: "error",
@@ -137,9 +151,17 @@ export function createProviderClient(opts: ProviderClientOptions) {
             `${provider} ${endpoint}: HTTP 429 after ${MAX_RETRIES} retries`,
           );
         }
-        await sleep(
-          retryAfterMs(response.headers.get("retry-after"), clock.now()),
+        const waitMs = retryAfterMs(
+          response.headers.get("retry-after"),
+          clock.now(),
         );
+        if (waitMs > MAX_RETRY_AFTER_MS) {
+          throw new ProviderHttpError(
+            429,
+            `${provider} ${endpoint}: retry-after too long: ${Math.ceil(waitMs / 1000)}s`,
+          );
+        }
+        await sleep(waitMs);
         continue;
       }
 

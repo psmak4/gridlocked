@@ -59,8 +59,9 @@ const eslintConfig = defineConfig([
             },
             {
               // Relative paths into src/providers, from elsewhere in src or
-              // from outside it (`../../src/providers/...`).
-              regex: "^(\\.\\./)+providers(/|$)|(^|/)src/providers(/|$)",
+              // from outside it (`../../src/providers/...`). Static imports
+              // only: dynamic import() and require() are not covered.
+              regex: "^((\\.\\./)+|\\./)providers(/|$)|(^|/)src/providers(/|$)",
               message: providerBoundaryMessage,
             },
           ],

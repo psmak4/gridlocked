@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { asc } from "drizzle-orm";
 import { createTestDb } from "../../../tests/helpers/test-db";
-import { providerRequests, rawSnapshots } from "@/db/schema";
+import {
+  circuits,
+  events,
+  jobs,
+  providerRequests,
+  rawSnapshots,
+  seasons,
+  sessions,
+} from "@/db/schema";
+import { newId } from "@/lib/ids";
 import { simulatedClock } from "@/lib/clock";
 import { createProviderClient } from "./client";
 import { createRateLimiter } from "./rate-limiter";
@@ -29,7 +38,8 @@ describe("createProviderClient", () => {
 
   function setup(
     responses: Array<Response | Error | (() => Response)>,
-    limits = { perSecond: 100 },
+    limits: { perSecond: number } = { perSecond: 100 },
+    extra: { timeoutMs?: number } = {},
   ) {
     const clock = simulatedClock(start);
     const sleeps: number[] = [];
@@ -38,9 +48,14 @@ describe("createProviderClient", () => {
       clock.advance(ms);
     };
     const urls: string[] = [];
+    const inits: Array<RequestInit | undefined> = [];
     const queue = [...responses];
-    const fakeFetch = (async (input: string | URL | Request) => {
+    const fakeFetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       urls.push(String(input));
+      inits.push(init);
       const next = queue.shift();
       if (next === undefined)
         throw new Error("fake fetch ran out of responses");
@@ -55,8 +70,9 @@ describe("createProviderClient", () => {
       fetch: fakeFetch,
       limiter: createRateLimiter(limits, clock, sleep),
       sleep,
+      ...extra,
     });
-    return { client, clock, sleeps, urls };
+    return { client, clock, sleeps, urls, inits };
   }
 
   const requests = () =>
@@ -216,5 +232,184 @@ describe("createProviderClient", () => {
       3000,
     );
     expect(await requests()).toHaveLength(10);
+  });
+  it("caps Retry-After at 5 minutes: a longer wait is logged and thrown, not slept", async () => {
+    const { client, sleeps, urls } = setup([
+      new Response("", { status: 429, headers: { "retry-after": "301" } }),
+    ]);
+    await expect(client.get("/x")).rejects.toThrow(
+      "retry-after too long: 301s",
+    );
+
+    expect(sleeps).toEqual([]);
+    expect(urls).toHaveLength(1);
+    const rows = await requests();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "rate_limited", statusCode: 429 });
+  });
+
+  it("still waits a Retry-After of exactly 5 minutes", async () => {
+    const { client, sleeps } = setup([
+      new Response("", { status: 429, headers: { "retry-after": "300" } }),
+      json({ ok: 1 }),
+    ]);
+    await client.get("/x");
+    expect(sleeps).toEqual([300_000]);
+  });
+
+  it("passes an abort signal to fetch for the timeout", async () => {
+    const { client, inits } = setup([json({ ok: 1 })], undefined, {
+      timeoutMs: 5_000,
+    });
+    await client.get("/x");
+    expect(inits[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("logs a fetch timeout as an error with a null status and rethrows", async () => {
+    const timeout = new DOMException(
+      "The operation timed out.",
+      "TimeoutError",
+    );
+    const { client } = setup([timeout as unknown as Error]);
+    await expect(client.get("/x")).rejects.toBe(timeout);
+
+    const rows = await requests();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      outcome: "error",
+      statusCode: null,
+      snapshotId: null,
+    });
+    expect(rows[0]!.error).toMatch(/timed out/);
+  });
+
+  it("measures duration right after the body is read, before storing the snapshot", async () => {
+    // Every clock read moves time by 100 ms, so any extra read shows up.
+    let time = start.getTime();
+    const clock = {
+      now: () => {
+        const at = new Date(time);
+        time += 100;
+        return at;
+      },
+    };
+    const client = createProviderClient({
+      provider: "jolpica",
+      baseUrl: "https://api.jolpi.ca/ergast/f1",
+      db: t.db,
+      clock,
+      fetch: (async () => json({ ok: 1 })) as typeof fetch,
+      limiter: { acquire: async () => {} },
+      sleep: async () => {},
+    });
+    await client.get("/x");
+    const [row] = await requests();
+    expect(row!.durationMs).toBe(100);
+  });
+
+  it("clamps a negative duration to zero", async () => {
+    // The first read is the start; every later read is five seconds earlier.
+    let reads = 0;
+    const clock = {
+      now: () => new Date(start.getTime() - (reads++ === 0 ? 0 : 5_000)),
+    };
+    const client = createProviderClient({
+      provider: "jolpica",
+      baseUrl: "https://api.jolpi.ca/ergast/f1",
+      db: t.db,
+      clock,
+      fetch: (async () => json({ ok: 1 })) as typeof fetch,
+      limiter: { acquire: async () => {} },
+      sleep: async () => {},
+    });
+    await client.get("/x");
+    const [row] = await requests();
+    expect(row!.durationMs).toBe(0);
+  });
+
+  it("makes a 429 attempt use a limiter slot, so the retry waits for the window too", async () => {
+    // Retry-After 0 means the retry has no wait of its own; at one call per
+    // second it must still wait out the window the 429 attempt used.
+    const { client, sleeps, clock } = setup(
+      [
+        new Response("", { status: 429, headers: { "retry-after": "0" } }),
+        json({ ok: 1 }),
+      ],
+      { perSecond: 1 },
+    );
+    await client.get("/x");
+    expect(sleeps).toEqual([0, 1000]);
+    expect(clock.now().getTime() - start.getTime()).toBe(1000);
+  });
+
+  it("waits for Retry-After and the window together, whichever is longer", async () => {
+    const { client, clock } = setup(
+      [
+        new Response("", { status: 429, headers: { "retry-after": "2" } }),
+        json({ ok: 1 }),
+      ],
+      { perSecond: 1 },
+    );
+    await client.get("/x");
+    expect(clock.now().getTime() - start.getTime()).toBe(2000);
+  });
+
+  it("records the job, season, event and session on the request and the snapshot", async () => {
+    const seasonId = newId();
+    await t.db
+      .insert(seasons)
+      .values({ id: seasonId, year: 2026, status: "active" });
+    const circuitId = newId();
+    await t.db.insert(circuits).values({
+      id: circuitId,
+      slug: "monaco",
+      name: "Circuit de Monaco",
+      locality: "Monte-Carlo",
+      country: "Monaco",
+      latitude: "43.734700",
+      longitude: "7.420560",
+      timezone: "Europe/Monaco",
+    });
+    const eventId = newId();
+    await t.db.insert(events).values({
+      id: eventId,
+      seasonId,
+      round: 1,
+      slug: "2026-monaco",
+      name: "Monaco Grand Prix",
+      circuitId,
+      format: "standard",
+      status: "scheduled",
+      lockAt: start,
+      lockAtSource: "default",
+    });
+    const sessionId = newId();
+    await t.db.insert(sessions).values({
+      id: sessionId,
+      eventId,
+      kind: "race",
+      sequence: 1,
+      scheduledStart: start,
+      startConfirmed: true,
+      scheduledEnd: new Date(start.getTime() + 3600_000),
+      timeSource: "provider",
+      status: "completed",
+    });
+    const jobId = newId();
+    await t.db.insert(jobs).values({
+      id: jobId,
+      kind: "poll",
+      dedupeKey: "k",
+      runAt: start,
+      maxAttempts: 3,
+    });
+
+    const { client } = setup([json({ ok: 1 })]);
+    await client.get("/x", {}, { jobId, seasonId, eventId, sessionId });
+
+    const [req] = await requests();
+    expect(req!.jobId).toBe(jobId);
+    const [snap] = await t.db.select().from(rawSnapshots);
+    expect(snap).toMatchObject({ seasonId, eventId, sessionId });
   });
 });

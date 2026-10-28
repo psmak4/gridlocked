@@ -23,7 +23,8 @@ export async function getSetting<K extends SettingKey>(
     .select({ value: settings.value })
     .from(settings)
     .where(eq(settings.key, key));
-  if (!row) return settingDefaults[key];
+  // A copy, so a caller that edits the result cannot change the defaults.
+  if (!row) return structuredClone(settingDefaults[key]);
 
   const parsed = settingSchemas[key].safeParse(row.value);
   if (!parsed.success) {
