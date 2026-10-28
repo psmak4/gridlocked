@@ -5,8 +5,12 @@
  * tests/fixtures/jolpica/. It goes through the same rate-limited provider
  * client as the app, so it stays under the configured limits, and it writes each
  * response body unchanged (pretty-printed). Tests never reach the network.
+ *
+ * `--openf1` records the OpenF1 practice participants instead (into
+ * tests/fixtures/openf1/), see `recordOpenF1`. `--openf1=sessions` records only
+ * the session list.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTestDb } from "../tests/helpers/test-db";
@@ -30,7 +34,120 @@ interface MRData {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+const OPENF1_BASE_URL = "https://api.openf1.org/v1";
+const openf1Root = fileURLToPath(
+  new URL("../tests/fixtures/openf1", import.meta.url),
+);
+
+/** The practice sessions whose participants the roster check tests use. */
+const OPENF1_TARGETS: Array<{ round: number; sessions: string[] }> = [
+  // The first swap weekend (Dutch GP). A sprint weekend: FP1 only.
+  { round: 12, sessions: ["Practice 1"] },
+  // The next swap weekend that has FP2 and FP3.
+  { round: 13, sessions: ["Practice 2", "Practice 3"] },
+  // The reversal weekend.
+  { round: 15, sessions: ["Practice 2"] },
+];
+
+interface OpenF1Session {
+  session_key: number;
+  session_name: string;
+  date_start: string;
+}
+
+/**
+ * Records `sessions?year=2026` and then `drivers?session_key=<k>` for each
+ * target practice session (found by name and by the race weekend's dates in the
+ * recorded Jolpica calendar). Goes through the same rate-limited client, under
+ * the configured OpenF1 limits.
+ */
+async function recordOpenF1(onlySessions: boolean) {
+  const t = await createTestDb();
+  const limits = (await getSetting(t.db, "provider_limits")).openf1;
+  const client = createProviderClient({
+    provider: "openf1",
+    baseUrl: OPENF1_BASE_URL,
+    db: t.db,
+    clock: systemClock,
+    fetch,
+    limiter: createRateLimiter(limits, systemClock, sleep),
+    sleep,
+  });
+  let calls = 0;
+  async function record(
+    endpoint: string,
+    params: Record<string, string>,
+    file: string,
+  ) {
+    calls++;
+    const res = await client.get(endpoint, params);
+    const path = join(openf1Root, file);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(res.body, null, 2) + "\n");
+    console.log(`${calls}. ${endpoint} ${JSON.stringify(params)} -> ${file}`);
+    return res.body;
+  }
+
+  const list = (await record(
+    "/sessions",
+    { year: "2026" },
+    "2026/sessions.json",
+  )) as OpenF1Session[];
+  if (!Array.isArray(list)) throw new Error("sessions: expected an array");
+  if (onlySessions) {
+    console.log(`done: ${calls} calls`);
+    await t.close();
+    return;
+  }
+
+  const calendar = JSON.parse(
+    await readFile(
+      fileURLToPath(
+        new URL("../tests/fixtures/jolpica/2026.json", import.meta.url),
+      ),
+      "utf8",
+    ),
+  ) as { MRData: MRData };
+  const races = calendar.MRData.RaceTable?.Races ?? [];
+  for (const target of OPENF1_TARGETS) {
+    const race = races.find((r) => Number(r.round) === target.round);
+    if (!race) throw new Error(`no round ${target.round} in the calendar`);
+    const raceDay = Date.parse(`${String(race.date)}T00:00:00Z`);
+    for (const name of target.sessions) {
+      const matches = list.filter((s) => {
+        const start = Date.parse(s.date_start);
+        return (
+          s.session_name === name &&
+          start >= raceDay - 3 * 86_400_000 &&
+          start < raceDay + 86_400_000
+        );
+      });
+      if (matches.length !== 1) {
+        throw new Error(
+          `round ${target.round} ${name}: ${matches.length} matching sessions`,
+        );
+      }
+      const key = matches[0]!.session_key;
+      const slug = name.replace("Practice ", "fp");
+      await record(
+        "/drivers",
+        { session_key: String(key) },
+        `2026/drivers-r${pad(target.round)}-${slug}.json`,
+      );
+    }
+  }
+  console.log(`done: ${calls} calls`);
+  await t.close();
+}
+
+const pad = (round: number | string) => String(round).padStart(2, "0");
+
 async function main() {
+  const openf1 = process.argv.find((a) => a.startsWith("--openf1"));
+  if (openf1) {
+    await recordOpenF1(openf1 === "--openf1=sessions");
+    return;
+  }
   const t = await createTestDb();
   const limits = (await getSetting(t.db, "provider_limits")).jolpica;
   const client = createProviderClient({
@@ -78,8 +195,6 @@ async function main() {
     }
     return first;
   }
-
-  const pad = (round: number | string) => String(round).padStart(2, "0");
 
   // `--rounds=15,16,17` records only those 2026 race results (a later top-up).
   const extra = process.argv.find((a) => a.startsWith("--rounds="));

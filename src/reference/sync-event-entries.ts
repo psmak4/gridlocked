@@ -15,7 +15,7 @@ export interface EventEntriesReport {
 }
 
 /** `YYYY-MM-DD` of an instant in an IANA zone; UTC if the zone is unknown. */
-function localDate(at: Date, timeZone: string): string {
+export function localDate(at: Date, timeZone: string): string {
   try {
     return new Intl.DateTimeFormat("en-CA", {
       timeZone,
