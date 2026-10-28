@@ -12,7 +12,30 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Deliberately violates rules; linted only by tests/lint.
+    "tests/lint/fixtures/**",
   ]),
+  {
+    // All "now" reads go through the injectable clock (src/lib/clock.ts).
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+          message: "Use the injectable clock (src/lib/clock.ts).",
+        },
+        {
+          selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+          message: "Use the injectable clock (src/lib/clock.ts).",
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/clock.ts", "**/*.test.ts"],
+    rules: { "no-restricted-syntax": "off" },
+  },
 ]);
 
 export default eslintConfig;
