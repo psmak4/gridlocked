@@ -1,8 +1,15 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Tests that create a test database run in the longer-timeout `db` project.
-const dbTests = ["src/db/**/*.test.{ts,tsx}", "src/jobs/**/*.test.{ts,tsx}"];
+// Tests that create a test database. Everything else stays in the fast
+// "unit" project.
+const dbTests = [
+  "src/db/**/*.test.{ts,tsx}",
+  "src/jobs/**/*.test.{ts,tsx}",
+  "src/settings/**/*.test.{ts,tsx}",
+  "src/providers/snapshots.test.ts",
+  "src/providers/http/client.test.ts",
+];
 
 export default defineConfig({
   resolve: {

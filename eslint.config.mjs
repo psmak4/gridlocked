@@ -2,6 +2,9 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+const providerBoundaryMessage =
+  "Only adapters know providers exist (HLD §3.3 rule 2).";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -44,8 +47,36 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // Only adapters know providers exist (HLD §3.3 rule 2).
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/providers", "@/providers/*"],
+              message: providerBoundaryMessage,
+            },
+            {
+              // Relative paths into src/providers, from elsewhere in src or
+              // from outside it (`../../src/providers/...`). Static imports
+              // only: dynamic import() and require() are not covered.
+              regex: "^((\\.\\./)+|\\./)providers(/|$)|(^|/)src/providers(/|$)",
+              message: providerBoundaryMessage,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["src/lib/clock.ts", "**/*.test.ts", "**/*.test.tsx"],
     rules: { "no-restricted-syntax": "off" },
+  },
+  {
+    // The adapters' own home, and tests of it.
+    files: ["src/providers/**"],
+    rules: { "no-restricted-imports": "off" },
   },
 ]);
 
