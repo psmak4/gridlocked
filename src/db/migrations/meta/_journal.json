@@ -15,6 +15,27 @@
       "when": 1793160716640,
       "tag": "0001_app_now",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793197404874,
+      "tag": "0002_daffy_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793197405301,
+      "tag": "0003_reference_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793197575647,
+      "tag": "0004_lazy_tenebrous",
+      "breakpoints": true
     }
   ]
 }
