@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Anton, Barlow, Barlow_Semi_Condensed } from "next/font/google";
+import { SiteFooter } from "@/components/site-footer";
+import { ThemeScript } from "@/components/theme-script";
 import "./globals.css";
 
 const anton = Anton({
@@ -25,7 +27,8 @@ const barlowSemi = Barlow_Semi_Condensed({
 
 export const metadata: Metadata = {
   title: "Gridlocked",
-  description: "An unofficial F1 fan community and fantasy game.",
+  description:
+    "An unofficial fan home for race weekends: forum, live chat and a fantasy game.",
 };
 
 export default function RootLayout({
@@ -36,9 +39,16 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${anton.variable} ${barlow.variable} ${barlowSemi.variable}`}
     >
-      <body>{children}</body>
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="bg-surface text-ink font-sans">
+        {children}
+        <SiteFooter />
+      </body>
     </html>
   );
 }
