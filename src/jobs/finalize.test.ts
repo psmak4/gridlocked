@@ -7,6 +7,7 @@ import {
 } from "../../tests/helpers/ingest-2026";
 import { loadBody, rowsOf } from "../../tests/helpers/results-2026";
 import {
+  allJobs,
   eventOfRound,
   jolpicaFixture,
   makePipeline,
@@ -23,6 +24,7 @@ import {
 } from "@/db/schema";
 import { simulatedClock } from "@/lib/clock";
 import { openReviewItem } from "@/reference/review";
+import { enqueue } from "./queue";
 import { planEventJobs } from "./plan-event";
 import { runDue } from "./runner";
 
@@ -80,6 +82,11 @@ describe("the finalize_check handler", () => {
     )[0];
   const eventStatus = async (id: string) =>
     (await t.db.select().from(events).where(eq(events.id, id)))[0]!.status;
+  /** The follow-up checks of a held event, in order. */
+  const heldJobs = async (eventId: string) =>
+    (await allJobs(t.db)).filter((j) =>
+      j.dedupeKey.startsWith(`finalize:${eventId}:held:`),
+    );
   const changes = (sessionId: string) =>
     t.db
       .select()
@@ -264,6 +271,105 @@ describe("the finalize_check handler", () => {
       expect(held!.status).toBe("resolved");
     });
 
+    it("keeps re-checking a held event every 6 h: once the blocker is resolved the next check finalizes", async () => {
+      const { event, race, quali } = await setup();
+      pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
+      pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      await openReviewItem(t.db, clock.now(), {
+        kind: "validation_failed",
+        severity: "blocking",
+        seasonId: event.seasonId,
+        eventId: event.id,
+        sessionId: race.id,
+        details: { problem: "steward query" },
+        dedupeKey: "test:blocking",
+      });
+      await run(after(race.scheduledEnd, 48));
+
+      const [held1] = await heldJobs(event.id);
+      expect(held1).toMatchObject({
+        dedupeKey: `finalize:${event.id}:held:1`,
+        status: "pending",
+        runAt: after(race.scheduledEnd, 54),
+      });
+      expect(held1!.payload).toMatchObject({ final: true, held: 1 });
+
+      // Still blocked at the next check: held again, a further 6 h on.
+      await run(after(race.scheduledEnd, 54));
+      expect(await eventStatus(event.id)).toBe("scheduled");
+      expect((await heldJobs(event.id)).map((j) => j.dedupeKey)).toEqual([
+        `finalize:${event.id}:held:1`,
+        `finalize:${event.id}:held:2`,
+      ]);
+
+      // An admin resolves the blocker; the following check finalizes.
+      await t.db
+        .update(reviewItems)
+        .set({ status: "resolved", resolution: "checked" })
+        .where(eq(reviewItems.dedupeKey, "test:blocking"));
+      const done = after(race.scheduledEnd, 60);
+      await run(done);
+      expect(await eventStatus(event.id)).toBe("completed");
+      for (const s of [race, quali]) {
+        expect(await state(s.id)).toMatchObject({
+          status: "final",
+          finalizedAt: done,
+        });
+      }
+      // Finalized: no further check was queued.
+      expect((await heldJobs(event.id)).map((j) => j.dedupeKey)).toEqual([
+        `finalize:${event.id}:held:1`,
+        `finalize:${event.id}:held:2`,
+      ]);
+      const [warning] = await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.dedupeKey, `finalize_held:${event.id}`));
+      expect(warning!.status).toBe("resolved");
+    });
+
+    it("a hold that never clears stops re-checking 14 days after the race, with the warning left open", async () => {
+      const { event, race, quali } = await setup();
+      pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
+      pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      await openReviewItem(t.db, clock.now(), {
+        kind: "validation_failed",
+        severity: "blocking",
+        seasonId: event.seasonId,
+        eventId: event.id,
+        sessionId: race.id,
+        details: { problem: "never resolved" },
+        dedupeKey: "test:blocking",
+      });
+
+      let at = after(race.scheduledEnd, 48);
+      for (let i = 0; i < 100; i++) {
+        await run(at);
+        const pending = (await heldJobs(event.id)).filter(
+          (j) => j.status === "pending",
+        );
+        if (pending.length === 0) break;
+        at = pending[0]!.runAt;
+      }
+
+      // 48 h, then every 6 h: the check at exactly 14 days is the last.
+      expect(clock.now()).toEqual(after(race.scheduledEnd, 14 * 24));
+      const held = await heldJobs(event.id);
+      expect(held).toHaveLength(48);
+      expect(held.every((j) => j.status === "succeeded")).toBe(true);
+      expect(await eventStatus(event.id)).toBe("scheduled");
+      const [warning] = await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.dedupeKey, `finalize_held:${event.id}`));
+      expect(warning).toMatchObject({ status: "open" });
+      expect(warning!.details).toMatchObject({ recheckStopped: true });
+    });
+
     it("holds the event when a scored session never got results", async () => {
       const { event, race, quali } = await setup();
       // Qualifying was never polled, so it has no results at all.
@@ -345,7 +451,7 @@ describe("the finalize_check handler", () => {
   });
 
   describe("a provider outage", () => {
-    it("skips the failed re-fetch and still finalizes on what is stored", async () => {
+    it("skips a failed re-fetch at the early checks, but does not finalize on stored data at the last one", async () => {
       const { event, race, quali } = await setup();
       pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
       let down = false;
@@ -365,13 +471,58 @@ describe("the finalize_check handler", () => {
           lost: 0,
         });
       }
+      expect(await run(after(race.scheduledEnd, 48))).toEqual({
+        ran: 1,
+        failed: 0,
+        lost: 0,
+      });
+      // Held for a late correction: the next check is an hour away.
       expect(await eventStatus(event.id)).toBe("scheduled");
-      const done = after(race.scheduledEnd, 48);
-      expect(await run(done)).toEqual({ ran: 1, failed: 0, lost: 0 });
+      expect((await state(race.id))!.status).toBe("provisional");
+      const next = await heldJobs(event.id);
+      expect(next.map((j) => [j.dedupeKey, j.status, j.runAt])).toEqual([
+        [
+          `finalize:${event.id}:held:1`,
+          "pending",
+          after(race.scheduledEnd, 49),
+        ],
+      ]);
+      expect(next[0]!.payload).toMatchObject({ final: true, held: 1 });
+
+      // The provider is back: the next held check re-fetches and finalizes.
+      down = false;
+      const done = after(race.scheduledEnd, 49);
+      await run(done);
       expect(await eventStatus(event.id)).toBe("completed");
       expect(await state(race.id)).toMatchObject({
         status: "final",
         finalizedAt: done,
+      });
+    });
+
+    it("a provider that stays down past 14 days stops the re-checks and says so in the warning", async () => {
+      const { event, race } = await setup({ polls: false });
+      pipeline.serve(RACE, () => new Response("down", { status: 503 }));
+      const last = after(race.scheduledEnd, 14 * 24);
+      await enqueue(t.db, {
+        kind: "finalize_check",
+        dedupeKey: `finalize:${event.id}:held:99`,
+        runAt: last,
+        payload: { eventId: event.id, afterHours: 48, final: true, held: 99 },
+      });
+      await run(last);
+
+      expect((await heldJobs(event.id)).map((j) => j.dedupeKey)).toEqual([
+        `finalize:${event.id}:held:99`,
+      ]);
+      const [warning] = await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.dedupeKey, `finalize_held:${event.id}`));
+      expect(warning).toMatchObject({ status: "open", severity: "warning" });
+      expect(warning!.details).toMatchObject({
+        providerUnavailable: true,
+        recheckStopped: true,
       });
     });
 
@@ -428,6 +579,13 @@ describe("the finalize_check handler", () => {
       expect(await state(race.id)).toEqual(before);
       expect(await changes(race.id)).toEqual([]);
       expect(pipeline.calls).not.toContain(RACE);
+    });
+
+    it("fails for the runner's retry when the provider answers 404", async () => {
+      const { race } = await setup({ polls: false });
+      // Nothing served: a 404 is a bug in the request, not an outage.
+      const res = await run(after(race.scheduledEnd, 2));
+      expect(res).toEqual({ ran: 0, failed: 1, lost: 0 });
     });
 
     it("still fails for the runner's retry on a programming error", async () => {

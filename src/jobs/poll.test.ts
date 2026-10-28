@@ -380,6 +380,27 @@ describe("the poll_session handler", () => {
       expect((await state(race.id))!.currentSnapshotId).toBeNull();
     });
 
+    it("a 404 is a bug in the request, not an outage: the job fails and nothing is queued", async () => {
+      const race = await startPoll(18, "race"); // nothing served: 404
+      expect(await run(race.scheduledEnd)).toEqual({
+        ran: 0,
+        failed: 1,
+        lost: 0,
+      });
+      const [job] = await pollJobs();
+      expect(job!.lastError).toMatch(/404/);
+      expect(await state(race.id)).toBeUndefined();
+    });
+
+    it("a 403 fails the job too", async () => {
+      const race = await startPoll(18, "race");
+      pipeline.serve(
+        "/ergast/f1/2026/18/results.json",
+        () => new Response("no", { status: 403 }),
+      );
+      expect(await run(race.scheduledEnd)).toMatchObject({ failed: 1 });
+    });
+
     it("an event with no Jolpica key is a programming error: it still fails the job", async () => {
       const race = await startPoll(18, "race");
       await t.db.delete(providerIds);

@@ -43,6 +43,9 @@ function asText(value: string | number | boolean | null): string | null {
  * "latest snapshot" would be wrong. Normalizing a snapshot that is already
  * the session's current one writes nothing.
  *
+ * A session whose state is `final` is never written to: nothing changes and
+ * a `normalize_after_final` warning is opened (once per snapshot).
+ *
  * A failed parse writes nothing to `results` and keeps the previous rows. It
  * opens one blocking review item, `unknown_classification` or
  * `validation_failed`, which a rerun of the same snapshot does not repeat.
@@ -109,6 +112,22 @@ export async function normalizeSession(
       .where(eq(sessionResultState.sessionId, sessionId))
       .for("update");
     if (state!.currentSnapshotId === snapshotId) return { changed: 0 };
+
+    // A final session is never written to: a late response is refused and an
+    // admin is told (reopening it is the audited way, HLD §4.4).
+    if (state!.status === "final") {
+      const ctx = await getSessionContext(tx, sessionId);
+      await openReviewItem(tx, now, {
+        kind: "normalize_after_final",
+        severity: "warning",
+        seasonId: ctx.seasonId,
+        eventId: ctx.eventId,
+        sessionId,
+        details: { snapshotId, currentSnapshotId: state!.currentSnapshotId },
+        dedupeKey: `normalize_after_final:${sessionId}:${snapshotId}`,
+      });
+      return { changed: 0 };
+    }
 
     const previous = new Map(
       (

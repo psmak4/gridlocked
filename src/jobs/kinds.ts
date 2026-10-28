@@ -37,11 +37,15 @@ export const pollPayload = z.object({
 });
 export type PollPayload = z.infer<typeof pollPayload>;
 
-/** `final` marks the last check, which finalizes the event. */
+/**
+ * `final` marks a check that finalizes the event. `held` is set on the
+ * follow-up checks of a held event (1, 2, ...); the planned checks omit it.
+ */
 export const finalizePayload = z.object({
   eventId: z.string().min(1),
   afterHours: z.number().int().positive(),
   final: z.boolean(),
+  held: z.number().int().positive().optional(),
 });
 export type FinalizePayload = z.infer<typeof finalizePayload>;
 
@@ -59,6 +63,9 @@ export const pollAttemptKey = (sessionId: string, attempt: number) =>
   `poll:${sessionId}:${attempt}`;
 export const finalizeKey = (eventId: string, afterHours: number) =>
   `finalize:${eventId}:+${afterHours}h`;
+/** The `n`th follow-up of a final check that held the event. */
+export const finalizeHeldKey = (eventId: string, n: number) =>
+  `finalize:${eventId}:held:${n}`;
 export const rosterKey = (eventId: string, kind: RosterKind) =>
   `roster:${eventId}:${kind}`;
 

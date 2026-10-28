@@ -34,6 +34,20 @@ export interface ProviderClientOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Errors thrown by the `fetch` call itself (or while reading its body): the
+ * connection failed, timed out or was aborted. The error is rethrown as it
+ * came, and marked here so callers can tell a provider that is unreachable
+ * from a bug in building the request (e.g. a bad URL).
+ */
+const networkFailures = new WeakSet<object>();
+
+export function isNetworkFailure(error: unknown): boolean {
+  return typeof error === "object" && error !== null
+    ? networkFailures.has(error)
+    : false;
+}
+
 /** A provider answered with a status we do not accept. */
 export class ProviderHttpError extends Error {
   constructor(
@@ -131,6 +145,9 @@ export function createProviderClient(opts: ProviderClientOptions) {
         durationMs = elapsed();
       } catch (error) {
         durationMs = elapsed();
+        if (typeof error === "object" && error !== null) {
+          networkFailures.add(error);
+        }
         await log({
           statusCode: null,
           outcome: "error",
