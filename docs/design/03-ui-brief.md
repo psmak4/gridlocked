@@ -1,6 +1,6 @@
 # Gridlocked — UI/UX Brief (phase 3)
 
-**Status:** Look and feel decided 2026-10-27. Wave 1 (design system) is drafted for your review.
+**Status:** Look and feel decided 2026-10-27. Wave 1 (design system) is drafted. Wave 2 (team builder, session thread, spoiler states) is drafted for your review.
 **Date:** 2026-10-27
 **Builds on:** [01-high-level-design.md](01-high-level-design.md) (HLD) and [02-data-model.md](02-data-model.md) (DM), both approved 2026-10-27.
 
@@ -113,7 +113,7 @@ Every board also has Tweaks, for theme and team colors, so any look can be flipp
 | Question | Decision |
 |---|---|
 | Look | **B · Race-day energy:** bold condensed display type, a strong countdown block, chunky rounded cards, one hot accent plus a yellow for the budget and Boost |
-| Theme | **Follow the device.** Dark and light are designed to the same standard, with a manual switch in settings |
+| Theme | **Follow the device.** Dark and light are designed to the same standard, with a manual switch in settings. **Light is the fallback** when a device doesn't say (changed 2026-10-27, yours) |
 | Team colors | **Bold:** rows tinted in team color, with a solid team badge. See row 3 of the canvas, which now includes B in both themes |
 | Chip names | **As proposed:** Strategist, Overdrive, Safety Car, Rebuild, Blank Cheque, Late Call. To be checked by your lawyer with the brand |
 
@@ -146,7 +146,7 @@ The system is in Claude Design as [Gridlocked](https://claude.ai/artifact/PUXqoE
   - SpoilerCover, TextField, Sheet, Toast, EmptyState.
 
 **Calls I made, to check:**
-- Dark is the first theme and the fallback.
+- ~~Dark is the first theme and the fallback.~~ You changed this: light is the fallback.
 - One heat block per screen.
 - Team tints are 22% in dark and 12% in light. 12% is what keeps light-mode text at AA on the reddest teams.
 - The spoiler cover **replaces** content rather than blurring it.
@@ -154,4 +154,33 @@ The system is in Claude Design as [Gridlocked](https://claude.ai/artifact/PUXqoE
 - The countdown ticks every second only in the last 10 minutes.
 
 **Not in wave 1:** the screens themselves (wave 2 onward), a logo (it waits for the trademark check), and the desktop side menu (wave 3).
+
+## Wave 2: the riskiest mobile screens (drafted 2026-10-27)
+The screens are on the canvas [Gridlocked wave 2](https://claude.ai/artifact/6ffGHC4QcgEgRZv6pGgwfU) (private to you). Every board uses the design system's real components, light first, with a Dark tweak on each. The sample weekend is round 13, the Italian Grand Prix. Prices and points are illustrative.
+
+| Row | Boards |
+|---|---|
+| Team builder | Ready to save · Over the cap with an extra transfer · Pick a replacement driver · Chips sheet · Locked, with qualifying scores hidden |
+| Session thread | Live chat (slow mode) · Discussion (nested replies, votes, chat replay, results link) |
+| Spoiler protection | Weekend hub with qualifying not watched · Qualifying thread hidden until watched |
+| Dark theme | Team builder · Live chat |
+
+**What you can click (Play):**
+- Bearman's row opens the driver picker.
+- Chips opens the chip sheet, and Cancel goes back.
+- On the hub, "Mark as watched" or "Show it" reveals the qualifying score.
+- The Qualifying session row opens its hidden thread, and revealing it shows the discussion.
+- On the locked screen, the score reveals the same way.
+
+**Calls I made, to check:**
+- **Save stays visible.** The Save and Chips buttons sit in a fixed bar above the nav, so Save is always on screen while the list scrolls.
+- **Over the cap,** one plain sentence says what's wrong and what to do. A second line explains the transfer penalty. Save is disabled.
+- **The driver picker** shows about 7 rows, with "See all 22":
+  - drivers you can't afford stay visible, untinted, with "$0.4M over budget";
+  - Hadjar shows "Out this race" (his real 2026 absence in rounds 12–14).
+- **Chips** live in one sheet with a sentence each. Late Call shows "Opens after qualifying" until it can be used.
+- **After lock,** prices are replaced by a hidden qualifying score. The action becomes "Play Late Call".
+- **Live chat** is flat, newest at the bottom, with no bottom nav. Send waits out slow mode, and there's no live timing.
+- **Discussion** replies indent up to 3 levels, then "Continue thread". Results are a link, not shown inline, so the thread itself stays spoiler-light.
+- **"Show it" versus "Mark as watched":** Show it reveals just this item. Mark as watched reveals that session everywhere. The hidden thread explains the difference in two lines.
 
