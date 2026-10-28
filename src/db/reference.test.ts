@@ -463,6 +463,17 @@ describe("reference schema (DM Part 1)", () => {
       await expectPgError(row("jolpica", "verstappen", a), UNIQUE_VIOLATION);
       // Another provider may use the same key and entity.
       await row("openf1", "1", a);
+
+      // The provider key is the primary key.
+      const pk = await t.client.query<{ columns: string }>(
+        `select string_agg(a.attname, ',' order by array_position(c.conkey, a.attnum)) as columns
+         from pg_constraint c
+         join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+         where c.conrelid = 'provider_ids'::regclass and c.contype = 'p'`,
+      );
+      expect(pk.rows).toEqual([
+        { columns: "provider,entity_type,provider_key" },
+      ]);
     });
   });
 });

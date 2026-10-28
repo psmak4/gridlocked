@@ -363,11 +363,10 @@ export const providerIds = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    unique("provider_ids_provider_entity_type_provider_key_unique").on(
-      t.provider,
-      t.entityType,
-      t.providerKey,
-    ),
+    primaryKey({
+      name: "provider_ids_pkey",
+      columns: [t.provider, t.entityType, t.providerKey],
+    }),
     unique("provider_ids_provider_entity_type_entity_id_unique").on(
       t.provider,
       t.entityType,

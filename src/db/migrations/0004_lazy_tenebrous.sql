@@ -1,0 +1,2 @@
+ALTER TABLE "provider_ids" DROP CONSTRAINT "provider_ids_provider_entity_type_provider_key_unique";--> statement-breakpoint
+ALTER TABLE "provider_ids" ADD CONSTRAINT "provider_ids_pkey" PRIMARY KEY("provider","entity_type","provider_key");
