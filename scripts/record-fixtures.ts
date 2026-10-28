@@ -10,11 +10,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTestDb } from "../tests/helpers/test-db";
-// This script is the adapter's caller, not domain code.
-/* eslint-disable no-restricted-imports */
 import { createProviderClient } from "@/providers/http/client";
 import { createRateLimiter } from "@/providers/http/rate-limiter";
-/* eslint-enable no-restricted-imports */
 import { systemClock } from "@/lib/clock";
 import { getSetting } from "@/settings";
 

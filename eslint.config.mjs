@@ -74,6 +74,12 @@ const eslintConfig = defineConfig([
     rules: { "no-restricted-syntax": "off" },
   },
   {
+    // Test helpers parse recorded provider fixtures, and the one-off
+    // recording script calls the provider client. Neither is domain code.
+    files: ["tests/helpers/**", "scripts/**"],
+    rules: { "no-restricted-imports": "off" },
+  },
+  {
     // The adapters' own home, and tests of it.
     files: ["src/providers/**"],
     rules: { "no-restricted-imports": "off" },
