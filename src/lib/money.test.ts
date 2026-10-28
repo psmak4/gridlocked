@@ -39,10 +39,6 @@ describe("formatMoney", () => {
     expect(formatMoney(234, { trimWhole: true })).toBe("$23.4M");
   });
 
-  it("deliberately fails to prove CI blocks merges (remove before merge)", () => {
-    expect(formatMoney(234)).toBe("$0.0M");
-  });
-
   it("throws RangeError for non-integer units", () => {
     expect(() => formatMoney(23.5)).toThrow(RangeError);
   });
