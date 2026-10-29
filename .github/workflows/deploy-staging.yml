@@ -1,0 +1,96 @@
+name: Deploy staging
+
+# Manual only. Run it from the Actions tab (or `gh workflow run deploy-staging.yml`).
+# It takes the code to the Neon project `gridlocked-staging`, branch `main`:
+# migrations, an optional import of the 2026 season, and the `tick` function
+# with its two triggers (neon.ts).
+on:
+  workflow_dispatch:
+    inputs:
+      import_2026:
+        description: Import the recorded 2026 season (refuses a database that has polled live data)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Two deploys at once would race on migrations and on the function.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  # Pinned: the version of the `neon` CLI from npm that this workflow uses.
+  NEON_CLI_VERSION: 8.13.2
+  NEON_PROJECT_ID: ancient-fog-03461181
+  NEON_BRANCH: main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Holds the staging secrets: NEON_API_KEY_STAGING and DATABASE_URL_STAGING.
+    environment: staging
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Must come before setup-node so `cache: pnpm` can find the pnpm binary.
+      # Reads the version from `packageManager` in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The direct (unpooled) URL of the staging `main` branch. Prints the
+      # migrations it applied. Safe to run again.
+      - name: Run migrations
+        run: pnpm db:migrate:staging
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+
+      # Refuses a database that has polled live data (provider_requests is not
+      # empty), so it cannot overwrite newer results.
+      - name: Import the 2026 season
+        if: ${{ inputs.import_2026 }}
+        run: pnpm import:2026
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+
+      - name: Install the Neon CLI
+        run: npm install --global "neon@${NEON_CLI_VERSION}"
+
+      # A dry run: what the deploy below would change.
+      - name: Plan the Neon deploy
+        run: neon config plan --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH"
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+
+      # Applies neon.ts: the `scheduler` bucket, the `tick` function (bundled
+      # from src/jobs/functions/tick.ts) and the two schedule triggers.
+      # No --yes: if it would override branch settings or touch a protected
+      # branch, it stops and names the flag.
+      - name: Deploy the function and triggers
+        run: neon deploy --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH" --no-env-pull
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+
+      # The function URL and the trigger ids only; never the environment.
+      - name: Show the function and triggers
+        run: |
+          neon functions list --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH" --output json \
+            | jq -r '(if type == "array" then . else (.functions // []) end)[] | "function \(.slug): \(.current_deployment.status // "unknown") \(.invocation_url)"'
+          neon triggers list --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH" --output json \
+            | jq -r '(if type == "array" then . else (.triggers // []) end)[] | "trigger \(.trigger_id) \(.name) cron=\(.schedule.cron // "-") path=\(.function_path) enabled=\(.enabled) next_run_at=\(.next_run_at // "-")"'
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
