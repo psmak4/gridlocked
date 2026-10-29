@@ -18,6 +18,8 @@ import {
   sessions,
 } from "@/db/schema";
 import { simulatedClock } from "@/lib/clock";
+import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
+import { DUE_KEY } from "./due-times";
 import { runDue } from "./runner";
 import { enqueueCalendarSync } from "./sync-calendar";
 
@@ -86,6 +88,25 @@ describe("the sync_calendar handler", () => {
       ["sync_calendar", "sync_calendar:2026:2026-02-01", { season: 2026 }],
       ["sync_calendar", "sync_calendar:2026:2026-02-02", { season: 2026 }],
     ]);
+  });
+
+  it("republishes the due-times file when given a store", async () => {
+    const m = createMemoryDueStore({
+      [DUE_KEY]: JSON.stringify({
+        version: 1,
+        generated_at: T0.toISOString(),
+        next_due_at: new Date(T0.getTime() + DAY).toISOString(),
+      }),
+    });
+    await enqueueCalendarSync(t.db, T0, 2026, m.store);
+    expect(JSON.parse(m.objects.get(DUE_KEY)!).next_due_at).toBe(
+      T0.toISOString(),
+    );
+
+    // Already due at T0: a second call the same day writes nothing.
+    m.puts.length = 0;
+    await enqueueCalendarSync(t.db, T0, 2026, m.store);
+    expect(m.puts).toHaveLength(0);
   });
 
   it("from nothing: syncs the calendar, drivers and constructors, and plans every event", async () => {

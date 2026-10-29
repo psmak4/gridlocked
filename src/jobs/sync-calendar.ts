@@ -2,24 +2,35 @@ import { and, asc, eq } from "drizzle-orm";
 import { events, seasons } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { syncEventEntries } from "@/reference/sync-event-entries";
+import { republishIfEarlier, type DueStore } from "./due-times";
 import { planEventJobs } from "./plan-event";
 import { syncCalendarKey, syncCalendarPayload } from "./kinds";
 import type { CalendarSyncSource } from "./ports";
+import type { ClockDb } from "@/lib/resolve-clock";
 import { enqueue, type JobsDb } from "./queue";
 import type { JobHandler } from "./runner";
 
 /**
  * Enqueues the season's calendar sync for the UTC day of `now`, due now. A
  * second call on the same day finds the same job (dedupe key
- * `sync_calendar:<season>:<yyyy-mm-dd>`).
+ * `sync_calendar:<season>:<yyyy-mm-dd>`). Callers outside a tick (an admin
+ * action) pass the due-times `store` so the file moves earlier to `now`; the
+ * tick itself republishes after every run and needs no store.
  */
-export function enqueueCalendarSync(db: JobsDb, now: Date, season: number) {
-  return enqueue(db, {
+export async function enqueueCalendarSync(
+  db: JobsDb & ClockDb,
+  now: Date,
+  season: number,
+  store?: DueStore,
+) {
+  const result = await enqueue(db, {
     kind: "sync_calendar",
     dedupeKey: syncCalendarKey(season, now.toISOString().slice(0, 10)),
     runAt: now,
     payload: { season },
   });
+  if (store) await republishIfEarlier(db, store, now, now);
+  return result;
 }
 
 /**
