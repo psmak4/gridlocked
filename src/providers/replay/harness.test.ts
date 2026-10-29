@@ -70,8 +70,12 @@ describe("replayWeekend", () => {
     // (+0, +5, +20 min empty, +80 min published), and the four finalize
     // checks; every one succeeded.
     expect(report.jobs).toEqual({ succeeded: 14 });
-    // Each of those ran at a minute of its own.
-    expect(report.wakeTicks).toBe(14);
+    // The calendar sync recurs: the first safety tick (Friday 06:07 UTC)
+    // finds none pending and starts the chain, then it runs at 06:00 UTC on
+    // each of the four days after; Wednesday's is queued.
+    expect(report.calendarSyncs).toEqual({ succeeded: 5, pending: 1 });
+    // Every job and every sync ran at a minute of its own.
+    expect(report.wakeTicks).toBe(14 + 5);
   });
 
   it("shows a late +5 s penalty as result_changes and a new order at the next finalize check", async () => {

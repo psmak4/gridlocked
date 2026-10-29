@@ -6,6 +6,7 @@ import { seedSeats2026 } from "../../tests/helpers/seats-2026";
 import {
   allJobs,
   eventOfRound,
+  importFixtures2026,
   jolpicaFixture,
   makePipeline,
 } from "../../tests/helpers/pipeline-2026";
@@ -143,6 +144,109 @@ describe("the sync_calendar handler", () => {
     }
     // One synced snapshot trail for the three calls.
     expect(await t.db.select().from(rawSnapshots)).toHaveLength(3);
+  });
+
+  it("enqueues tomorrow's sync at 06:00 UTC, so the sync recurs", async () => {
+    const at = new Date("2026-02-01T09:30:00.000Z");
+    expect(await syncAt(at)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    const syncs = (await allJobs(t.db)).filter(
+      (j) => j.kind === "sync_calendar",
+    );
+    expect(
+      syncs.map((j) => [j.dedupeKey, j.status, j.runAt, j.payload]),
+    ).toEqual([
+      ["sync_calendar:2026:2026-02-01", "succeeded", at, { season: 2026 }],
+      [
+        "sync_calendar:2026:2026-02-02",
+        "pending",
+        new Date("2026-02-02T06:00:00.000Z"),
+        { season: 2026 },
+      ],
+    ]);
+
+    // Run again the next day: the chain continues, and nothing is duplicated.
+    const next = new Date("2026-02-02T06:00:00.000Z");
+    clock.set(next);
+    await runDue(t.db, clock, pipeline.handlers, {
+      maxJobs: 1,
+      leaseMs: 5 * MIN,
+    });
+    expect(
+      (await allJobs(t.db))
+        .filter((j) => j.kind === "sync_calendar")
+        .map((j) => [j.dedupeKey, j.status]),
+    ).toEqual([
+      ["sync_calendar:2026:2026-02-01", "succeeded"],
+      ["sync_calendar:2026:2026-02-02", "succeeded"],
+      ["sync_calendar:2026:2026-02-03", "pending"],
+    ]);
+  });
+
+  it("a failed run enqueues no next day, so the retry does", async () => {
+    pipeline.serve("/ergast/f1/2026.json", () => {
+      throw new TypeError("fetch failed");
+    });
+    await syncAt(T0);
+    expect(
+      (await allJobs(t.db)).map((j) => [j.kind, j.dedupeKey, j.status]),
+    ).toEqual([["sync_calendar", "sync_calendar:2026:2026-02-01", "failed"]]);
+  });
+
+  describe("after the 2026 import", () => {
+    const NOW = new Date("2026-10-29T06:00:00.000Z");
+
+    it("plans only the events still to finish, and nothing is due right away", async () => {
+      await importFixtures2026(t.db, new Date("2026-10-28T09:00:00Z"));
+      expect(await allJobs(t.db)).toEqual([]);
+
+      expect(await syncAt(NOW)).toEqual({ ran: 1, failed: 0, lost: 0 });
+
+      const evs = await t.db.select().from(events);
+      const roundOf = new Map(evs.map((e) => [e.id, e.round]));
+      const sessionRound = new Map(
+        (await t.db.select().from(sessions)).map((s) => [
+          s.id,
+          roundOf.get(s.eventId)!,
+        ]),
+      );
+      const rounds = new Set<number>();
+      for (const job of await planned()) {
+        const p = job.payload as { eventId?: string; sessionId?: string };
+        rounds.add(
+          p.eventId ? roundOf.get(p.eventId)! : sessionRound.get(p.sessionId!)!,
+        );
+        // Everything planned is still in the future.
+        expect(job.runAt.getTime()).toBeGreaterThan(NOW.getTime());
+      }
+      expect([...rounds].sort((a, b) => a - b)).toEqual([19, 20, 21, 22, 23]);
+
+      // The only job due now or earlier is the sync itself: today's has run,
+      // and the next is tomorrow at 06:00.
+      const syncs = (await allJobs(t.db)).filter(
+        (j) => j.kind === "sync_calendar",
+      );
+      expect(syncs.map((j) => [j.status, j.runAt.toISOString()])).toEqual([
+        ["succeeded", NOW.toISOString()],
+        ["pending", "2026-10-30T06:00:00.000Z"],
+      ]);
+      // Imported rounds stay as the import left them.
+      for (const e of evs.filter((e) => e.round <= 18)) {
+        expect(e.status).toBe("scheduled");
+      }
+    });
+
+    it("still plans a weekend whose last finalize check is ahead", async () => {
+      await importFixtures2026(t.db, new Date("2026-10-26T09:00:00Z"));
+      // Round 18's race ended 2026-10-25 22:00Z; +48 h is 2026-10-27 22:00Z.
+      await syncAt(new Date("2026-10-26T06:00:00.000Z"));
+      const keys = (await planned()).map((j) => j.dedupeKey);
+      const finals = keys.filter((k) => k.startsWith("finalize:"));
+      expect(finals.some((k) => k.endsWith("+48h"))).toBe(true);
+      const { event } = await eventOfRound(t.db, 18);
+      expect(finals.filter((k) => k.includes(event.id))).toEqual(
+        expect.arrayContaining([`finalize:${event.id}:+48h`]),
+      );
+    });
   });
 
   it("creates the event entries from the seats", async () => {
