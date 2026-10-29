@@ -11,9 +11,12 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1159.0
         version: 3.1159.0
+      '@neondatabase/serverless':
+        specifier: 1.2.0
+        version: 1.2.0
       drizzle-orm:
         specifier: ^0.45.4
-        version: 0.45.4(@electric-sql/pglite@0.5.12)
+        version: 0.45.4(@electric-sql/pglite@0.5.12)(@neondatabase/serverless@1.2.0)
       next:
         specifier: 16.4.3
         version: 16.4.3(@babel/core@7.29.7)(@playwright/test@1.64.1)(@types/node@24.19.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -33,6 +36,9 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.5.12
         version: 0.5.12
+      '@neon/config':
+        specifier: 1.9.5
+        version: 1.9.5
       '@playwright/test':
         specifier: ^1.64.1
         version: 1.64.1
@@ -936,6 +942,18 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || 2.0.0-beta.2
       '@emnapi/runtime': ^1.7.1 || 2.0.0-beta.2
+
+  '@neon/config@1.9.5':
+    resolution: {integrity: sha512-KK105CxGBrcNGJfUgmjINKTykizGbWh9fdjkaEflls10Q8VsBSMt/AXagECH9spYr/mI8o/UCtr6AOMwpKTsRw==}
+    engines: {node: '>=20.19.0'}
+
+  '@neon/sdk@7.6.0':
+    resolution: {integrity: sha512-CqNhupvYjP2KeO8v7aMy5hcDQuo118+KsNGkZd8UUyjYpC+MpLH1eot4uzTjITGPXBZ6yrfwtqnByVJOtuAmqg==}
+    engines: {node: '>=20.19.0'}
+
+  '@neondatabase/serverless@1.2.0':
+    resolution: {integrity: sha512-tnaqgixUengZQNd9ZrS3ytQfamJzLKY8QxgqWQTNHHtB+KrFQWk77JTbbpg4RD+J3qE4eO2lVytvGDX5Kj6FdQ==}
+    engines: {node: '>=19.0.0'}
 
   '@next/env@16.4.3':
     resolution: {integrity: sha512-a7tz1QCcWWkwC/rPJcPMJk/UNRu9CFhDd3OHYE5hddbJrs8BqRTalxI6GlKCWEGzRLHN+S/B7a4PAHCtm25aBQ==}
@@ -3805,6 +3823,16 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
+  '@neon/config@1.9.5':
+    dependencies:
+      '@neon/sdk': 7.6.0
+      jiti: 2.7.0
+      zod: 4.6.7
+
+  '@neon/sdk@7.6.0': {}
+
+  '@neondatabase/serverless@1.2.0': {}
+
   '@next/env@16.4.3': {}
 
   '@next/eslint-plugin-next@16.4.3(eslint@9.39.5(jiti@2.7.0))':
@@ -4450,9 +4478,10 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.4(@electric-sql/pglite@0.5.12):
+  drizzle-orm@0.45.4(@electric-sql/pglite@0.5.12)(@neondatabase/serverless@1.2.0):
     optionalDependencies:
       '@electric-sql/pglite': 0.5.12
+      '@neondatabase/serverless': 1.2.0
 
   dunder-proto@1.0.1:
     dependencies:
