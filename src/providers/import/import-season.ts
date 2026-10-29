@@ -187,6 +187,84 @@ async function reportOf(db: Db): Promise<ImportReport> {
   };
 }
 
+/** Stores a recorded body as a raw snapshot and returns its id. */
+async function storeRecorded(
+  db: Db,
+  clock: Clock,
+  provider: "jolpica" | "openf1",
+  request: ProviderRequest,
+  body: unknown,
+  link: { seasonId?: string; eventId?: string; sessionId?: string } = {},
+): Promise<string> {
+  return (
+    await storeSnapshot(db, {
+      provider,
+      ...request,
+      body,
+      now: clock.now(),
+      ...link,
+    })
+  ).id;
+}
+
+/**
+ * The reference half of the import: the season's calendar, drivers and
+ * constructors from the recorded fixtures (each stored as a raw snapshot and
+ * synced), the seats from `seats-2026.json`, and every event's entries. No
+ * results and no practice participants. The replay harness runs this to seed
+ * a weekend, as the calendar sync and the seat setup would have before it.
+ */
+export async function importReference2026(
+  db: Db,
+  clock: Clock,
+  fixturesDir: string,
+): Promise<{ seasonId: string }> {
+  const jolpicaDir = join(fixturesDir, "jolpica", String(SEASON));
+  const store = (
+    provider: "jolpica" | "openf1",
+    request: ProviderRequest,
+    body: unknown,
+  ) => storeRecorded(db, clock, provider, request, body);
+
+  const requests = jolpicaCalendarRequests(SEASON);
+  const calendarBody = await readJson(
+    join(fixturesDir, "jolpica", `${SEASON}.json`),
+  );
+  const calendarId = await store("jolpica", requests.calendar, calendarBody);
+  await syncCalendar(db, clock, SEASON, {
+    events: parseJolpicaCalendar(calendarBody),
+    snapshotId: calendarId,
+  });
+  const driversBody = await readJson(join(jolpicaDir, "drivers.json"));
+  await syncDrivers(db, clock, SEASON, {
+    items: parseJolpicaDrivers(driversBody),
+    snapshotId: await store("jolpica", requests.drivers, driversBody),
+  });
+  const constructorsBody = await readJson(
+    join(jolpicaDir, "constructors.json"),
+  );
+  await syncConstructors(db, clock, SEASON, {
+    items: parseJolpicaConstructors(constructorsBody),
+    snapshotId: await store("jolpica", requests.constructors, constructorsBody),
+  });
+
+  const { seasonId } = await seedSeats(
+    db,
+    clock.now(),
+    SEASON,
+    parseSeatsFile(await readJson(join(fixturesDir, `seats-${SEASON}.json`))),
+  );
+  const eventIds = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(eq(events.seasonId, seasonId))
+    .orderBy(asc(events.round));
+  for (const { id } of eventIds) {
+    await syncEventEntries(db, id, clock.now());
+  }
+  return { seasonId };
+}
+
 /**
  * Loads the recorded 2026 fixtures (`fixturesDir` is the root that holds
  * `jolpica/`, `openf1/` and `seats-2026.json`) into `db`, the way the pipeline
@@ -230,60 +308,14 @@ export async function importSeason2026(
   );
   resultFiles.sort((a, b) => a.round - b.round || (a.kind < b.kind ? -1 : 1));
 
-  // --- Calendar, drivers, constructors ------------------------------------
-  const requests = jolpicaCalendarRequests(SEASON);
-  const store = async (
+  // --- Calendar, drivers, constructors, seats and entries -----------------
+  const { seasonId } = await importReference2026(db, clock, fixturesDir);
+  const store = (
     provider: "jolpica" | "openf1",
     request: ProviderRequest,
     body: unknown,
     link: { seasonId?: string; eventId?: string; sessionId?: string } = {},
-  ) =>
-    (
-      await storeSnapshot(db, {
-        provider,
-        ...request,
-        body,
-        now: clock.now(),
-        ...link,
-      })
-    ).id;
-
-  const calendarBody = await readJson(
-    join(fixturesDir, "jolpica", `${SEASON}.json`),
-  );
-  const calendarId = await store("jolpica", requests.calendar, calendarBody);
-  await syncCalendar(db, clock, SEASON, {
-    events: parseJolpicaCalendar(calendarBody),
-    snapshotId: calendarId,
-  });
-  const driversBody = await readJson(join(jolpicaDir, "drivers.json"));
-  await syncDrivers(db, clock, SEASON, {
-    items: parseJolpicaDrivers(driversBody),
-    snapshotId: await store("jolpica", requests.drivers, driversBody),
-  });
-  const constructorsBody = await readJson(
-    join(jolpicaDir, "constructors.json"),
-  );
-  await syncConstructors(db, clock, SEASON, {
-    items: parseJolpicaConstructors(constructorsBody),
-    snapshotId: await store("jolpica", requests.constructors, constructorsBody),
-  });
-
-  // --- Seats and entries --------------------------------------------------
-  const { seasonId } = await seedSeats(
-    db,
-    clock.now(),
-    SEASON,
-    parseSeatsFile(await readJson(join(fixturesDir, `seats-${SEASON}.json`))),
-  );
-  const eventIds = await db
-    .select({ id: events.id })
-    .from(events)
-    .where(eq(events.seasonId, seasonId))
-    .orderBy(asc(events.round));
-  for (const { id } of eventIds) {
-    await syncEventEntries(db, id, clock.now());
-  }
+  ) => storeRecorded(db, clock, provider, request, body, link);
 
   // --- Results ------------------------------------------------------------
   for (const { file, round, kind } of resultFiles) {
