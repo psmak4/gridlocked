@@ -1,6 +1,6 @@
 import { providerRequests } from "@/db/schema";
 import type { Db } from "@/db/types";
-import type { Clock } from "@/lib/clock";
+import type { Clock, Timer } from "@/lib/clock";
 import { newId } from "@/lib/ids";
 import type { RateLimiter } from "./rate-limiter";
 import { storeSnapshot } from "../snapshots";
@@ -31,11 +31,16 @@ export interface ProviderClientOptions {
   provider: ProviderName;
   baseUrl: string;
   db: Db;
+  /** The app's "now", for the `requested_at` stamps only. */
   clock: Clock;
+  /**
+   * Real time, for how long a call took, `Retry-After` and waiting. Apart from
+   * `clock` because a tick's clock is frozen at its scheduled minute. Give the
+   * limiter the same timer.
+   */
+  timer: Timer;
   fetch: typeof fetch;
   limiter: RateLimiter;
-  /** Waits for `Retry-After`. The same `sleep` the limiter uses. */
-  sleep: (ms: number) => Promise<void>;
   /** Abort a request that has not finished after this long. Default 30 s. */
   timeoutMs?: number;
 }
@@ -72,13 +77,13 @@ const MAX_RETRY_AFTER_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** `Retry-After` is seconds or an HTTP date. Anything else gets the default. */
-function retryAfterMs(header: string | null, now: Date): number {
+function retryAfterMs(header: string | null, nowMs: number): number {
   if (header !== null && /^\d+$/.test(header.trim())) {
     return Number(header.trim()) * 1000;
   }
   if (header !== null) {
     const at = Date.parse(header);
-    if (!Number.isNaN(at)) return Math.max(0, at - now.getTime());
+    if (!Number.isNaN(at)) return Math.max(0, at - nowMs);
   }
   return DEFAULT_RETRY_AFTER_MS;
 }
@@ -94,7 +99,7 @@ function errorMessage(error: unknown): string {
  * three times; any other failure is logged and thrown.
  */
 export function createProviderClient(opts: ProviderClientOptions) {
-  const { provider, baseUrl, db, clock, limiter, sleep } = opts;
+  const { provider, baseUrl, db, clock, limiter, timer } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function get(
@@ -114,11 +119,11 @@ export function createProviderClient(opts: ProviderClientOptions) {
     for (let attempt = 0; ; attempt++) {
       await limiter.acquire();
       const requestedAt = clock.now();
+      const startedMs = timer.now();
 
       // Set once the response (or the failure) is in, before any database work.
       let durationMs = 0;
-      const elapsed = () =>
-        Math.max(0, clock.now().getTime() - requestedAt.getTime());
+      const elapsed = () => Math.max(0, timer.now() - startedMs);
 
       const log = (entry: {
         statusCode: number | null;
@@ -176,7 +181,7 @@ export function createProviderClient(opts: ProviderClientOptions) {
         }
         const waitMs = retryAfterMs(
           response.headers.get("retry-after"),
-          clock.now(),
+          timer.now(),
         );
         if (waitMs > MAX_RETRY_AFTER_MS) {
           throw new ProviderHttpError(
@@ -184,7 +189,7 @@ export function createProviderClient(opts: ProviderClientOptions) {
             `${provider} ${endpoint}: retry-after too long: ${Math.ceil(waitMs / 1000)}s`,
           );
         }
-        await sleep(waitMs);
+        await timer.sleep(waitMs);
         continue;
       }
 

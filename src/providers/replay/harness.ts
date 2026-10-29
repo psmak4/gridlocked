@@ -17,7 +17,7 @@ import { events, seasons, sessions } from "@/db/schema";
 import { publishDueTimes, type DueStore } from "@/jobs/due-times";
 import { planEventJobs } from "@/jobs/plan-event";
 import type { TickDb, TickDeps } from "@/jobs/tick";
-import { fixedClock, simulatedClock } from "@/lib/clock";
+import { fixedClock, virtualTimer, type Clock } from "@/lib/clock";
 import { localDate } from "@/reference/sync-event-entries";
 import {
   runReplayClock,
@@ -29,10 +29,9 @@ import type { Injection } from "@/replay/injections";
 import { buildReport, type ReplayReport } from "@/replay/report";
 import { SCORED_KINDS } from "@/results/validate";
 import { parseJolpicaCalendar } from "../jolpica/calendar";
-import { createProviderClient } from "../http/client";
-import { createRateLimiter } from "../http/rate-limiter";
 import { importReference2026 } from "../import/import-season";
 import { createPipelineHandlers } from "../pipeline";
+import { createPipelineClients } from "../pipeline/clients";
 import { createReplayFetch } from "./fixture-fetch";
 
 export type { ReplayReport };
@@ -199,12 +198,15 @@ export async function replayWeekend(
   }
 
   // --- Providers: the real clients over the recorded fixtures --------------
-  const clock = simulatedClock(from);
+  // The handlers are built inside each wake, on that tick's database and
+  // clock, as in production. The fetch is built once and reads the clock of
+  // the tick that is running.
+  let tickClock: Clock = fixedClock(from);
   const replayFetch = createReplayFetch({
     fixturesDir,
     season,
     round,
-    now: () => clock.now(),
+    now: () => tickClock.now(),
     sessions: running.map((s) => ({
       kind: s.kind,
       scheduledEnd: s.scheduledEnd,
@@ -213,28 +215,24 @@ export async function replayWeekend(
       (opts.publishDelayMinutes ?? DEFAULT_PUBLISH_DELAY_MINUTES) * MINUTE_MS,
     injections: opts.inject ?? [],
   });
-  const sleep = async () => {};
-  // Time inside a tick stands still, so the limiter would never see a window
-  // empty: the replay is not what the rate limits are tested on.
-  const client = (provider: "jolpica" | "openf1", baseUrl: string) =>
-    createProviderClient({
-      provider,
-      baseUrl,
-      db,
-      clock,
-      fetch: replayFetch,
-      limiter: createRateLimiter({ perSecond: 1_000_000 }, clock, sleep),
-      sleep,
-    });
-  const handlers = createPipelineHandlers({
-    jolpica: client("jolpica", "https://api.jolpi.ca/ergast/f1"),
-    openf1: client("openf1", "https://api.openf1.org/v1"),
-  });
 
   const deps: TickDeps = {
     db: () => db,
     store,
-    handlers,
+    // The configured provider limits apply here too. Time inside a tick
+    // stands still, so a limiter that has to wait sleeps on a virtual timer,
+    // which moves forward without waiting.
+    handlers: async (tickDb, clock) => {
+      tickClock = clock;
+      return createPipelineHandlers(
+        await createPipelineClients({
+          db: tickDb,
+          clock,
+          timer: virtualTimer(clock),
+          fetch: replayFetch,
+        }),
+      );
+    },
     mode: "replay",
   };
   const loop = await runReplayClock({
@@ -243,7 +241,6 @@ export async function replayWeekend(
     from,
     until,
     step: opts.step ?? "jump",
-    onMinute: (at) => clock.set(at),
     actions: (opts.admin ?? []).map((action) => {
       const session = eventSessions.find((s) => s.kind === action.session);
       if (!session) {

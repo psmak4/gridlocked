@@ -11,11 +11,23 @@ import {
   sessions,
 } from "@/db/schema";
 import { newId } from "@/lib/ids";
-import { simulatedClock } from "@/lib/clock";
+import { fixedClock, simulatedClock, type Timer } from "@/lib/clock";
 import { createProviderClient } from "./client";
 import { createRateLimiter } from "./rate-limiter";
 
 const start = new Date("2026-03-08T10:00:00.000Z");
+
+/** A timer that reads a simulated clock; `sleep` advances it. */
+const timerOn = (
+  clock: ReturnType<typeof simulatedClock>,
+  sleeps: number[] = [],
+): Timer => ({
+  now: () => clock.now().getTime(),
+  sleep: async (ms) => {
+    sleeps.push(ms);
+    clock.advance(ms);
+  },
+});
 
 function json(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -43,10 +55,7 @@ describe("createProviderClient", () => {
   ) {
     const clock = simulatedClock(start);
     const sleeps: number[] = [];
-    const sleep = async (ms: number) => {
-      sleeps.push(ms);
-      clock.advance(ms);
-    };
+    const timer = timerOn(clock, sleeps);
     const urls: string[] = [];
     const inits: Array<RequestInit | undefined> = [];
     const queue = [...responses];
@@ -68,8 +77,8 @@ describe("createProviderClient", () => {
       db: t.db,
       clock,
       fetch: fakeFetch,
-      limiter: createRateLimiter(limits, clock, sleep),
-      sleep,
+      limiter: createRateLimiter(limits, timer),
+      timer,
       ...extra,
     });
     return { client, clock, sleeps, urls, inits };
@@ -120,9 +129,9 @@ describe("createProviderClient", () => {
     expect(await t.db.select().from(rawSnapshots)).toHaveLength(1);
   });
 
-  it("records the call duration from the clock", async () => {
+  it("records the call duration from the timer", async () => {
     const clock = simulatedClock(start);
-    const sleep = async (ms: number) => clock.advance(ms);
+    const timer = timerOn(clock);
     const client = createProviderClient({
       provider: "openf1",
       baseUrl: "https://api.openf1.org/v1",
@@ -132,12 +141,62 @@ describe("createProviderClient", () => {
         clock.advance(250);
         return json([]);
       }) as typeof fetch,
-      limiter: createRateLimiter({ perSecond: 10 }, clock, sleep),
-      sleep,
+      limiter: createRateLimiter({ perSecond: 10 }, timer),
+      timer,
     });
     await client.get("/sessions");
     const [req] = await requests();
     expect(req!.durationMs).toBe(250);
+  });
+
+  it("stamps requested_at from the clock and measures time with the timer, even when the clock is frozen", async () => {
+    // System mode: the clock is the tick's scheduled instant, fixed for the
+    // whole tick, and only the timer sees time pass.
+    const clock = fixedClock(start);
+    const real = simulatedClock(new Date("2026-03-08T10:00:20.000Z"));
+    const timer = timerOn(real);
+    const client = createProviderClient({
+      provider: "openf1",
+      baseUrl: "https://api.openf1.org/v1",
+      db: t.db,
+      clock,
+      fetch: (async () => {
+        real.advance(250);
+        return json([]);
+      }) as typeof fetch,
+      limiter: createRateLimiter({ perSecond: 10 }, timer),
+      timer,
+    });
+    await client.get("/sessions");
+    const [req] = await requests();
+    expect(req!.requestedAt).toEqual(start);
+    expect(req!.durationMs).toBe(250);
+  });
+
+  it("works out an HTTP-date Retry-After from the timer's now", async () => {
+    // The clock is frozen at the tick's scheduled minute; the timer is 20 s later.
+    const clock = fixedClock(start);
+    const real = simulatedClock(new Date("2026-03-08T10:00:20.000Z"));
+    const sleeps: number[] = [];
+    const timer = timerOn(real, sleeps);
+    const responses = [
+      new Response("", {
+        status: 429,
+        headers: { "retry-after": "Sun, 08 Mar 2026 10:00:50 GMT" },
+      }),
+      json({ ok: 1 }),
+    ];
+    const client = createProviderClient({
+      provider: "jolpica",
+      baseUrl: "https://api.jolpi.ca/ergast/f1",
+      db: t.db,
+      clock,
+      fetch: (async () => responses.shift()!) as typeof fetch,
+      limiter: createRateLimiter({ perSecond: 10 }, timer),
+      timer,
+    });
+    await client.get("/x");
+    expect(sleeps).toEqual([30_000]);
   });
 
   it("waits Retry-After on a 429, then succeeds: two request rows, one snapshot", async () => {
@@ -284,23 +343,24 @@ describe("createProviderClient", () => {
   });
 
   it("measures duration right after the body is read, before storing the snapshot", async () => {
-    // Every clock read moves time by 100 ms, so any extra read shows up.
+    // Every timer read moves time by 100 ms, so any extra read shows up.
     let time = start.getTime();
-    const clock = {
+    const timer: Timer = {
       now: () => {
-        const at = new Date(time);
+        const at = time;
         time += 100;
         return at;
       },
+      sleep: async () => {},
     };
     const client = createProviderClient({
       provider: "jolpica",
       baseUrl: "https://api.jolpi.ca/ergast/f1",
       db: t.db,
-      clock,
+      clock: fixedClock(start),
       fetch: (async () => json({ ok: 1 })) as typeof fetch,
       limiter: { acquire: async () => {} },
-      sleep: async () => {},
+      timer,
     });
     await client.get("/x");
     const [row] = await requests();
@@ -310,17 +370,18 @@ describe("createProviderClient", () => {
   it("clamps a negative duration to zero", async () => {
     // The first read is the start; every later read is five seconds earlier.
     let reads = 0;
-    const clock = {
-      now: () => new Date(start.getTime() - (reads++ === 0 ? 0 : 5_000)),
+    const timer: Timer = {
+      now: () => start.getTime() - (reads++ === 0 ? 0 : 5_000),
+      sleep: async () => {},
     };
     const client = createProviderClient({
       provider: "jolpica",
       baseUrl: "https://api.jolpi.ca/ergast/f1",
       db: t.db,
-      clock,
+      clock: fixedClock(start),
       fetch: (async () => json({ ok: 1 })) as typeof fetch,
       limiter: { acquire: async () => {} },
-      sleep: async () => {},
+      timer,
     });
     await client.get("/x");
     const [row] = await requests();

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fixedClock, simulatedClock, systemClock } from "./clock";
+import {
+  fixedClock,
+  simulatedClock,
+  systemClock,
+  systemTimer,
+  virtualTimer,
+} from "./clock";
 
 describe("fixedClock", () => {
   it("always reports the given instant", () => {
@@ -74,5 +80,35 @@ describe("systemClock", () => {
     const read = systemClock.now().getTime();
     expect(read).toBeGreaterThanOrEqual(before);
     expect(read).toBeLessThanOrEqual(Date.now());
+  });
+});
+
+describe("virtualTimer", () => {
+  it("reads the clock, and sleeping moves it forward without waiting", async () => {
+    const clock = simulatedClock(new Date("2026-10-31T20:00:00Z"));
+    const timer = virtualTimer(clock);
+    const start = timer.now();
+    expect(start).toBe(Date.parse("2026-10-31T20:00:00Z"));
+    await timer.sleep(1500);
+    expect(timer.now()).toBe(start + 1500);
+    // It follows the clock too.
+    clock.advance(1000);
+    expect(timer.now()).toBe(start + 2500);
+  });
+
+  it("keeps its own offset, so one timer's sleeps do not move another's", async () => {
+    const clock = fixedClock(new Date("2026-10-31T20:00:00Z"));
+    const a = virtualTimer(clock);
+    const b = virtualTimer(clock);
+    await a.sleep(1000);
+    expect(a.now() - b.now()).toBe(1000);
+  });
+});
+
+describe("systemTimer", () => {
+  it("reports epoch milliseconds and sleeps for real", async () => {
+    const before = systemTimer.now();
+    await systemTimer.sleep(5);
+    expect(systemTimer.now()).toBeGreaterThanOrEqual(before + 4);
   });
 });

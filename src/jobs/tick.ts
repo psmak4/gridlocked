@@ -4,6 +4,7 @@
  * passes the trigger's scheduled instant. Nothing here reads the time.
  */
 import type { Db } from "@/db/types";
+import type { Clock } from "@/lib/clock";
 import {
   assertClockMode,
   resolveClock,
@@ -32,7 +33,19 @@ export type TickDeps = {
    */
   db: () => TickDb;
   store: DueStore;
-  handlers: Record<string, JobHandler>;
+  /**
+   * Builds the job handlers for one wake, on the tick's own database and
+   * clock (the one `resolveClock` gave `runDue`), so the provider clients,
+   * the request log and the jobs' writes share one connection and one instant
+   * (HLD decision 20). Called once, after the clock check and only when jobs
+   * are going to run, so a sleeping tick never builds (or connects) anything.
+   * May be async: building the provider clients reads settings and the
+   * recent request log.
+   */
+  handlers: (
+    db: TickDb,
+    clock: Clock,
+  ) => Record<string, JobHandler> | Promise<Record<string, JobHandler>>;
   mode: ClockMode;
   /** Where a store read failure is reported. Defaults to `console.error`. */
   log?: (message: string) => void;
@@ -108,7 +121,8 @@ export async function tick(
     );
     return { action: "republished", reason: decision.reason, file };
   }
-  const run = await runDue(db, clock, deps.handlers, opts);
+  const handlers = await deps.handlers(db, clock);
+  const run = await runDue(db, clock, handlers, opts);
   const file = await publishDueTimes(db, deps.store, clock.now());
   return { action: "wake", run, file };
 }

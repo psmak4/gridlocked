@@ -1,17 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { simulatedClock } from "@/lib/clock";
+import { simulatedClock, type Timer } from "@/lib/clock";
 import { createRateLimiter } from "./rate-limiter";
 
 const start = new Date("2026-03-01T00:00:00.000Z");
 
-function setup(limits: Parameters<typeof createRateLimiter>[0]) {
+/** A timer on a simulated clock: sleeping advances it. */
+function simulatedTimer(sleeps: number[] = []) {
   const clock = simulatedClock(start);
-  const sleeps: number[] = [];
-  const sleep = async (ms: number) => {
-    sleeps.push(ms);
-    clock.advance(ms);
+  const timer: Timer = {
+    now: () => clock.now().getTime(),
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      clock.advance(ms);
+    },
   };
-  const limiter = createRateLimiter(limits, clock, sleep);
+  return { clock, timer };
+}
+
+function setup(
+  limits: Parameters<typeof createRateLimiter>[0],
+  opts?: Parameters<typeof createRateLimiter>[2],
+) {
+  const sleeps: number[] = [];
+  const { clock, timer } = simulatedTimer(sleeps);
+  const limiter = createRateLimiter(limits, timer, opts);
   const elapsed = () => clock.now().getTime() - start.getTime();
   return { clock, limiter, sleeps, elapsed };
 }
@@ -74,14 +86,95 @@ describe("createRateLimiter", () => {
     // Concurrent sleepers wait in parallel, so a sleep moves the clock only up
     // to its own wake-up time instead of adding to the other sleepers' time.
     const clock = simulatedClock(start);
-    const sleep = async (ms: number) => {
-      const wakeAt = clock.now().getTime() + ms;
-      if (clock.now().getTime() < wakeAt) clock.set(new Date(wakeAt));
+    const timer: Timer = {
+      now: () => clock.now().getTime(),
+      sleep: async (ms) => {
+        const wakeAt = clock.now().getTime() + ms;
+        if (clock.now().getTime() < wakeAt) clock.set(new Date(wakeAt));
+      },
     };
-    const limiter = createRateLimiter({ perSecond: 2 }, clock, sleep);
+    const limiter = createRateLimiter({ perSecond: 2 }, timer);
     await Promise.all(Array.from({ length: 6 }, () => limiter.acquire()));
     // 2 per second means the sixth call cannot be earlier than 2 s in, and
     // nothing forces it later than that.
     expect(clock.now().getTime() - start.getTime()).toBe(2000);
+  });
+  it("throws when its time has not moved after a sleep, instead of looping forever", async () => {
+    const timer: Timer = { now: () => start.getTime(), sleep: async () => {} };
+    const limiter = createRateLimiter({ perSecond: 1 }, timer);
+    await limiter.acquire();
+    await expect(limiter.acquire()).rejects.toThrow(
+      "limiter clock is not advancing",
+    );
+  });
+
+  describe("seeded with the calls other invocations already made", () => {
+    const ago = (ms: number) => start.getTime() - ms;
+
+    it("waits as if the seeded calls were its own, per second", async () => {
+      // Three calls 100 ms ago fill the 3/s window until 900 ms from now.
+      const { limiter, sleeps, elapsed } = setup(
+        { perSecond: 3 },
+        { seed: [ago(100), ago(100), ago(100)] },
+      );
+      await limiter.acquire();
+      expect(sleeps).toEqual([900]);
+      expect(elapsed()).toBe(900);
+    });
+
+    it("waits as if the seeded calls were its own, per minute", async () => {
+      // 25 calls in the last 10 s: the 26th waits until the oldest is a minute old.
+      const seed = Array.from({ length: 25 }, (_, i) => ago(10_000 - i * 100));
+      const { limiter, elapsed } = setup(
+        { perSecond: 100, perMinute: 25 },
+        { seed },
+      );
+      await limiter.acquire();
+      expect(elapsed()).toBe(50_000);
+    });
+
+    it("waits as if the seeded calls were its own, per hour", async () => {
+      const seed = Array.from({ length: 400 }, (_, i) => ago(1_800_000 - i));
+      const { limiter, elapsed } = setup(
+        { perSecond: 3, perHour: 400 },
+        { seed },
+      );
+      await limiter.acquire();
+      // The oldest seeded call is 1_800_000 ms old: it leaves the hour in 1_800_000 ms.
+      expect(elapsed()).toBe(3_600_000 - 1_800_000);
+    });
+
+    it("counts its own calls on top of the seeded ones", async () => {
+      const { limiter, elapsed } = setup(
+        { perSecond: 3 },
+        { seed: [ago(100)] },
+      );
+      await limiter.acquire();
+      await limiter.acquire();
+      // One seeded call plus two of its own fill the window of three.
+      expect(elapsed()).toBe(0);
+      await limiter.acquire();
+      // The seeded call is the first to leave the window.
+      expect(elapsed()).toBe(900);
+    });
+
+    it("ignores seeded calls that are outside every window", async () => {
+      const { limiter, sleeps } = setup(
+        { perSecond: 1, perHour: 1 },
+        { seed: [ago(3_600_001)] },
+      );
+      await limiter.acquire();
+      expect(sleeps).toEqual([]);
+    });
+
+    it("accepts an unsorted seed", async () => {
+      const { limiter, elapsed } = setup(
+        { perSecond: 2 },
+        { seed: [ago(100), ago(900)] },
+      );
+      await limiter.acquire();
+      // The call 900 ms ago is the one that leaves first.
+      expect(elapsed()).toBe(100);
+    });
   });
 });

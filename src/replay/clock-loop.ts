@@ -66,8 +66,6 @@ export interface ClockLoopOptions {
   from: Date;
   until: Date;
   step: ReplayStep;
-  /** Called with each simulated minute before it is written, so a caller's own clock can follow. */
-  onMinute?: (at: Date) => void;
   /** Run once each, at their minute (see above). Actions after `until` never run. */
   actions?: Array<{ at: Date; run: (at: Date) => Promise<void> }>;
 }
@@ -92,10 +90,7 @@ export async function runReplayClock(
   }
 
   const result: ClockLoopResult = { ticks: 0, wakeTicks: 0, safetyTicks: 0 };
-  const setClock = async (at: Date) => {
-    opts.onMinute?.(at);
-    await setSimulatedClock(opts.db, at);
-  };
+  const setClock = (at: Date) => setSimulatedClock(opts.db, at);
 
   const pending = [...(opts.actions ?? [])].sort(
     (a, b) => a.at.getTime() - b.at.getTime(),
