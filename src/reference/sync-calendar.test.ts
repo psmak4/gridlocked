@@ -22,6 +22,8 @@ describe("syncCalendar", () => {
   const clock = simulatedClock(new Date("2026-02-01T00:00:00.000Z"));
 
   beforeEach(async () => {
+    // Tests move the shared clock; each starts from the same day.
+    clock.set(new Date("2026-02-01T00:00:00.000Z"));
     t = await createTestDb();
   });
   afterEach(async () => {
@@ -233,6 +235,97 @@ describe("syncCalendar", () => {
         new Date(moved.start.getTime() + 60 * MINUTE),
       );
       expect(event.lockAt).toEqual(moved.start);
+    });
+  });
+
+  describe("a lock that has passed never moves", () => {
+    const postpone = (list: CalendarEvent[], hours: number) => {
+      const quali = list[0]!.sessions.find((s) => s.kind === "qualifying")!;
+      quali.start = new Date(quali.start.getTime() + hours * 60 * MINUTE);
+      return quali;
+    };
+
+    it("keeps lock_at when the lock session moves after the lock, and opens lock_passed_changed", async () => {
+      await sync(loadCalendar2026());
+      const before = await eventByName("Australian Grand Prix");
+      // Qualifying started a minute ago.
+      clock.set(new Date(before.lockAt.getTime() + MINUTE));
+
+      const list = loadCalendar2026();
+      const moved = postpone(list, 24);
+      const report = await sync(list);
+
+      const after = await eventByName("Australian Grand Prix");
+      expect(after.lockAt).toEqual(before.lockAt);
+      expect(after.lockAtSource).toBe("default");
+      // The session itself follows the provider; only the lock stays.
+      const q = (await sessionsOf(after.id)).find(
+        (s) => s.kind === "qualifying",
+      )!;
+      expect(q.scheduledStart).toEqual(moved.start);
+      expect(report.reviewItems).toBe(1);
+      const [item] = await reviews();
+      expect(item).toMatchObject({
+        kind: "lock_passed_changed",
+        severity: "warning",
+        status: "open",
+        eventId: after.id,
+        dedupeKey: `lock_passed_changed:${after.id}`,
+        createdAt: clock.now(),
+      });
+      expect(item!.details).toMatchObject({
+        lockAt: before.lockAt.toISOString(),
+        wantedLockAt: moved.start.toISOString(),
+        lockSessionId: q.id,
+      });
+
+      // A repeat adds nothing.
+      clock.advance(MINUTE);
+      await sync(list);
+      expect(await reviews()).toHaveLength(1);
+      expect((await eventByName("Australian Grand Prix")).lockAt).toEqual(
+        before.lockAt,
+      );
+    });
+
+    it("keeps lock_at at the instant of the lock too (at or before now)", async () => {
+      await sync(loadCalendar2026());
+      const before = await eventByName("Australian Grand Prix");
+      clock.set(before.lockAt);
+      const list = loadCalendar2026();
+      postpone(list, 2);
+      await sync(list);
+      expect((await eventByName("Australian Grand Prix")).lockAt).toEqual(
+        before.lockAt,
+      );
+      expect((await reviews()).map((r) => r.kind)).toEqual([
+        "lock_passed_changed",
+      ]);
+    });
+
+    it("still follows the session before the lock, with no item", async () => {
+      await sync(loadCalendar2026());
+      const before = await eventByName("Australian Grand Prix");
+      clock.set(new Date(before.lockAt.getTime() - MINUTE));
+      const list = loadCalendar2026();
+      const moved = postpone(list, 24);
+      await sync(list);
+
+      expect((await eventByName("Australian Grand Prix")).lockAt).toEqual(
+        moved.start,
+      );
+      expect(await reviews()).toEqual([]);
+    });
+
+    it("an event first seen after its lock gets its lock from the session", async () => {
+      clock.set(new Date("2026-12-01T00:00:00.000Z"));
+      await sync(loadCalendar2026());
+      const event = await eventByName("Australian Grand Prix");
+      const q = (await sessionsOf(event.id)).find(
+        (s) => s.kind === "qualifying",
+      )!;
+      expect(event.lockAt).toEqual(q.scheduledStart);
+      expect(await reviews()).toEqual([]);
     });
   });
 
