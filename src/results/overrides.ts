@@ -1,11 +1,48 @@
 import { and, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { resultOverrides, results } from "@/db/schema";
+import { resultOverrides, results, sessionResultState } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 
 // The admin layer over provider rows (DM 2.6). An override is stored as an
 // event: made, then revoked, never edited, so history stays readable.
+
+/**
+ * The session is `final`: its results are closed, so an override can be
+ * neither added nor revoked. Reopening a final session is the audited flow
+ * (M8).
+ */
+export class SessionFinalError extends Error {
+  constructor() {
+    super("session is final: reopen it first");
+    this.name = "SessionFinalError";
+  }
+}
+
+/**
+ * Locks the session's state row (creating it if the session has none yet),
+ * refuses a final session, and bumps `version`: the effective results are
+ * about to change, and whatever listens for that (scoring, M3/M4) sees a new
+ * version. Called inside the override's transaction, so a refusal rolls
+ * everything back. The status itself is moved by `advanceStatus`, which the
+ * caller must run afterwards.
+ */
+async function lockAndBump(tx: Db, sessionId: string): Promise<void> {
+  await tx
+    .insert(sessionResultState)
+    .values({ sessionId })
+    .onConflictDoNothing();
+  const [state] = await tx
+    .select()
+    .from(sessionResultState)
+    .where(eq(sessionResultState.sessionId, sessionId))
+    .for("update");
+  if (state!.status === "final") throw new SessionFinalError();
+  await tx
+    .update(sessionResultState)
+    .set({ version: state!.version + 1 })
+    .where(eq(sessionResultState.sessionId, sessionId));
+}
 
 /** Columns of `results` an override can never set: identity and provenance. */
 const NOT_OVERRIDABLE = [
@@ -123,6 +160,9 @@ function checkFields(
  * driver in the session is revoked first, in the same transaction, so there
  * is only ever one (DM 2.6): editing is revoke-and-replace. `now` stamps both
  * the revocation and the new row; `createdBy` is recorded as the revoker.
+ *
+ * Refuses a `final` session (`SessionFinalError`) and otherwise bumps the
+ * session's `version` once. Callers run `advanceStatus` afterwards.
  */
 export async function addOverride(
   db: Db,
@@ -139,6 +179,7 @@ export async function addOverride(
   const fields = checkFields(o.kind, o.fields);
   if (o.reason.trim() === "") throw new Error("an override needs a reason");
   return db.transaction(async (tx) => {
+    await lockAndBump(tx, o.sessionId);
     await tx
       .update(resultOverrides)
       .set({
@@ -168,28 +209,37 @@ export async function addOverride(
   });
 }
 
-/** Revokes an override, reverting that driver to the provider value. */
+/**
+ * Revokes an override, reverting that driver to the provider value. Refuses a
+ * `final` session (`SessionFinalError`) and otherwise bumps the session's
+ * `version` once. Callers run `advanceStatus` afterwards.
+ */
 export async function revokeOverride(
   db: Db,
   now: Date,
   id: string,
   by: string,
 ): Promise<void> {
-  const revoked = await db
-    .update(resultOverrides)
-    .set({
-      revokedAt: now,
-      revokedBy: by,
-      version: sql`${resultOverrides.version} + 1`,
-    })
-    .where(and(eq(resultOverrides.id, id), isNull(resultOverrides.revokedAt)))
-    .returning({ id: resultOverrides.id });
-  if (revoked.length > 0) return;
-  const [existing] = await db
-    .select({ id: resultOverrides.id })
-    .from(resultOverrides)
-    .where(eq(resultOverrides.id, id));
-  throw new Error(
-    existing ? `override ${id} is already revoked` : `no override ${id}`,
-  );
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({
+        sessionId: resultOverrides.sessionId,
+        revokedAt: resultOverrides.revokedAt,
+      })
+      .from(resultOverrides)
+      .where(eq(resultOverrides.id, id));
+    if (!existing) throw new Error(`no override ${id}`);
+    await lockAndBump(tx, existing.sessionId);
+    const revoked = await tx
+      .update(resultOverrides)
+      .set({
+        revokedAt: now,
+        revokedBy: by,
+        version: sql`${resultOverrides.version} + 1`,
+      })
+      .where(and(eq(resultOverrides.id, id), isNull(resultOverrides.revokedAt)))
+      .returning({ id: resultOverrides.id });
+    if (revoked.length === 0)
+      throw new Error(`override ${id} is already revoked`);
+  });
 }

@@ -71,12 +71,81 @@ describe("advanceStatus", () => {
     return id;
   }
 
+  describe("what it returns: the change signal", () => {
+    it("reports the previous and next status, whether it changed, and the results version", async () => {
+      const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
+      const first = await advanceStatus(t.db, T1, id);
+      expect(first).toEqual({
+        previous: "awaiting",
+        next: "provisional",
+        changed: true,
+        resultsVersion: (await state(id))!.version,
+      });
+
+      // Nothing happened: the same answer, unchanged, at the same version.
+      expect(await advanceStatus(t.db, T2, id)).toEqual({
+        previous: "provisional",
+        next: "provisional",
+        changed: false,
+        resultsVersion: first.resultsVersion,
+      });
+    });
+
+    it("the version moves when the effective results change, even if the status does not", async () => {
+      const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
+      const before = await advanceStatus(t.db, T1, id);
+      const driverId = await idFor(t.db, "driver", "russell");
+
+      await addOverride(t.db, T2, {
+        sessionId: id,
+        driverId,
+        kind: "patch",
+        fields: { fastest_lap_ms: 91234 },
+        reason: "stewards",
+        createdBy: ADMIN,
+      });
+      const after = await advanceStatus(t.db, T2, id);
+      expect(after).toMatchObject({
+        previous: "provisional",
+        next: "provisional",
+        changed: false,
+      });
+      expect(after.resultsVersion).toBe(before.resultsVersion + 1);
+      expect(after.resultsVersion).toBe((await state(id))!.version);
+    });
+
+    it("a final session answers final to final, unchanged", async () => {
+      const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
+      await advanceStatus(t.db, T1, id);
+      await t.db
+        .update(sessionResultState)
+        .set({ status: "final", finalizedAt: T1 })
+        .where(eq(sessionResultState.sessionId, id));
+      expect(await advanceStatus(t.db, T2, id)).toEqual({
+        previous: "final",
+        next: "final",
+        changed: false,
+        resultsVersion: (await state(id))!.version,
+      });
+    });
+
+    it("a session with no state row yet is previously awaiting", async () => {
+      const id = await sessionIdFor(t.db, 18, "race");
+      await seedEntriesFor(t.db, id);
+      expect(await advanceStatus(t.db, T1, id)).toMatchObject({
+        previous: "awaiting",
+        next: "awaiting",
+        changed: false,
+      });
+    });
+  });
+
   describe("a complete, clean session", () => {
     it("moves awaiting to provisional, and creates the state row if needed", async () => {
       const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
       expect((await state(id))!.status).toBe("awaiting");
 
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
       expect(await state(id)).toMatchObject({
         status: "provisional",
         version: 3,
@@ -88,7 +157,7 @@ describe("advanceStatus", () => {
       const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
       await advanceStatus(t.db, T1, id);
       const before = await state(id);
-      expect(await advanceStatus(t.db, T2, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("provisional");
       expect(await state(id)).toEqual(before);
     });
 
@@ -100,17 +169,18 @@ describe("advanceStatus", () => {
         "qualifying",
         "r18-qualifying.json",
       );
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
     });
 
     it("leaves a final session alone", async () => {
       const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
+      // An override that would raise a finding, made before the session closed.
+      await patchOverride(id, "russell", { constructor_id: await ferrari() });
       await t.db
         .update(sessionResultState)
         .set({ status: "final", finalizedAt: T1 })
         .where(eq(sessionResultState.sessionId, id));
-      await patchOverride(id, "russell", { constructor_id: await ferrari() });
-      expect(await advanceStatus(t.db, T2, id)).toBe("final");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("final");
       expect(await items(id)).toEqual([]);
     });
 
@@ -137,7 +207,7 @@ describe("advanceStatus", () => {
     it("with no results yet stays awaiting and opens nothing", async () => {
       const id = await sessionIdFor(t.db, 18, "race");
       await seedEntriesFor(t.db, id);
-      expect(await advanceStatus(t.db, T1, id)).toBe("awaiting");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("awaiting");
       expect(await state(id)).toMatchObject({
         status: "awaiting",
         source: "provider",
@@ -155,11 +225,11 @@ describe("advanceStatus", () => {
         reason: "drop one",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T1, id)).toBe("awaiting");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("awaiting");
       expect(await items(id)).toEqual([]);
 
       await revokeOverride(t.db, T2, suppress, ADMIN);
-      expect(await advanceStatus(t.db, T2, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("provisional");
     });
 
     it("a provisional session that loses a row is held for review, not sent back to awaiting", async () => {
@@ -173,7 +243,7 @@ describe("advanceStatus", () => {
         reason: "drop one",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T2, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("under_review");
 
       const [item] = await items(id);
       expect(item).toMatchObject({
@@ -192,7 +262,7 @@ describe("advanceStatus", () => {
 
       // The row comes back: the finding clears and the session advances.
       await revokeOverride(t.db, T3, suppress, ADMIN);
-      expect(await advanceStatus(t.db, T3, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T3, id)).next).toBe("provisional");
       expect(await items(id)).toEqual([
         expect.objectContaining({
           status: "resolved",
@@ -203,7 +273,7 @@ describe("advanceStatus", () => {
 
     it("an under_review session that loses a row also opens a missing_driver item", async () => {
       const id = await raceWithRussellIn("ferrari");
-      expect(await advanceStatus(t.db, T1, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("under_review");
       const hamilton = await idFor(t.db, "driver", "hamilton");
       await addOverride(t.db, T2, {
         sessionId: id,
@@ -212,7 +282,7 @@ describe("advanceStatus", () => {
         reason: "drop one",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T2, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("under_review");
       expect(
         (await items(id)).find(
           (i) => i.dedupeKey === `validate:${id}:missing_driver:${hamilton}`,
@@ -229,7 +299,7 @@ describe("advanceStatus", () => {
         reason: "drop one",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T1, id)).toBe("awaiting");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("awaiting");
       expect(await items(id)).toEqual([]);
     });
   });
@@ -237,7 +307,7 @@ describe("advanceStatus", () => {
   describe("a roster surprise", () => {
     it("opens a blocking team_change and moves to under_review", async () => {
       const id = await raceWithRussellIn("ferrari");
-      expect(await advanceStatus(t.db, T1, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("under_review");
 
       const open = (await items(id)).filter((i) => i.status === "open");
       const russell = await idFor(t.db, "driver", "russell");
@@ -280,12 +350,12 @@ describe("advanceStatus", () => {
           and(eq(reviewItems.sessionId, id), eq(reviewItems.status, "open")),
         );
 
-      expect(await advanceStatus(t.db, T2, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("provisional");
       // The decided findings were not reopened.
       expect((await items(id)).every((i) => i.status === "resolved")).toBe(
         true,
       );
-      expect(await advanceStatus(t.db, T3, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T3, id)).next).toBe("provisional");
     });
 
     it("a finding the admin dismissed is not reopened, but a changed finding is", async () => {
@@ -295,7 +365,7 @@ describe("advanceStatus", () => {
         .update(reviewItems)
         .set({ status: "dismissed", resolution: "ignore", resolvedAt: T2 })
         .where(eq(reviewItems.sessionId, id));
-      expect(await advanceStatus(t.db, T2, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("provisional");
 
       // The car number changes: not the thing the admin decided on.
       await addOverride(t.db, T2, {
@@ -306,7 +376,7 @@ describe("advanceStatus", () => {
         reason: "test",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T3, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T3, id)).next).toBe("under_review");
     });
 
     it("refreshes the details of an item that is still open", async () => {
@@ -324,7 +394,7 @@ describe("advanceStatus", () => {
         reason: "test",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T3, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T3, id)).next).toBe("under_review");
       const [after] = (await items(id)).filter((i) => i.kind === "team_change");
       expect(after!.id).toBe(before!.id);
       expect(after!.status).toBe("open");
@@ -349,10 +419,10 @@ describe("advanceStatus", () => {
         reason: "wrong car",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T1, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("under_review");
 
       await revokeOverride(t.db, T2, bad, ADMIN);
-      expect(await advanceStatus(t.db, T2, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("provisional");
       const all = await items(id);
       expect(all.length).toBeGreaterThan(0);
       for (const item of all) {
@@ -372,7 +442,7 @@ describe("advanceStatus", () => {
         reason: "wrong car again",
         createdBy: ADMIN,
       });
-      expect(await advanceStatus(t.db, T3, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T3, id)).next).toBe("under_review");
       expect(
         (await items(id)).filter((i) => i.status === "open"),
       ).not.toHaveLength(0);
@@ -390,7 +460,7 @@ describe("advanceStatus", () => {
         details: {},
         dedupeKey: `normalize:${id}:x`,
       });
-      expect(await advanceStatus(t.db, T1, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("under_review");
       // It is not one of ours, so it is left alone.
       const [item] = await items(id);
       expect(item).toMatchObject({
@@ -409,12 +479,12 @@ describe("advanceStatus", () => {
         details: {},
         dedupeKey: `warn:${id}`,
       });
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
     });
 
     it("under_review goes to provisional once the problem and the items are gone", async () => {
       const id = await raceWithRussellIn("ferrari");
-      expect(await advanceStatus(t.db, T1, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("under_review");
       // A corrected provider response.
       await ingest(
         t.db,
@@ -423,7 +493,7 @@ describe("advanceStatus", () => {
         "race",
         loadBody("jolpica/2026/r18-results.json"),
       );
-      expect(await advanceStatus(t.db, T2, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("provisional");
     });
   });
 
@@ -549,7 +619,7 @@ describe("advanceStatus", () => {
   describe("more recorded sessions reach provisional", () => {
     it("a sprint (round 2) is provisional with no review items", async () => {
       const id = await ingestRecorded(t.db, T0, 2, "sprint", "r02-sprint.json");
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
       expect(await items(id)).toEqual([]);
     });
 
@@ -565,7 +635,7 @@ describe("advanceStatus", () => {
       delete row.Q3;
       await ingest(t.db, T0, id, "qualifying", body);
 
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
       expect(await items(id)).toEqual([]);
     });
 
@@ -578,7 +648,7 @@ describe("advanceStatus", () => {
       [17, "r17-results.json"],
     ])("round %i race is provisional", async (round, file) => {
       const id = await ingestRecorded(t.db, T0, round, "race", file);
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
       expect(await items(id)).toEqual([]);
     });
   });
@@ -640,7 +710,7 @@ describe("advanceStatus", () => {
       const id = await sessionIdFor(t.db, 18, "race");
       await seedEntriesFor(t.db, id);
       await enterByHand(id);
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
     });
 
     it("opens provider_after_manual, keeps the inserts, and holds the session", async () => {
@@ -656,7 +726,7 @@ describe("advanceStatus", () => {
         "race",
         loadBody("jolpica/2026/r18-results.json"),
       );
-      expect(await advanceStatus(t.db, T2, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("under_review");
 
       const [item] = await items(id);
       expect(item).toMatchObject({
@@ -696,8 +766,8 @@ describe("advanceStatus", () => {
         "race",
         loadBody("jolpica/2026/r18-results.json"),
       );
-      expect(await advanceStatus(t.db, T1, id)).toBe("under_review");
-      expect(await advanceStatus(t.db, T2, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("under_review");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("under_review");
       expect(await items(id)).toHaveLength(1);
 
       await t.db
@@ -709,7 +779,7 @@ describe("advanceStatus", () => {
           resolvedAt: T2,
         })
         .where(eq(reviewItems.sessionId, id));
-      expect(await advanceStatus(t.db, T3, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T3, id)).next).toBe("provisional");
       expect(await items(id)).toHaveLength(1);
     });
 
@@ -729,12 +799,12 @@ describe("advanceStatus", () => {
         .update(reviewItems)
         .set({ status: "resolved", resolution: "keep", resolvedAt: T1 })
         .where(eq(reviewItems.sessionId, id));
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
 
       const body = loadBody("jolpica/2026/r18-results.json");
       rowsOf(body, "Results")[0]!.laps = "55";
       await ingest(t.db, T2, id, "race", body);
-      expect(await advanceStatus(t.db, T2, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("under_review");
       expect((await items(id)).filter((i) => i.status === "open")).toHaveLength(
         1,
       );
@@ -744,11 +814,11 @@ describe("advanceStatus", () => {
       const id = await sessionIdFor(t.db, 18, "race");
       await seedEntriesFor(t.db, id);
       await enterByHand(id);
-      expect(await advanceStatus(t.db, T1, id)).toBe("provisional");
+      expect((await advanceStatus(t.db, T1, id)).next).toBe("provisional");
 
       const [insert] = await activeInserts(id);
       await revokeOverride(t.db, T2, insert!.id, ADMIN);
-      expect(await advanceStatus(t.db, T2, id)).toBe("under_review");
+      expect((await advanceStatus(t.db, T2, id)).next).toBe("under_review");
       const [item] = await items(id);
       expect(item).toMatchObject({
         kind: "missing_driver",

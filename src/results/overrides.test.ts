@@ -6,8 +6,17 @@ import {
   ingestRecorded,
   seedWorldWithSeats,
 } from "../../tests/helpers/ingest-2026";
-import { effectiveResults, resultOverrides } from "@/db/schema";
-import { addOverride, resultFieldsSchema, revokeOverride } from "./overrides";
+import {
+  effectiveResults,
+  resultOverrides,
+  sessionResultState,
+} from "@/db/schema";
+import {
+  addOverride,
+  resultFieldsSchema,
+  revokeOverride,
+  SessionFinalError,
+} from "./overrides";
 
 describe("result override fields", () => {
   const insertFields = {
@@ -323,5 +332,107 @@ describe("addOverride and revokeOverride", () => {
     const rows = await overrides(antonelli);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.revokedAt).toBeNull();
+  });
+
+  describe("the results version", () => {
+    const version = async () =>
+      (
+        await t.db
+          .select()
+          .from(sessionResultState)
+          .where(eq(sessionResultState.sessionId, sessionId))
+      )[0]!.version;
+    const patch = (at: Date, position: number, reason = "stewards") =>
+      addOverride(t.db, at, {
+        sessionId,
+        driverId: antonelli,
+        kind: "patch",
+        fields: { position },
+        reason,
+        createdBy: ADMIN,
+      });
+
+    it("addOverride and revokeOverride each bump session_result_state.version", async () => {
+      const v0 = await version();
+      const id = await patch(T1, 3);
+      expect(await version()).toBe(v0 + 1);
+
+      // Replacing is one add: one bump, though it revokes the first too.
+      await patch(T2, 2, "second");
+      expect(await version()).toBe(v0 + 2);
+
+      const [active] = (await overrides(antonelli)).filter(
+        (o) => o.revokedAt === null,
+      );
+      await revokeOverride(t.db, T2, active!.id, ADMIN2);
+      expect(await version()).toBe(v0 + 3);
+      expect(id).not.toBe(active!.id);
+    });
+
+    it("a refused revoke bumps nothing", async () => {
+      const id = await patch(T1, 3);
+      await revokeOverride(t.db, T2, id, ADMIN);
+      const v = await version();
+      await expect(revokeOverride(t.db, T2, id, ADMIN)).rejects.toThrow(
+        /already revoked/,
+      );
+      expect(await version()).toBe(v);
+    });
+  });
+
+  describe("a final session", () => {
+    const makeFinal = () =>
+      t.db
+        .update(sessionResultState)
+        .set({ status: "final", finalizedAt: T1 })
+        .where(eq(sessionResultState.sessionId, sessionId));
+
+    it("refuses addOverride with SessionFinalError, writing nothing", async () => {
+      await makeFinal();
+      const before = await t.db.select().from(sessionResultState);
+      const attempt = addOverride(t.db, T2, {
+        sessionId,
+        driverId: antonelli,
+        kind: "patch",
+        fields: { position: 3 },
+        reason: "too late",
+        createdBy: ADMIN,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(SessionFinalError);
+      await expect(attempt).rejects.toThrow(
+        "session is final: reopen it first",
+      );
+      expect(await overrides(antonelli)).toEqual([]);
+      expect(await t.db.select().from(sessionResultState)).toEqual(before);
+    });
+
+    it("refuses revokeOverride, leaving the override active", async () => {
+      const id = await addOverride(t.db, T1, {
+        sessionId,
+        driverId: antonelli,
+        kind: "patch",
+        fields: { position: 3 },
+        reason: "stewards",
+        createdBy: ADMIN,
+      });
+      await makeFinal();
+      const before = await t.db.select().from(sessionResultState);
+
+      const attempt = revokeOverride(t.db, T2, id, ADMIN2);
+      await expect(attempt).rejects.toBeInstanceOf(SessionFinalError);
+      await expect(attempt).rejects.toThrow(
+        "session is final: reopen it first",
+      );
+      const [row] = await overrides(antonelli);
+      expect(row).toMatchObject({ revokedAt: null, revokedBy: null });
+      expect(await t.db.select().from(sessionResultState)).toEqual(before);
+    });
+
+    it("still says an override that does not exist does not exist", async () => {
+      await makeFinal();
+      await expect(
+        revokeOverride(t.db, T2, "0198f3e0-0000-7000-8000-0000000000cc", ADMIN),
+      ).rejects.toThrow(/no override/);
+    });
   });
 });
