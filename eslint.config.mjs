@@ -80,6 +80,13 @@ const eslintConfig = defineConfig([
     rules: { "no-restricted-imports": "off" },
   },
   {
+    // The Neon Function entry wires the jobs to the providers and the real
+    // database, like the replay harness does: the one file in src/jobs that
+    // may import src/providers.
+    files: ["src/jobs/functions/tick.ts"],
+    rules: { "no-restricted-imports": "off" },
+  },
+  {
     // The adapters' own home, and tests of it.
     files: ["src/providers/**"],
     rules: { "no-restricted-imports": "off" },
