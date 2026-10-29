@@ -4,11 +4,20 @@
 import { and, asc, eq } from "drizzle-orm";
 import { events, jobs, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
-import type { Clock } from "@/lib/clock";
+import { fixedClock, type Clock } from "@/lib/clock";
 import { createProviderClient } from "@/providers/http/client";
 import { createRateLimiter } from "@/providers/http/rate-limiter";
 import { createPipelineHandlers } from "@/providers/pipeline";
+import { fileURLToPath } from "node:url";
+import { importSeason2026 } from "@/providers/import/import-season";
 import { readFixture } from "./fixtures";
+
+const FIXTURES = fileURLToPath(new URL("../fixtures", import.meta.url));
+
+/** The whole recorded 2026 season imported as of `at` (`importSeason2026`). */
+export async function importFixtures2026(db: Db, at: Date) {
+  return importSeason2026(db, fixedClock(at), FIXTURES);
+}
 
 export const JOLPICA_PATH = "/ergast/f1";
 export const OPENF1_PATH = "/v1";

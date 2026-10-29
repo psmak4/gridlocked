@@ -2,6 +2,14 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { reviewItems } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+
+/**
+ * What `openReviewItem` needs: any Drizzle Postgres database or transaction.
+ * The job queue is generic over the schema (`JobsDb`), so it takes this wider
+ * type, and `Db` is assignable to it.
+ */
+type AnyPgDb = PgDatabase<PgQueryResultHKT, Record<string, unknown>>;
 
 /**
  * Opens an item in the admin queue: a warning, unless `severity` says
@@ -10,12 +18,13 @@ import { newId } from "@/lib/ids";
  * this call opened a new item.
  */
 export async function openReviewItem(
-  db: Db,
+  db: AnyPgDb,
   now: Date,
   item: {
     kind: string;
     severity?: "warning" | "blocking";
-    seasonId: string;
+    /** Null for an item that belongs to no season (a dead job). */
+    seasonId: string | null;
     eventId?: string | null;
     sessionId?: string | null;
     driverId?: string | null;

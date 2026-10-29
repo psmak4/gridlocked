@@ -82,6 +82,41 @@ describe("normalizeSession", () => {
         .where(eq(sessionResultState.sessionId, sessionId))
     )[0];
 
+  describe("the results version", () => {
+    const version = async (sessionId: string) =>
+      (await state(sessionId))?.version ?? 0;
+
+    it("moves when rows are written, and only then", async () => {
+      const sessionId = await sessionIdFor(t.db, 1, "race");
+      const body = loadBody("jolpica/2026/r01-results.json");
+
+      const first = await run(sessionId, "race", body, T1);
+      const v1 = await version(sessionId);
+      expect(v1).toBeGreaterThan(1);
+
+      // The same snapshot again writes nothing.
+      await normalizeSession(
+        t.db,
+        T2,
+        sessionId,
+        first.snapshotId,
+        await parsedFor(t.db, "race", body),
+      );
+      expect(await version(sessionId)).toBe(v1);
+
+      // A new snapshot with a change writes rows: one bump.
+      rowsOf(body, "Results")[0]!.points = "26";
+      await run(sessionId, "race", body, T2);
+      expect(await version(sessionId)).toBe(v1 + 1);
+
+      // A response that is held (a driver disappeared) writes none.
+      const held = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(held, "Results").splice(0, 1);
+      await run(sessionId, "race", held, T3);
+      expect(await version(sessionId)).toBe(v1 + 1);
+    });
+  });
+
   describe("a first normalization", () => {
     it("stores every row, creates the state row and logs no changes", async () => {
       const sessionId = await sessionIdFor(t.db, 1, "race");

@@ -12,6 +12,21 @@ import {
 
 export type SessionResultStatus = (typeof RESULT_STATES)[number];
 
+/**
+ * What `advanceStatus` reports: the status before and after, whether it
+ * moved, and the session's `version` after the call. This is the one hook
+ * point for whatever must react to a session's results changing (M3/M4 will
+ * enqueue scoring from it): `resultsVersion` goes up with every normalization
+ * that wrote rows, every override added or revoked, and every status change,
+ * so "the version I last acted on" is a complete record of what has been seen.
+ */
+export interface StatusAdvance {
+  previous: SessionResultStatus;
+  next: SessionResultStatus;
+  changed: boolean;
+  resultsVersion: number;
+}
+
 /** Review kinds with their own name (DM 2.9); the rest are `validation_failed`. */
 const OWN_KIND = new Set([
   "unknown_driver",
@@ -115,12 +130,20 @@ async function reconcileValidationItems(
  *   puts the session `under_review`;
  * - otherwise a session that is not yet complete is `awaiting`;
  * - otherwise it is `provisional`.
- * A `final` session is never touched here. Returns the resulting status.
+ * A `final` session is never touched here. Returns a `StatusAdvance`: the
+ * previous and resulting status, whether it changed, and the results version.
  *
  * Callers (the poll and finalize jobs, and the override actions) must call it
  * after every normalization and after every override change (`addOverride`,
  * `revokeOverride`): neither moves the status itself, so a session whose
  * effective results changed keeps its old status until this runs.
+ *
+ * The same holds for an admin resolving or dismissing a blocking review item:
+ * resolving it does not move the session either, so the resolve action must
+ * call this for the item's session (the M8 contract). The finalize checks call
+ * it for every scored session of the event as a backstop, which is why an
+ * item resolved without it still clears at the next check, but the status the
+ * admin sees would be stale until then.
  *
  * A session that is `provisional` or `under_review` and loses rows is not
  * sent back to `awaiting`: each missing driver opens a blocking
@@ -135,7 +158,7 @@ export async function advanceStatus(
   db: Db,
   now: Date,
   sessionId: string,
-): Promise<SessionResultStatus> {
+): Promise<StatusAdvance> {
   const ctx = await getSessionContext(db, sessionId);
   if (!SCORED_KINDS.includes(ctx.kind)) {
     throw new Error(`a ${ctx.kind} session has no results to validate`);
@@ -151,7 +174,14 @@ export async function advanceStatus(
       .from(sessionResultState)
       .where(eq(sessionResultState.sessionId, sessionId))
       .for("update");
-    if (state!.status === "final") return "final";
+    if (state!.status === "final") {
+      return {
+        previous: "final",
+        next: "final",
+        changed: false,
+        resultsVersion: state!.version,
+      };
+    }
 
     const validated = await validateSession(tx, sessionId);
     // Only a session that has not had its results yet may be merely
@@ -211,12 +241,18 @@ export async function advanceStatus(
         ? "awaiting"
         : "provisional";
 
-    if (next !== state!.status) {
+    const changed = next !== state!.status;
+    if (changed) {
       await tx
         .update(sessionResultState)
         .set({ status: next, version: state!.version + 1 })
         .where(eq(sessionResultState.sessionId, sessionId));
     }
-    return next;
+    return {
+      previous: state!.status,
+      next,
+      changed,
+      resultsVersion: state!.version + (changed ? 1 : 0),
+    };
   });
 }

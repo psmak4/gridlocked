@@ -164,4 +164,89 @@ describe("normalizeJolpicaSession", () => {
       dedupeKey: `normalize:${sessionId}:${snapshotId}`,
     });
   });
+
+  describe("a body that is not for this event", () => {
+    it("holds the session when the body is for a different round, writing nothing", async () => {
+      // Round 17's race, handed to round 18's race session.
+      const { sessionId, snapshotId, outcome } = await normalize(
+        18,
+        "race",
+        loadBody("jolpica/2026/r17-results.json"),
+      );
+
+      expect(outcome).toEqual({ changed: 0 });
+      expect(await resultRows(sessionId)).toEqual([]);
+      expect(
+        await t.db
+          .select()
+          .from(sessionResultState)
+          .where(eq(sessionResultState.sessionId, sessionId)),
+      ).toEqual([]);
+      const items = await reviews(sessionId);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "validation_failed",
+        severity: "blocking",
+        status: "open",
+        dedupeKey: `normalize:${sessionId}:${snapshotId}`,
+        details: {
+          snapshotId,
+          asked: { season: 2026, round: 18, date: "2026-10-25" },
+          got: { season: 2026, round: 17, date: "2026-10-11" },
+        },
+      });
+    });
+
+    it("keeps the rows it has when a later body is for another round", async () => {
+      const { sessionId } = await normalize(
+        18,
+        "race",
+        loadBody("jolpica/2026/r18-results.json"),
+      );
+      await normalize(
+        18,
+        "race",
+        loadBody("jolpica/2026/r17-results.json"),
+        T2,
+      );
+      expect(await resultRows(sessionId)).toHaveLength(22);
+      expect((await reviews(sessionId)).map((r) => r.kind)).toEqual([
+        "validation_failed",
+      ]);
+    });
+
+    it("holds the session when the body is dated 7 days off", async () => {
+      const body = loadBody("jolpica/2026/r18-results.json");
+      body.MRData.RaceTable.Races[0]!.date = "2026-11-01";
+      const { sessionId } = await normalize(18, "race", body);
+
+      expect(await resultRows(sessionId)).toEqual([]);
+      const [item] = await reviews(sessionId);
+      expect(item).toMatchObject({
+        kind: "validation_failed",
+        details: {
+          asked: { season: 2026, round: 18, date: "2026-10-25" },
+          got: { season: 2026, round: 18, date: "2026-11-01" },
+        },
+      });
+    });
+
+    it("accepts a date a day off (the race date is local, ours is UTC)", async () => {
+      const body = loadBody("jolpica/2026/r18-results.json");
+      body.MRData.RaceTable.Races[0]!.date = "2026-10-26";
+      const { sessionId } = await normalize(18, "race", body);
+      expect(await resultRows(sessionId)).toHaveLength(22);
+      expect(await reviews(sessionId)).toEqual([]);
+    });
+
+    it("checks qualifying and the sprint against the same race", async () => {
+      const wrong = loadBody("jolpica/2026/r18-qualifying.json");
+      wrong.MRData.RaceTable.Races[0]!.round = "17";
+      const { sessionId } = await normalize(18, "qualifying", wrong);
+      expect(await resultRows(sessionId)).toEqual([]);
+      expect((await reviews(sessionId)).map((r) => r.kind)).toEqual([
+        "validation_failed",
+      ]);
+    });
+  });
 });

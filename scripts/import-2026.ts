@@ -3,7 +3,10 @@
  * the pipeline would have learned it: raw snapshots, calendar, roster, seats,
  * entries, results with their status, and practice participants. See
  * `importSeason2026` in src/providers/import. It plans no jobs and finalizes
- * nothing.
+ * nothing, so every imported round stays `provisional`: the calendar sync
+ * (HLD §4.5) plans jobs only for events still to finish, and leaves the
+ * imported past rounds as they are rather than queueing a backlog of polls
+ * and finalize checks for them. An admin finalizes them (M8) if need be.
  *
  *   pnpm tsx scripts/import-2026.ts --dry-run   in-memory database, prints the report
  *   DATABASE_URL=postgres://... pnpm tsx scripts/import-2026.ts

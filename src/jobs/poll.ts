@@ -60,7 +60,7 @@ export function createPollHandler(source: ResultsSource): JobHandler {
         fetched.snapshotId,
         fetched.body,
       );
-      status = await advanceStatus(db, ctx.clock.now(), sessionId);
+      status = (await advanceStatus(db, ctx.clock.now(), sessionId)).next;
     } catch (error) {
       if (!(error instanceof ProviderUnavailableError)) throw error;
       // The state row carries the attempt count and the give-up time.

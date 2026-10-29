@@ -51,4 +51,6 @@ export type ParsedResults =
       ok: false;
       problem: string;
       code: "unknown_classification" | "validation_failed";
+      /** Facts for the review item, next to `problem` (e.g. what was asked). */
+      details?: Record<string, unknown>;
     };

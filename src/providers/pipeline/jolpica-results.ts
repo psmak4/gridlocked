@@ -1,9 +1,8 @@
-import { and, eq } from "drizzle-orm";
-import { providerIds } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { ResultsSource } from "@/jobs/ports";
 import type { ProviderClient, ProviderRequest } from "../http/client";
 import { asOutage } from "./failures";
+import { jolpicaEventKey } from "../jolpica/event-key";
 import { normalizeJolpicaSession } from "../jolpica/normalize-session";
 
 /** Jolpica's endpoint for each session kind it serves results for. */
@@ -15,18 +14,9 @@ const ENDPOINTS: Partial<Record<string, string>> = {
 
 /** Jolpica's key for our event, `season/round` (written by the calendar sync). */
 async function eventKey(db: Db, eventId: string): Promise<string> {
-  const [row] = await db
-    .select({ key: providerIds.providerKey })
-    .from(providerIds)
-    .where(
-      and(
-        eq(providerIds.provider, "jolpica"),
-        eq(providerIds.entityType, "event"),
-        eq(providerIds.entityId, eventId),
-      ),
-    );
-  if (!row) throw new Error(`event ${eventId} has no Jolpica key`);
-  return row.key;
+  const key = await jolpicaEventKey(db, eventId);
+  if (key === null) throw new Error(`event ${eventId} has no Jolpica key`);
+  return key;
 }
 
 /**

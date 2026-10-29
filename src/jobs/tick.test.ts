@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
 import { jobs } from "@/db/schema";
@@ -336,11 +336,20 @@ describe("safetyTick", () => {
   beforeEach(async () => {
     t = await createTestDb();
   });
+  /** A pending calendar sync for 2026, so the backstop adds none of its own. */
+  const pendingSync = (runAt: Date) =>
+    enqueue(t.db, {
+      kind: "sync_calendar",
+      dedupeKey: "sync_calendar:2026:2026-03-02",
+      runAt,
+      payload: { season: 2026 },
+    });
   afterEach(async () => {
     await t.close();
   });
 
   it("republishes a missing file from the job table", async () => {
+    await pendingSync(at(60 * 20));
     await enqueue(t.db, {
       kind: "k",
       dedupeKey: "a",
@@ -361,6 +370,7 @@ describe("safetyTick", () => {
   });
 
   it("dead-letters exhausted expired leases, then publishes", async () => {
+    await pendingSync(at(60 * 20));
     const { id } = await enqueue(t.db, {
       kind: "k",
       dedupeKey: "stuck",
@@ -381,7 +391,78 @@ describe("safetyTick", () => {
 
     const [row] = await t.db.select().from(jobs).where(eq(jobs.id, id));
     expect(row!.status).toBe("dead");
-    expect(result.next_due_at).toBeNull();
+    // Only the pending sync is left.
+    expect(result.next_due_at).toBe(at(60 * 20).toISOString());
+  });
+
+  describe("the calendar sync backstop", () => {
+    const deps = (m: ReturnType<typeof createMemoryDueStore>) => ({
+      db: () => t.db,
+      store: m.store,
+      mode: "system" as const,
+    });
+    const syncs = () =>
+      t.db
+        .select()
+        .from(jobs)
+        .where(eq(jobs.kind, "sync_calendar"))
+        .orderBy(asc(jobs.dedupeKey));
+    const seed = (status: string, payload: unknown = { season: 2026 }) =>
+      enqueue(t.db, {
+        kind: "sync_calendar",
+        dedupeKey: `sync_calendar:2026:2026-03-0${status === "failed" ? 1 : 2}`,
+        runAt: at(60 * 20),
+        payload,
+      });
+
+    it("with no sync pending, enqueues one due now for the current year", async () => {
+      const m = createMemoryDueStore();
+      const result = await safetyTick(deps(m), T0);
+      expect(
+        (await syncs()).map((j) => [j.dedupeKey, j.status, j.runAt, j.payload]),
+      ).toEqual([
+        ["sync_calendar:2026:2026-03-01", "pending", T0, { season: 2026 }],
+      ]);
+      // ... and the file published after it says so.
+      expect(result.next_due_at).toBe(T0.toISOString());
+    });
+
+    it("uses the season row whose status is active", async () => {
+      await t.client.query(
+        `insert into seasons (id, year, status) values
+          ('019a0000-0000-7000-8000-000000000001', 2026, 'completed'),
+          ('019a0000-0000-7000-8000-000000000002', 2027, 'active')`,
+      );
+      await safetyTick(deps(createMemoryDueStore()), T0);
+      expect((await syncs()).map((j) => j.payload)).toEqual([{ season: 2027 }]);
+    });
+
+    it("with a sync already pending, adds nothing", async () => {
+      await seed("pending");
+      await safetyTick(deps(createMemoryDueStore()), T0);
+      expect(await syncs()).toHaveLength(1);
+    });
+
+    it("counts a failed sync (awaiting its retry) as one", async () => {
+      const { id } = await seed("failed");
+      await t.db
+        .update(jobs)
+        .set({ status: "failed", attempts: 1 })
+        .where(eq(jobs.id, id));
+      await safetyTick(deps(createMemoryDueStore()), T0);
+      expect(await syncs()).toHaveLength(1);
+    });
+
+    it("does not count a sync for another season", async () => {
+      await enqueue(t.db, {
+        kind: "sync_calendar",
+        dedupeKey: "sync_calendar:2025:2026-03-02",
+        runAt: at(60),
+        payload: { season: 2025 },
+      });
+      await safetyTick(deps(createMemoryDueStore()), T0);
+      expect(await syncs()).toHaveLength(2);
+    });
   });
 
   it("throws ClockModeError and publishes nothing on a clock-mode mismatch", async () => {

@@ -80,9 +80,13 @@ export async function normalizeSession(
       return { changed: 0 };
     };
 
-    let failure: { code: string; problem: string } | null = parsed.ok
+    let failure: {
+      code: string;
+      problem: string;
+      details?: Record<string, unknown>;
+    } | null = parsed.ok
       ? null
-      : { code: parsed.code, problem: parsed.problem };
+      : { code: parsed.code, problem: parsed.problem, details: parsed.details };
     if (parsed.ok) {
       const seen = new Set<string>();
       for (const row of parsed.rows) {
@@ -97,7 +101,10 @@ export async function normalizeSession(
       }
     }
     if (failure !== null) {
-      return hold(failure.code, { problem: failure.problem });
+      return hold(failure.code, {
+        problem: failure.problem,
+        ...failure.details,
+      });
     }
     if (!parsed.ok) throw new Error("unreachable");
 

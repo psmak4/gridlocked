@@ -24,6 +24,7 @@ import {
   setSimulatedClock,
   type ReplayStep,
 } from "@/replay/clock-loop";
+import { applyAdminAction, type AdminAction } from "@/replay/admin";
 import type { Injection } from "@/replay/injections";
 import { buildReport, type ReplayReport } from "@/replay/report";
 import { SCORED_KINDS } from "@/results/validate";
@@ -48,6 +49,8 @@ export interface ReplayOptions {
   /** The root that holds `jolpica/`, `openf1/` and `seats-2026.json`. */
   fixturesDir: string;
   inject?: Injection[];
+  /** What an admin does while it runs (a held session, then its resolution). */
+  admin?: AdminAction[];
   /** Results appear this long after a session's scheduled end. Default 30. */
   publishDelayMinutes?: number;
   /** `jump` (default) skips minutes with nothing due; `minute` visits every one. */
@@ -143,11 +146,12 @@ export async function replayWeekend(
   await importReference2026(db, fixedClock(weekendStart), fixturesDir);
 
   const [event] = await db
-    .select({ id: events.id })
+    .select({ id: events.id, seasonId: events.seasonId })
     .from(events)
     .innerJoin(seasons, eq(seasons.id, events.seasonId))
     .where(and(eq(seasons.year, season), eq(events.round, round)));
   if (!event) throw new Error(`replay: round ${round} was not imported`);
+  const seasonRow = { id: event.seasonId };
   const eventSessions = await db
     .select()
     .from(sessions)
@@ -240,6 +244,26 @@ export async function replayWeekend(
     until,
     step: opts.step ?? "jump",
     onMinute: (at) => clock.set(at),
+    actions: (opts.admin ?? []).map((action) => {
+      const session = eventSessions.find((s) => s.kind === action.session);
+      if (!session) {
+        throw new Error(`replay: the event has no ${action.session} session`);
+      }
+      return {
+        at: new Date(action.at),
+        run: (now: Date) =>
+          applyAdminAction(
+            db,
+            now,
+            {
+              seasonId: seasonRow.id,
+              eventId: event.id,
+              sessionId: session.id,
+            },
+            action,
+          ),
+      };
+    }),
   });
 
   return buildReport(db, event.id, {

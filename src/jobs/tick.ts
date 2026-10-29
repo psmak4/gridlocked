@@ -20,6 +20,7 @@ import {
 } from "./due-times";
 import { reapExpired } from "./queue";
 import { runDue, type JobHandler } from "./runner";
+import { ensureCalendarSync } from "./sync-calendar";
 
 /** A database that can run jobs (Drizzle) and the clock queries (raw SQL). */
 export type TickDb = Db & ClockDb;
@@ -114,8 +115,11 @@ export async function tick(
 
 /**
  * The backstop, every six hours (minute 7 of every sixth hour): dead-letters
- * jobs whose last attempt died, then rebuilds the file from the job table. It
- * repairs a missing or malformed file and any republish a caller forgot.
+ * jobs whose last attempt died, makes sure a calendar sync is pending for the
+ * current season (`ensureCalendarSync`; the sync re-enqueues itself each day,
+ * and this restarts a chain that was lost), then rebuilds the file from the
+ * job table. It repairs a missing or malformed file and any republish a
+ * caller forgot.
  */
 export async function safetyTick(
   deps: Pick<TickDeps, "db" | "store" | "mode">,
@@ -125,5 +129,6 @@ export async function safetyTick(
   await assertClockMode(db, deps.mode);
   const clock = await resolveClock({ mode: deps.mode, db, scheduledAt });
   await reapExpired(db, clock.now());
+  await ensureCalendarSync(db, clock.now());
   return publishDueTimes(db, deps.store, clock.now());
 }

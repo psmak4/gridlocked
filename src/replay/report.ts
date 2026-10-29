@@ -20,9 +20,18 @@ export interface ReplayReport {
   /** Review items opened during the replay, by kind. */
   reviewItems: Record<string, number>;
   resultChanges: number;
-  /** Jobs by status. */
+  /**
+   * Jobs of the replayed event by status: its polls, roster checks and
+   * finalize checks. The calendar syncs, and the jobs the syncs plan for the
+   * season's other events, are not part of one weekend.
+   */
   jobs: Record<string, number>;
-  /** Ticks that opened the database (the rest only read the due-times file). */
+  /** The daily calendar syncs (HLD §4.5) by status. */
+  calendarSyncs: Record<string, number>;
+  /**
+   * Ticks that opened the database (the rest only read the due-times file):
+   * one per minute that ran a job, the event's or a calendar sync.
+   */
   wakeTicks: number;
 }
 
@@ -64,12 +73,29 @@ export async function buildReport(
     .groupBy(reviewItems.kind);
   for (const { kind, n } of items) byKind[kind] = n;
 
+  // Poll and roster jobs name a session, finalize jobs the event.
+  const sessionIds = new Set(
+    (
+      await db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(eq(sessions.eventId, eventId))
+    ).map((s) => s.id),
+  );
   const byStatus: Record<string, number> = {};
-  const jobRows = await db
-    .select({ status: jobs.status, n: count() })
-    .from(jobs)
-    .groupBy(jobs.status);
-  for (const { status, n } of jobRows) byStatus[status] = n;
+  const syncs: Record<string, number> = {};
+  for (const job of await db.select().from(jobs)) {
+    const payload = job.payload as { eventId?: string; sessionId?: string };
+    const tally =
+      job.kind === "sync_calendar"
+        ? syncs
+        : payload.eventId === eventId ||
+            (payload.sessionId !== undefined &&
+              sessionIds.has(payload.sessionId))
+          ? byStatus
+          : null;
+    if (tally) tally[job.status] = (tally[job.status] ?? 0) + 1;
+  }
 
   const [changes] = await db.select({ n: count() }).from(resultChanges);
 
@@ -80,6 +106,7 @@ export async function buildReport(
     reviewItems: byKind,
     resultChanges: changes!.n,
     jobs: byStatus,
+    calendarSyncs: syncs,
     wakeTicks: extras.wakeTicks,
   };
 }

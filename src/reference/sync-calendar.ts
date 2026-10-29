@@ -582,7 +582,7 @@ export async function syncCalendar(
       }
 
       // The lock: the link to its session is always kept; `lock_at` follows
-      // that session unless an admin set it.
+      // that session unless an admin set it or it has already passed.
       const kind = lockKind(event);
       const lock = kind ? sessionIds.get(sessionKey(kind, 1)) : undefined;
       const [current] = await tx
@@ -613,7 +613,24 @@ export async function syncCalendar(
         ).start;
         const wanted = lock ? lock.start : fallback;
         if (current!.lockAt.getTime() !== wanted.getTime()) {
-          lockPatch.lockAt = wanted;
+          // A lock that has passed never moves: lineups were already closed
+          // against it, and moving it would reopen or re-close the game
+          // behind the players' backs. A new event's first lock is exempt
+          // (nothing was ever locked against it). An admin looks instead.
+          if (decision.type === "match" && current!.lockAt <= now) {
+            await openReview({
+              kind: "lock_passed_changed",
+              eventId,
+              dedupeKey: `lock_passed_changed:${eventId}`,
+              details: {
+                lockAt: current!.lockAt.toISOString(),
+                wantedLockAt: wanted.toISOString(),
+                lockSessionId: lock?.id ?? current!.lockSessionId,
+              },
+            });
+          } else {
+            lockPatch.lockAt = wanted;
+          }
         }
       }
       if (Object.keys(lockPatch).length > 0) {

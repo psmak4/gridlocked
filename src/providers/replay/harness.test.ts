@@ -9,6 +9,7 @@ import {
   jobs,
   providerRequests,
   resultChanges,
+  reviewItems,
   sessions,
 } from "@/db/schema";
 import { replayWeekend, type ReplayReport } from "./harness";
@@ -70,8 +71,12 @@ describe("replayWeekend", () => {
     // (+0, +5, +20 min empty, +80 min published), and the four finalize
     // checks; every one succeeded.
     expect(report.jobs).toEqual({ succeeded: 14 });
-    // Each of those ran at a minute of its own.
-    expect(report.wakeTicks).toBe(14);
+    // The calendar sync recurs: the first safety tick (Friday 06:07 UTC)
+    // finds none pending and starts the chain, then it runs at 06:00 UTC on
+    // each of the four days after; Wednesday's is queued.
+    expect(report.calendarSyncs).toEqual({ succeeded: 5, pending: 1 });
+    // Every job and every sync ran at a minute of its own.
+    expect(report.wakeTicks).toBe(14 + 5);
   });
 
   it("shows a late +5 s penalty as result_changes and a new order at the next finalize check", async () => {
@@ -197,6 +202,37 @@ describe("replayWeekend", () => {
     });
     expect(report.eventStatus).toBe("completed");
     expect(report.jobs).toEqual({ succeeded: 16 });
+  });
+
+  it("finalizes with no other action once an admin resolves a held qualifying", async () => {
+    // A steward query is opened while qualifying (ends 22:00 on Oct 24) is
+    // being polled, so the session goes under review. The +48 h check holds
+    // the event (finalize_held), and the admin resolves the query afterwards
+    // and does nothing else: qualifying is not polled any more, so only the
+    // follow-up finalize check 6 h later (Oct 28 04:00) can clear it.
+    const report = await replay({
+      until: "2026-10-28T05:00:00Z",
+      admin: [
+        { at: "2026-10-24T22:10:00Z", kind: "block", session: "qualifying" },
+        { at: "2026-10-27T23:00:00Z", kind: "resolve", session: "qualifying" },
+      ],
+    });
+
+    expect(report.sessionStatuses).toEqual({
+      qualifying: "final",
+      race: "final",
+    });
+    expect(report.eventStatus).toBe("completed");
+    // The steward query, and the hold warning; both closed by the end.
+    expect(report.reviewItems).toEqual({
+      validation_failed: 1,
+      finalize_held: 1,
+    });
+    const items = await t.db.select().from(reviewItems);
+    expect(items.every((i) => i.status === "resolved")).toBe(true);
+    // As the plain weekend's 14, plus the one follow-up check, minus the last
+    // qualifying poll: a session under review ends its poll chain.
+    expect(report.jobs).toEqual({ succeeded: 14 });
   });
 
   it("gives the same report when it steps every minute as when it jumps to the next due minute", async () => {

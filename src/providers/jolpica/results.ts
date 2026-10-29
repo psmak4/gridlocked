@@ -17,7 +17,24 @@ export interface ParseFailure {
   ok: false;
   problem: string;
   code: "unknown_classification" | "validation_failed";
+  /** Extra facts for the review item (see `checkRace`). */
+  details?: Record<string, unknown>;
 }
+
+/**
+ * What the request was for: the season and round we asked Jolpica about, and
+ * the event's race date (`yyyy-mm-dd`, UTC) that the answer's `date` has to
+ * be within `DATE_TOLERANCE_DAYS` of. Jolpica's date is the local race date
+ * and ours is UTC, so they can differ by a day.
+ */
+export interface ExpectedRace {
+  season: number;
+  round: number;
+  date: string | null;
+}
+
+const DATE_TOLERANCE_DAYS = 3;
+const DAY_MS = 24 * 3_600_000;
 
 export type JolpicaParse =
   { ok: true; rows: JolpicaResultRow[] } | ParseFailure;
@@ -225,20 +242,77 @@ function parseRaceRow(
   };
 }
 
+/** A year, round or date as the body wrote it, or null when it is not there. */
+const asNumber = (value: unknown): number | null => {
+  const n =
+    typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  return Number.isNaN(n) ? null : n;
+};
+const asDate = (value: unknown): string | null =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+
+/**
+ * A body must be about the race we asked for. The answer for another season
+ * or round (a stale cache, a wrong URL, a renumbered calendar) parses as
+ * perfectly good results, so it is checked here: `Races[0]` has to carry our
+ * season and round and a date near the event's. Returns the failure, or null.
+ * An empty race list is "not published yet" and is not checked.
+ */
+function checkRace(body: unknown, expected: ExpectedRace): ParseFailure | null {
+  const race = (body as { MRData?: { RaceTable?: { Races?: unknown } } } | null)
+    ?.MRData?.RaceTable?.Races;
+  if (!Array.isArray(race) || race.length === 0) return null;
+  const first = race[0] as Record<string, unknown> | null;
+  const got = {
+    season: asNumber(first?.season),
+    round: asNumber(first?.round),
+    date: asDate(first?.date),
+  };
+  const dateOff =
+    expected.date !== null &&
+    (got.date === null ||
+      Math.abs(
+        Date.parse(`${got.date}T00:00:00Z`) -
+          Date.parse(`${expected.date}T00:00:00Z`),
+      ) >
+        DATE_TOLERANCE_DAYS * DAY_MS);
+  if (
+    got.season === expected.season &&
+    got.round === expected.round &&
+    !dateOff
+  ) {
+    return null;
+  }
+  const show = (r: { season: unknown; round: unknown; date: unknown }) =>
+    `${r.season ?? "?"} round ${r.round ?? "?"} (${r.date ?? "no date"})`;
+  return {
+    ok: false,
+    code: "validation_failed",
+    problem: `the answer is for ${show(got)}, not ${show(expected)}`,
+    details: { asked: expected, got },
+  };
+}
+
 /**
  * Reads one session's results out of a Jolpica response. A body that does not
  * have the expected array, a row that is not the shape we know, or a
  * `positionText` we have no mapping for fails the whole parse: no partial
  * rows, no guessed values. An empty array is not a failure (the results are
  * not out yet).
+ *
+ * With `expected`, a body whose `Races[0]` is for another season, round or
+ * date fails too (see `checkRace`), with `details: { asked, got }`.
  */
 export function parseJolpicaResults(
   kind: SessionKind,
   body: unknown,
+  expected?: ExpectedRace,
 ): JolpicaParse {
   if (resultKeys[kind] === undefined) {
     return validationFailed(`${kind} sessions have no results to parse`);
   }
+  const wrong = expected && checkRace(body, expected);
+  if (wrong) return wrong;
   const raw = findRows(kind, body);
   if (raw === undefined) return validationFailed("missing results");
 

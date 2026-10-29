@@ -56,6 +56,20 @@ describe("the finalize_check handler", () => {
   const after = (d: Date, hours: number) =>
     new Date(d.getTime() + hours * HOUR);
 
+  /**
+   * Round 18's recorded qualifying relabelled as round 2's (the recordings
+   * have no round 2 qualifying), so it passes the check that a body is for
+   * the event asked.
+   */
+  function round2Qualifying() {
+    const body = loadBody("jolpica/2026/r18-qualifying.json");
+    Object.assign(body.MRData.RaceTable.Races[0]!, {
+      round: "2",
+      date: "2026-03-15",
+    });
+    return body;
+  }
+
   const RACE = "/ergast/f1/2026/18/results.json";
   const QUALI = "/ergast/f1/2026/18/qualifying.json";
 
@@ -183,6 +197,7 @@ describe("the finalize_check handler", () => {
       "/ergast/f1/2026/2/sprint.json",
       jolpicaFixture("r02-sprint.json"),
     );
+    pipeline.serve("/ergast/f1/2026/2/qualifying.json", round2Qualifying());
 
     await run(after(race.scheduledEnd, 2));
     expect(pipeline.calls).toEqual(
@@ -191,8 +206,10 @@ describe("the finalize_check handler", () => {
         "/ergast/f1/2026/2/sprint.json",
       ]),
     );
-    // Sprint qualifying and qualifying are not re-fetched.
-    expect(pipeline.calls.some((c) => c.endsWith("qualifying.json"))).toBe(
+    // Qualifying is re-fetched too (a post-session disqualification); sprint
+    // qualifying has no Jolpica endpoint.
+    expect(pipeline.calls).toContain("/ergast/f1/2026/2/qualifying.json");
+    expect(pipeline.calls.some((c) => c.includes("sprint_qualifying"))).toBe(
       false,
     );
   });
@@ -377,6 +394,8 @@ describe("the finalize_check handler", () => {
         .delete(jobs)
         .where(eq(jobs.dedupeKey, `poll:${quali.id}:start`));
       pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      // Jolpica has nothing for qualifying: its "no results yet" answer.
+      pipeline.serve(QUALI, jolpicaFixture("r23-results-empty.json"));
       await run(race.scheduledEnd);
 
       await run(after(race.scheduledEnd, 48));
@@ -404,16 +423,133 @@ describe("the finalize_check handler", () => {
     });
   });
 
+  describe("qualifying", () => {
+    const block = (
+      event: { id: string; seasonId: string },
+      sessionId: string,
+    ) =>
+      openReviewItem(t.db, clock.now(), {
+        kind: "validation_failed",
+        severity: "blocking",
+        seasonId: event.seasonId,
+        eventId: event.id,
+        sessionId,
+        details: { problem: "steward query" },
+        dedupeKey: "test:quali-blocking",
+      });
+
+    it("held by a blocking item and then resolved by an admin, the next check clears it and finalizes the event", async () => {
+      const { event, race, quali } = await setup();
+      pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
+      pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      // A steward query is open when qualifying is polled, so it goes
+      // under review at once.
+      await block(event, quali.id);
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      expect((await state(quali.id))!.status).toBe("under_review");
+
+      // The +48 h check holds the event.
+      await run(after(race.scheduledEnd, 48));
+      expect((await state(quali.id))!.status).toBe("under_review");
+      expect(await eventStatus(event.id)).toBe("scheduled");
+
+      // An admin resolves the item and does nothing else (the status stays
+      // under_review until something advances it).
+      await t.db
+        .update(reviewItems)
+        .set({ status: "resolved", resolution: "checked" })
+        .where(eq(reviewItems.dedupeKey, "test:quali-blocking"));
+      expect((await state(quali.id))!.status).toBe("under_review");
+
+      const done = after(race.scheduledEnd, 54);
+      await run(done);
+      expect(await state(quali.id)).toMatchObject({
+        status: "final",
+        finalizedAt: done,
+      });
+      expect(await eventStatus(event.id)).toBe("completed");
+    });
+
+    it("a post-session disqualification in a changed snapshot is picked up by a finalize check", async () => {
+      const { event, race, quali } = await setup();
+      let qualiBody: unknown = jolpicaFixture("r18-qualifying.json");
+      pipeline.serve(QUALI, () => qualiBody);
+      pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      const first = (await state(quali.id))!.currentSnapshotId;
+      expect(await changes(quali.id)).toEqual([]);
+
+      // The stewards disqualify the pole sitter: he drops to the back.
+      const body = loadBody("jolpica/2026/r18-qualifying.json");
+      const rows = rowsOf(body, "QualifyingResults");
+      const [pole] = rows.splice(0, 1);
+      rows.forEach((r, i) => (r.position = String(i + 1)));
+      pole!.position = String(rows.length + 1);
+      rows.push(pole!);
+      qualiBody = body;
+
+      await run(after(race.scheduledEnd, 2));
+      expect((await state(quali.id))!.currentSnapshotId).not.toBe(first);
+      const logged = await changes(quali.id);
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged.map((c) => c.field)).toContain("position");
+      expect((await state(quali.id))!.status).toBe("provisional");
+      expect(await eventStatus(event.id)).toBe("scheduled");
+    });
+
+    it("a disqualified driver missing from a changed snapshot holds the event for an admin", async () => {
+      const { event, race, quali } = await setup();
+      let qualiBody: unknown = jolpicaFixture("r18-qualifying.json");
+      pipeline.serve(QUALI, () => qualiBody);
+      pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+
+      const body = loadBody("jolpica/2026/r18-qualifying.json");
+      rowsOf(body, "QualifyingResults").splice(0, 1);
+      qualiBody = body;
+      await run(after(race.scheduledEnd, 2));
+      expect((await state(quali.id))!.status).toBe("under_review");
+
+      await run(after(race.scheduledEnd, 48));
+      expect(await eventStatus(event.id)).toBe("scheduled");
+      expect((await state(quali.id))!.status).toBe("under_review");
+    });
+
+    it("moves an admin-resolved session on even when the provider is down at that check", async () => {
+      const { event, race, quali } = await setup();
+      let down = false;
+      pipeline.serve(QUALI, () =>
+        down
+          ? new Response("unavailable", { status: 503 })
+          : jolpicaFixture("r18-qualifying.json"),
+      );
+      pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      await block(event, quali.id);
+      await run(after(race.scheduledEnd, 2));
+      expect((await state(quali.id))!.status).toBe("under_review");
+
+      down = true;
+      await t.db
+        .update(reviewItems)
+        .set({ status: "resolved", resolution: "checked" })
+        .where(eq(reviewItems.dedupeKey, "test:quali-blocking"));
+      await run(after(race.scheduledEnd, 6));
+      expect((await state(quali.id))!.status).toBe("provisional");
+    });
+  });
+
   describe("a sprint weekend", () => {
     it("finalizes at +48 h with no admin action: sprint qualifying is not scored", async () => {
       const { event, sessions: all } = await eventOfRound(t.db, 2);
       const by = Object.fromEntries(all.map((s) => [s.kind, s]));
       await seedEntriesFor(t.db, by.race!.id);
       await planEventJobs(t.db, event.id);
-      pipeline.serve(
-        "/ergast/f1/2026/2/qualifying.json",
-        jolpicaFixture("r18-qualifying.json"),
-      );
+      pipeline.serve("/ergast/f1/2026/2/qualifying.json", round2Qualifying());
       pipeline.serve(
         "/ergast/f1/2026/2/sprint.json",
         jolpicaFixture("r02-sprint.json"),
@@ -503,6 +639,7 @@ describe("the finalize_check handler", () => {
     it("a provider that stays down past 14 days stops the re-checks and says so in the warning", async () => {
       const { event, race } = await setup({ polls: false });
       pipeline.serve(RACE, () => new Response("down", { status: 503 }));
+      pipeline.serve(QUALI, () => new Response("down", { status: 503 }));
       const last = after(race.scheduledEnd, 14 * 24);
       await enqueue(t.db, {
         kind: "finalize_check",
@@ -528,9 +665,11 @@ describe("the finalize_check handler", () => {
 
     it("a network failure is skipped the same way", async () => {
       const { race } = await setup({ polls: false });
-      pipeline.serve(RACE, () => {
-        throw new TypeError("fetch failed");
-      });
+      for (const path of [QUALI, RACE]) {
+        pipeline.serve(path, () => {
+          throw new TypeError("fetch failed");
+        });
+      }
       expect(await run(after(race.scheduledEnd, 2))).toEqual({
         ran: 1,
         failed: 0,

@@ -357,3 +357,96 @@ describe("parseJolpicaResults: a body we cannot use", () => {
     expect(races("jolpica/2026/r01-results.json").round).toBe("1");
   });
 });
+
+describe("parseJolpicaResults: checked against the request", () => {
+  const body = () => readFixture("jolpica/2026/r01-results.json");
+  const asked = { season: 2026, round: 1, date: "2026-03-08" };
+  const edit = (change: (race: Record<string, unknown>) => void) => {
+    const b = structuredClone(body()) as {
+      MRData: { RaceTable: { Races: Array<Record<string, unknown>> } };
+    };
+    change(b.MRData.RaceTable.Races[0]!);
+    return b;
+  };
+
+  it("accepts the body for the round asked", () => {
+    expect(parseJolpicaResults("race", body(), asked)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("rejects another season, with what was asked and what came", () => {
+    expect(
+      parseJolpicaResults(
+        "race",
+        edit((r) => (r.season = "2025")),
+        asked,
+      ),
+    ).toEqual({
+      ok: false,
+      code: "validation_failed",
+      problem: expect.stringContaining("2025"),
+      details: {
+        asked,
+        got: { season: 2025, round: 1, date: "2026-03-08" },
+      },
+    });
+  });
+
+  it("rejects another round", () => {
+    expect(
+      parseJolpicaResults(
+        "race",
+        edit((r) => (r.round = "2")),
+        asked,
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: "validation_failed",
+      details: { asked, got: { season: 2026, round: 2, date: "2026-03-08" } },
+    });
+  });
+
+  it("allows a date up to 3 days either side, and rejects more", () => {
+    const at = (date: string) =>
+      parseJolpicaResults(
+        "race",
+        edit((r) => (r.date = date)),
+        asked,
+      );
+    expect(at("2026-03-11")).toMatchObject({ ok: true });
+    expect(at("2026-03-05")).toMatchObject({ ok: true });
+    expect(at("2026-03-12")).toMatchObject({
+      ok: false,
+      details: { got: { date: "2026-03-12" } },
+    });
+    expect(at("2026-03-01")).toMatchObject({ ok: false });
+  });
+
+  it("rejects a race that lacks the identifying fields", () => {
+    expect(
+      parseJolpicaResults(
+        "race",
+        edit((r) => delete r.date),
+        asked,
+      ),
+    ).toMatchObject({
+      ok: false,
+      details: { got: { season: 2026, round: 1, date: null } },
+    });
+  });
+
+  it("does not check an empty answer, or a call that asks nothing", () => {
+    const empty = readFixture("jolpica/2026/r23-results-empty.json");
+    expect(parseJolpicaResults("race", empty, asked)).toEqual({
+      ok: true,
+      rows: [],
+    });
+    expect(
+      parseJolpicaResults(
+        "race",
+        edit((r) => (r.round = "9")),
+      ),
+    ).toMatchObject({ ok: true });
+  });
+});

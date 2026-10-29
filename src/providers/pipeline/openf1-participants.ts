@@ -1,6 +1,10 @@
 import { eq } from "drizzle-orm";
 import { seasons } from "@/db/schema";
-import type { ParticipantsSource } from "@/jobs/ports";
+import {
+  ProviderUnavailableError,
+  type ParticipantsSource,
+} from "@/jobs/ports";
+import { asOutage } from "./failures";
 import type { ProviderClient, ProviderRequest } from "../http/client";
 import {
   linkOpenF1Sessions,
@@ -25,6 +29,10 @@ export const openF1DriversRequest = (sessionKey: number): ProviderRequest => ({
  * The pipeline's practice-participants port over OpenF1 (HLD §8.2). Links our
  * session to OpenF1's through `provider_ids` on first use (one `sessions` call
  * for the season), then fetches `drivers` for its session key and stores them.
+ *
+ * An outage, and a season list that has no session matching ours yet (OpenF1
+ * publishes a session a little after it ends), both throw
+ * `ProviderUnavailableError`: the roster job asks again later.
  */
 export function createOpenF1ParticipantsSource(
   client: ProviderClient,
@@ -45,24 +53,24 @@ export function createOpenF1ParticipantsSource(
           .where(eq(seasons.id, session.seasonId));
         if (!season) throw new Error(`no season ${session.seasonId}`);
         const sessionsRequest = openF1SessionsRequest(season.year);
-        const list = await client.get(
-          sessionsRequest.endpoint,
-          sessionsRequest.params,
-          { jobId, seasonId: session.seasonId, eventId: session.eventId },
+        const list = await asOutage("OpenF1 /sessions", () =>
+          client.get(sessionsRequest.endpoint, sessionsRequest.params, {
+            jobId,
+            seasonId: session.seasonId,
+            eventId: session.eventId,
+          }),
         );
         await linkOpenF1Sessions(db, now, list.body);
         key = await openF1SessionKey(db, session.id);
         if (key === null) {
-          throw new Error(
-            `OpenF1 has no ${session.kind} session matching ${session.id}`,
+          throw new ProviderUnavailableError(
+            `OpenF1 has no ${session.kind} session matching ${session.id} yet`,
           );
         }
       }
       const driversRequest = openF1DriversRequest(key);
-      const drivers = await client.get(
-        driversRequest.endpoint,
-        driversRequest.params,
-        ctx,
+      const drivers = await asOutage("OpenF1 /drivers", () =>
+        client.get(driversRequest.endpoint, driversRequest.params, ctx),
       );
       await storeParticipants(
         db,
