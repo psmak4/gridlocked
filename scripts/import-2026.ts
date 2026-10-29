@@ -8,52 +8,47 @@
  * imported past rounds as they are rather than queueing a backlog of polls
  * and finalize checks for them. An admin finalizes them (M8) if need be.
  *
- *   pnpm tsx scripts/import-2026.ts --dry-run   in-memory database, prints the report
- *   DATABASE_URL=postgres://... pnpm tsx scripts/import-2026.ts
+ *   pnpm import:2026 --dry-run   in-memory database, prints the report
+ *   DATABASE_URL=postgres://... pnpm import:2026
  *
- * Without `--dry-run` it needs DATABASE_URL and refuses to run without it.
+ * Without `--dry-run` it needs DATABASE_URL (the Neon database, through
+ * `createDb`) and refuses to run without it.
  * Safe to run again: a second run of the import changes nothing. It is meant
  * for an empty or staging database: one that has polled live data (any
  * `provider_requests` row) is refused unless `--force` is given, because the
  * recorded bodies would overwrite newer results. Unknown arguments are
- * refused too, so a mistyped `--dry-run` can't reach a real database. The
- * clock is the shared one (CLOCK_MODE, default system), resolved once here.
+ * refused too, so a mistyped `--dry-run` can't reach a real database. It runs
+ * in system mode only: it checks the database has no `simulated_clock` row
+ * (a replay database) and refuses a CLOCK_MODE other than system.
  */
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
+import { createDb } from "@/db/client";
+import {
+  assertClockMode,
+  clockModeFromEnv,
+  resolveClock,
+  type ClockDb,
+} from "@/lib/resolve-clock";
 import type { Db } from "@/db/types";
-import { clockModeFromEnv, resolveClock } from "@/lib/resolve-clock";
 import { importSeason2026 } from "@/providers/import/import-season";
-import * as schema from "@/db/schema";
-import { createTestDb } from "../tests/helpers/test-db";
 
 const FIXTURES = fileURLToPath(new URL("../tests/fixtures", import.meta.url));
 
+type Target = { db: Db & ClockDb; close(): Promise<void> };
+
 /**
- * A Neon (Postgres over WebSocket) connection. The driver is not a dependency
- * of the app yet, so it is loaded only here, by a name the type checker does
- * not resolve, and a missing one is a clear error instead of a crash.
+ * `--dry-run` uses an in-memory PGlite database. It is loaded only then, so a
+ * real import never pulls the test database (and its WASM) in.
  */
-async function connect(
-  url: string,
-): Promise<{ db: Db; close(): Promise<void> }> {
-  const driver = "@neondatabase/serverless";
-  let neon: {
-    Pool: new (opts: { connectionString: string }) => { end(): Promise<void> };
-  };
-  try {
-    neon = await import(/* @vite-ignore */ driver);
-  } catch {
-    throw new Error(
-      `${driver} is not installed: add it before importing into a real database, or use --dry-run`,
-    );
+async function open(dryRun: boolean, url: string | undefined): Promise<Target> {
+  if (dryRun) {
+    const { createTestDb } = await import("../tests/helpers/test-db");
+    const t = await createTestDb();
+    return { db: t.db, close: t.close };
   }
-  const { drizzle } = await import("drizzle-orm/neon-serverless");
-  const pool = new neon.Pool({ connectionString: url });
-  return {
-    db: drizzle(pool as never, { schema }) as unknown as Db,
-    close: () => pool.end(),
-  };
+  const handle = createDb(url as string);
+  return { db: handle.db(), close: handle.close };
 }
 
 const KNOWN_ARGS = new Set(["--dry-run", "--force"]);
@@ -74,24 +69,25 @@ async function main() {
       "DATABASE_URL is not set: pass it in the environment, or use --dry-run for an in-memory database",
     );
   }
+  if (clockModeFromEnv(process.env) !== "system") {
+    throw new Error("the import runs in system mode: unset CLOCK_MODE");
+  }
 
-  const target = dryRun ? await createTestDb() : await connect(url as string);
+  const target = await open(dryRun, url);
   try {
+    await assertClockMode(target.db, "system");
     if (!force) {
-      const polled = (await (target.db as Db).execute(
+      const polled = await target.db.execute(
         sql`select 1 from provider_requests limit 1`,
-      )) as { rows: unknown[] };
+      );
       if (polled.rows.length > 0) {
         throw new Error(
           "this database has polled live data (provider_requests is not empty): the import would overwrite newer results. Use --force to import anyway",
         );
       }
     }
-    const clock = await resolveClock({
-      mode: clockModeFromEnv(process.env),
-      db: target.db as never,
-    });
-    const report = await importSeason2026(target.db as Db, clock, FIXTURES);
+    const clock = await resolveClock({ mode: "system", db: target.db });
+    const report = await importSeason2026(target.db, clock, FIXTURES);
     console.log(
       `${dryRun ? "dry run (in-memory database)" : "imported"}:\n${JSON.stringify(report, null, 2)}`,
     );
