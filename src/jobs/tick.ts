@@ -4,6 +4,7 @@
  * passes the trigger's scheduled instant. Nothing here reads the time.
  */
 import type { Db } from "@/db/types";
+import { systemTimer, type Clock, type Timer } from "@/lib/clock";
 import {
   assertClockMode,
   resolveClock,
@@ -32,13 +33,47 @@ export type TickDeps = {
    */
   db: () => TickDb;
   store: DueStore;
-  handlers: Record<string, JobHandler>;
+  /**
+   * Builds the job handlers for one wake, on the tick's own database and
+   * clock (the one `resolveClock` gave `runDue`), so the provider clients,
+   * the request log and the jobs' writes share one connection and one instant
+   * (HLD decision 20). Called once, after the clock check and only when jobs
+   * are going to run, so a sleeping tick never builds (or connects) anything.
+   * May be async: building the provider clients reads settings and the
+   * recent request log.
+   */
+  handlers: (
+    db: TickDb,
+    clock: Clock,
+    wake: WakeBudget,
+  ) => Record<string, JobHandler> | Promise<Record<string, JobHandler>>;
+  /**
+   * Real time, for the wake's time budget (`TickOptions.deadlineMs`). Defaults
+   * to the system timer. It is not the clock: that is frozen at the scheduled
+   * minute.
+   */
+  timer?: Timer;
   mode: ClockMode;
   /** Where a store read failure is reported. Defaults to `console.error`. */
   log?: (message: string) => void;
 };
 
-export type TickOptions = { leaseMs: number; maxJobs: number };
+/** What a wake tells the handler factory about its time budget. */
+export type WakeBudget = {
+  timer: Timer;
+  /** The timer's epoch ms by which the wake must be done; unset = no limit. */
+  deadlineAt?: number;
+};
+
+export type TickOptions = {
+  leaseMs: number;
+  maxJobs: number;
+  /**
+   * Real-time budget for one wake: the runner claims no new job after it, and
+   * the provider clients start no call and sleep no wait past it.
+   */
+  deadlineMs?: number;
+};
 
 /** Handlers must finish within the lease (there is no heartbeat yet). */
 export const DEFAULT_TICK_OPTIONS: TickOptions = {
@@ -98,6 +133,9 @@ export async function tick(
   const decision = decideTick(parseDueFile(text), scheduledAt);
   if (decision.action === "sleep") return decision;
 
+  const timer = deps.timer ?? systemTimer;
+  const deadlineAt =
+    opts.deadlineMs === undefined ? undefined : timer.now() + opts.deadlineMs;
   const db = deps.db();
   await assertClockMode(db, deps.mode);
   const clock = await resolveClock({ mode: deps.mode, db, scheduledAt });
@@ -108,7 +146,16 @@ export async function tick(
     );
     return { action: "republished", reason: decision.reason, file };
   }
-  const run = await runDue(db, clock, deps.handlers, opts);
+  const handlers = await deps.handlers(db, clock, { timer, deadlineAt });
+  const run = await runDue(db, clock, handlers, {
+    maxJobs: opts.maxJobs,
+    leaseMs: opts.leaseMs,
+    timer,
+    deadlineMs:
+      deadlineAt === undefined
+        ? undefined
+        : Math.max(0, deadlineAt - timer.now()),
+  });
   const file = await publishDueTimes(db, deps.store, clock.now());
   return { action: "wake", run, file };
 }

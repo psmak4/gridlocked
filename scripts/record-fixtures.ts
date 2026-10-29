@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { createTestDb } from "../tests/helpers/test-db";
 import { createProviderClient } from "@/providers/http/client";
 import { createRateLimiter } from "@/providers/http/rate-limiter";
-import { systemClock } from "@/lib/clock";
+import { systemClock, systemTimer } from "@/lib/clock";
 import { getSetting } from "@/settings";
 
 const BASE_URL = "https://api.jolpi.ca/ergast/f1";
@@ -31,8 +31,6 @@ interface MRData {
   offset?: string;
   RaceTable?: { Races?: Array<Record<string, unknown>> };
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const OPENF1_BASE_URL = "https://api.openf1.org/v1";
 const openf1Root = fileURLToPath(
@@ -70,8 +68,8 @@ async function recordOpenF1(onlySessions: boolean) {
     db: t.db,
     clock: systemClock,
     fetch,
-    limiter: createRateLimiter(limits, systemClock, sleep),
-    sleep,
+    limiter: createRateLimiter(limits, systemTimer),
+    timer: systemTimer,
   });
   let calls = 0;
   async function record(
@@ -156,8 +154,8 @@ async function main() {
     db: t.db,
     clock: systemClock,
     fetch,
-    limiter: createRateLimiter(limits, systemClock, sleep),
-    sleep,
+    limiter: createRateLimiter(limits, systemTimer),
+    timer: systemTimer,
   });
 
   const written = new Set<string>();

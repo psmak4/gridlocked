@@ -30,3 +30,35 @@ export function simulatedClock(
     },
   };
 }
+
+/**
+ * Elapsed time and waiting, apart from the `Clock`. A `Clock` is the instant
+ * the app treats as "now" (frozen for a whole tick, or simulated in a replay);
+ * a `Timer` is real time passing: how long a call took, how long to wait, how
+ * long ago something happened. `now()` is epoch milliseconds, so it can be
+ * compared with a stored timestamp.
+ */
+export interface Timer {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+export const systemTimer: Timer = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+};
+
+/**
+ * A timer for tests and replays: it reads `clock`, and a sleep moves it
+ * forward by that much without waiting, so a rate limiter that has to wait
+ * sees the time pass and the run stays instant.
+ */
+export function virtualTimer(clock: Clock): Timer {
+  let slept = 0;
+  return {
+    now: () => clock.now().getTime() + slept,
+    sleep: async (ms) => {
+      slept += ms;
+    },
+  };
+}

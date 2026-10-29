@@ -4,7 +4,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { events, jobs, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { fixedClock, type Clock } from "@/lib/clock";
+import { fixedClock, virtualTimer, type Clock } from "@/lib/clock";
 import { createProviderClient } from "@/providers/http/client";
 import { createRateLimiter } from "@/providers/http/rate-limiter";
 import { createPipelineHandlers } from "@/providers/pipeline";
@@ -84,7 +84,7 @@ export function makePipeline(db: Db, clock: Clock) {
     });
   }) as typeof fetch;
 
-  const sleep = async () => {};
+  const timer = virtualTimer(clock);
   const client = (provider: "jolpica" | "openf1", baseUrl: string) =>
     createProviderClient({
       provider,
@@ -92,8 +92,8 @@ export function makePipeline(db: Db, clock: Clock) {
       db,
       clock,
       fetch: fakeFetch,
-      limiter: createRateLimiter({ perSecond: 1000 }, clock, sleep),
-      sleep,
+      timer,
+      limiter: createRateLimiter({ perSecond: 1000 }, timer),
     });
   const handlers = createPipelineHandlers({
     jolpica: client("jolpica", `https://api.jolpi.ca${JOLPICA_PATH}`),

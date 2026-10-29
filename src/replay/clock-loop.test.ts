@@ -68,7 +68,7 @@ describe("runReplayClock", () => {
       deps: {
         db: () => t.db,
         store: m.store,
-        handlers: { k: handler },
+        handlers: () => ({ k: handler }),
         mode: "replay",
       },
       from: FROM,
@@ -96,7 +96,7 @@ describe("runReplayClock", () => {
         deps: {
           db: () => t.db,
           store: m.store,
-          handlers: {},
+          handlers: () => ({}),
           mode: "replay",
         },
         from: FROM,

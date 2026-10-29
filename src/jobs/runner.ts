@@ -2,7 +2,7 @@
  * Runs due jobs. Called from an entry point (cron trigger or admin route)
  * that has already resolved the clock once (HLD decision 20).
  */
-import type { Clock } from "@/lib/clock";
+import { systemTimer, type Clock, type Timer } from "@/lib/clock";
 import {
   claimNext,
   complete,
@@ -30,6 +30,10 @@ function errorMessage(error: unknown): string {
  * succeeded, `failed` those that failed, and `lost` those whose result was
  * fenced out because another worker re-claimed the job.
  *
+ * With `deadlineMs`, it stops CLAIMING new jobs once `timer` (real time, not
+ * the frozen tick clock) passes the start plus that many ms. A job already
+ * running is finished, and the jobs not claimed stay due for the next tick.
+ *
  * Handlers must be idempotent and finish within `leaseMs`: there is no
  * heartbeat yet, so a slower handler can be re-claimed and run twice.
  */
@@ -37,13 +41,22 @@ export async function runDue(
   db: JobsDb,
   clock: Clock,
   handlers: Record<JobKind, JobHandler>,
-  opts: { maxJobs: number; leaseMs: number },
+  opts: {
+    maxJobs: number;
+    leaseMs: number;
+    deadlineMs?: number;
+    timer?: Timer;
+  },
 ): Promise<{ ran: number; failed: number; lost: number }> {
+  const timer = opts.timer ?? systemTimer;
+  const stopAt =
+    opts.deadlineMs === undefined ? undefined : timer.now() + opts.deadlineMs;
   let ran = 0;
   let failed = 0;
   let lost = 0;
   await reapExpired(db, clock.now());
   for (let i = 0; i < opts.maxJobs; i++) {
+    if (stopAt !== undefined && timer.now() >= stopAt) break;
     const job = await claimNext(db, clock.now(), opts.leaseMs);
     if (!job) break;
 

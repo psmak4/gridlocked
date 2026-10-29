@@ -4,10 +4,11 @@ import { createTestDb } from "../../tests/helpers/test-db";
 import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
 import { jobs } from "@/db/schema";
 import { ClockModeError } from "@/lib/resolve-clock";
+import type { Timer } from "@/lib/clock";
 import { DUE_KEY, type DueFile } from "./due-times";
 import { enqueue } from "./queue";
 import type { JobHandler } from "./runner";
-import { safetyTick, tick } from "./tick";
+import { safetyTick, tick, type TickDeps } from "./tick";
 
 const T0 = new Date("2026-03-01T10:00:00.000Z");
 const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
@@ -37,11 +38,11 @@ describe("tick", () => {
     const handler: JobHandler = async (job) => {
       seen.push(job.dedupeKey);
     };
-    const deps = {
+    const deps: TickDeps = {
       db,
       store: m.store,
-      handlers: { k: handler },
-      mode: opts.mode ?? ("system" as const),
+      handlers: () => ({ k: handler }),
+      mode: opts.mode ?? "system",
     };
     return { m, db, seen, deps };
   }
@@ -220,11 +221,11 @@ describe("tick", () => {
   it("publishes the retry time of a job that failed", async () => {
     const { id } = await job("a", T0);
     const { m, deps } = setup({ stored: file(T0.toISOString()) });
-    deps.handlers = {
+    deps.handlers = () => ({
       k: async () => {
         throw new Error("boom");
       },
-    };
+    });
     const result = await tick(deps, T0);
     expect(result).toMatchObject({ run: { ran: 0, failed: 1 } });
     const [row] = await t.db.select().from(jobs).where(eq(jobs.id, id));
@@ -232,15 +233,138 @@ describe("tick", () => {
     expect(published(m).next_due_at).toBe(row!.runAt.toISOString());
   });
 
+  describe("the handlers factory", () => {
+    it("is never called when the tick sleeps, republishes or skips", async () => {
+      const factory = vi.fn(() => ({}));
+      const { deps } = setup({ stored: file(at(5).toISOString()) });
+      deps.handlers = factory;
+      await tick(deps, T0);
+
+      const missing = setup();
+      missing.deps.handlers = factory;
+      await tick(missing.deps, T0);
+
+      const broken = setup();
+      broken.m.store.get = async () => {
+        throw new Error("503");
+      };
+      broken.deps.handlers = factory;
+      await tick({ ...broken.deps, log: () => {} }, T0);
+
+      expect(factory).not.toHaveBeenCalled();
+    });
+
+    it("is called once per wake with the tick's database and clock, after the clock check", async () => {
+      await job("a", T0);
+      await job("b", T0);
+      const { db, deps } = setup({ stored: file(T0.toISOString()) });
+      const seenClocks: Date[] = [];
+      const factory = vi.fn((_db: unknown, clock: { now(): Date }) => {
+        seenClocks.push(clock.now());
+        return { k: async () => {} };
+      });
+      deps.handlers = factory;
+
+      await tick(deps, T0);
+
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(factory.mock.calls[0]![0]).toBe(t.db);
+      expect(db).toHaveBeenCalledTimes(1);
+      expect(seenClocks).toEqual([T0]);
+    });
+
+    it("is not called when the clock mode is wrong, so nothing is built against the wrong time", async () => {
+      await t.client.query(
+        "insert into settings (key, value) values ('simulated_clock', $1::jsonb)",
+        [JSON.stringify({ at: T0.toISOString() })],
+      );
+      const { deps } = setup({ stored: file(T0.toISOString()) });
+      const factory = vi.fn(() => ({}));
+      deps.handlers = factory;
+      await expect(tick(deps, T0)).rejects.toBeInstanceOf(ClockModeError);
+      expect(factory).not.toHaveBeenCalled();
+    });
+
+    it("gets the wake's timer and deadline, and the run stops claiming at it", async () => {
+      for (let i = 0; i < 4; i++) await job(`d${i}`, T0);
+      const { deps, seen } = setup({ stored: file(T0.toISOString()) });
+      let now = 5_000;
+      const timer: Timer = {
+        now: () => now,
+        sleep: async (ms) => void (now += ms),
+      };
+      deps.timer = timer;
+      let wake: { timer: Timer; deadlineAt?: number } | undefined;
+      deps.handlers = (_db, _clock, w) => {
+        wake = w;
+        return {
+          k: async (j) => {
+            seen.push(j.dedupeKey);
+            now += 400;
+          },
+        };
+      };
+
+      const result = await tick(deps, T0, {
+        leaseMs: 60_000,
+        maxJobs: 50,
+        deadlineMs: 1000,
+      });
+
+      expect(wake?.timer).toBe(timer);
+      expect(wake?.deadlineAt).toBe(5_000 + 1000);
+      // Claims at +0, +400, +800; the fourth would start at +1200.
+      expect(result).toMatchObject({ action: "wake", run: { ran: 3 } });
+      expect(seen).toHaveLength(3);
+    });
+
+    it("has no deadline unless the options set one", async () => {
+      await job("a", T0);
+      const { deps } = setup({ stored: file(T0.toISOString()) });
+      let wake: { deadlineAt?: number } | undefined;
+      deps.handlers = (_db, _clock, w) => {
+        wake = w;
+        return { k: async () => {} };
+      };
+      await tick(deps, T0);
+      expect(wake?.deadlineAt).toBeUndefined();
+    });
+
+    it("may be async (building the provider clients reads the database)", async () => {
+      await job("a", T0);
+      const { seen, deps } = setup({ stored: file(T0.toISOString()) });
+      deps.handlers = async () => {
+        await Promise.resolve();
+        return {
+          k: async (j) => {
+            seen.push(j.dedupeKey);
+          },
+        };
+      };
+      await tick(deps, T0);
+      expect(seen).toHaveLength(1);
+    });
+
+    it("leaves the file alone when the factory throws, so the next tick tries again", async () => {
+      await job("a", T0);
+      const { m, deps } = setup({ stored: file(T0.toISOString()) });
+      deps.handlers = () => {
+        throw new Error("cannot read provider_limits");
+      };
+      await expect(tick(deps, T0)).rejects.toThrow("provider_limits");
+      expect(m.puts).toHaveLength(0);
+    });
+  });
+
   it("uses scheduledAt as the clock in system mode", async () => {
     await job("a", at(-1));
     let clockNow: Date | undefined;
     const { deps } = setup({ stored: file(at(-1).toISOString()) });
-    deps.handlers = {
+    deps.handlers = () => ({
       k: async (_job, ctx) => {
         clockNow = ctx.clock.now();
       },
-    };
+    });
     await tick(deps, T0);
     expect(clockNow).toEqual(T0);
   });
@@ -273,11 +397,11 @@ describe("tick", () => {
         stored: file(T0.toISOString()),
         mode: "replay",
       });
-      deps.handlers = {
+      deps.handlers = () => ({
         k: async (_job, ctx) => {
           clockNow = ctx.clock.now();
         },
-      };
+      });
       const result = await tick(deps, T0);
       expect(result).toMatchObject({ action: "wake", run: { ran: 1 } });
       expect(db).toHaveBeenCalledTimes(1);
