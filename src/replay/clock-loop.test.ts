@@ -87,6 +87,48 @@ describe("runReplayClock", () => {
     ]);
   });
 
+  it("runs an action once at its minute, in both modes, before that minute's tick", async () => {
+    const seen = async (step: "jump" | "minute") => {
+      const m = createMemoryDueStore();
+      const ran: string[] = [];
+      await runReplayClock({
+        db: t.db,
+        deps: {
+          db: () => t.db,
+          store: m.store,
+          handlers: {},
+          mode: "replay",
+        },
+        from: FROM,
+        until: UNTIL,
+        step,
+        actions: [
+          // Not a whole minute: it runs at the first minute at or after it.
+          {
+            at: at("2026-03-01T08:30:20Z"),
+            run: async (now) => void ran.push(`late@${now.toISOString()}`),
+          },
+          {
+            at: at("2026-03-01T05:00:00Z"),
+            run: async (now) => void ran.push(`early@${now.toISOString()}`),
+          },
+          // After the window: never.
+          {
+            at: at("2026-03-01T14:00:00Z"),
+            run: async () => void ran.push("x"),
+          },
+        ],
+      });
+      return ran;
+    };
+    const expected = [
+      "early@2026-03-01T05:00:00.000Z",
+      "late@2026-03-01T08:31:00.000Z",
+    ];
+    expect(await seen("jump")).toEqual(expected);
+    expect(await seen("minute")).toEqual(expected);
+  });
+
   it("leaves the simulated clock at the end of the window", async () => {
     await run("jump");
     const { rows } = await t.db.execute(

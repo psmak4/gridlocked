@@ -122,6 +122,13 @@ async function reconcileValidationItems(
  * `revokeOverride`): neither moves the status itself, so a session whose
  * effective results changed keeps its old status until this runs.
  *
+ * The same holds for an admin resolving or dismissing a blocking review item:
+ * resolving it does not move the session either, so the resolve action must
+ * call this for the item's session (the M8 contract). The finalize checks call
+ * it for every scored session of the event as a backstop, which is why an
+ * item resolved without it still clears at the next check, but the status the
+ * admin sees would be stale until then.
+ *
  * A session that is `provisional` or `under_review` and loses rows is not
  * sent back to `awaiting`: each missing driver opens a blocking
  * `missing_driver` item and the session is `under_review`.

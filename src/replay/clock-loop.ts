@@ -12,6 +12,11 @@
  *   next safety tick. A tick that finds `next_due_at` in the future only
  *   reads the file, so skipping those ticks changes nothing in the database.
  *
+ * `actions` are things done to the database at a given minute (an admin
+ * resolving an item): each runs once, at the first visited minute that is not
+ * before its time, after the clock is written and before the tick. `jump`
+ * visits that minute too.
+ *
  * Nothing here reads the time, and nothing here knows a provider exists.
  */
 import { sql } from "drizzle-orm";
@@ -63,6 +68,8 @@ export interface ClockLoopOptions {
   step: ReplayStep;
   /** Called with each simulated minute before it is written, so a caller's own clock can follow. */
   onMinute?: (at: Date) => void;
+  /** Run once each, at their minute (see above). Actions after `until` never run. */
+  actions?: Array<{ at: Date; run: (at: Date) => Promise<void> }>;
 }
 
 export interface ClockLoopResult {
@@ -90,9 +97,15 @@ export async function runReplayClock(
     await setSimulatedClock(opts.db, at);
   };
 
+  const pending = [...(opts.actions ?? [])].sort(
+    (a, b) => a.at.getTime() - b.at.getTime(),
+  );
   let minute = from;
   while (minute.getTime() <= until.getTime()) {
     await setClock(minute);
+    while (pending.length > 0 && pending[0]!.at.getTime() <= minute.getTime()) {
+      await pending.shift()!.run(minute);
+    }
     const outcome = await tick(deps, minute);
     result.ticks++;
     if (outcome.action === "wake" || outcome.action === "republished") {
@@ -110,9 +123,14 @@ export async function runReplayClock(
         due.ok && due.file.next_due_at !== null
           ? Math.ceil(Date.parse(due.file.next_due_at) / MINUTE_MS) * MINUTE_MS
           : Infinity;
+      const nextAction =
+        pending.length > 0
+          ? Math.ceil(pending[0]!.at.getTime() / MINUTE_MS) * MINUTE_MS
+          : Infinity;
       next = Math.min(
         Math.max(next, nextDue),
         nextSafetyMinute(minute).getTime(),
+        Math.max(next, nextAction),
       );
     }
     minute = new Date(next);

@@ -14,9 +14,6 @@ import { enqueue } from "./queue";
 import type { JobHandler } from "./runner";
 import { loadSession } from "./session-info";
 
-/** Sessions the finalizer re-fetches: where late penalties change the order. */
-const REFETCHED_KINDS = ["sprint", "race"] as const;
-
 /** A held event is looked at again this often (an hour if the provider was down). */
 const HELD_RECHECK_MS = 6 * 3_600_000;
 const OUTAGE_RECHECK_MS = 3_600_000;
@@ -25,10 +22,18 @@ const HELD_WINDOW_MS = 14 * 24 * 3_600_000;
 
 /**
  * The `finalize_check` handler (HLD §4.4). At each check after the race it
- * re-fetches the race (and the sprint, if the event has one) and compares the
+ * re-fetches every scored session of the event (`SCORED_KINDS`: qualifying,
+ * the sprint if there is one, and the race: a post-session disqualification
+ * changes qualifying as much as a penalty changes the race) and compares the
  * snapshot with the one the results came from. A different snapshot is
- * normalized, which logs `result_changes`; `advanceStatus` then runs for every
- * re-fetched session, as it must after any normalization.
+ * normalized, which logs `result_changes`.
+ *
+ * `advanceStatus` then runs for each of those sessions that is not final or
+ * cancelled, whether or not the re-fetch worked and whether or not anything
+ * changed. That is what moves a session whose blocking item an admin resolved
+ * (resolving it does not move the status itself) on to `provisional`, so
+ * every check, not only the last one, leaves the statuses current before the
+ * event is judged.
  *
  * The last planned check (`final` in the payload, the +48 h one) also
  * finalizes the event, if it can: every scored session of the event has to be
@@ -73,7 +78,7 @@ export function createFinalizeHandler(source: ResultsSource): JobHandler {
         and(
           eq(sessions.eventId, eventId),
           ne(sessions.status, "cancelled"),
-          inArray(sessions.kind, [...REFETCHED_KINDS]),
+          inArray(sessions.kind, [...SCORED_KINDS]),
         ),
       )
       .orderBy(asc(sessions.scheduledStart), asc(sessions.sequence));
