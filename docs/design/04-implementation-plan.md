@@ -96,9 +96,10 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Scope:**
   - a cron-triggered Neon Function, run every minute, that reads the due-times file and wakes Postgres only when something is due (HLD §4.5): this is where the file's home gets decided;
   - a small job table with uniqueness keys, so a duplicate tick can't double-act;
-  - the hourly safety tick that checks the job table directly;
+  - the safety tick that checks the job table directly (hourly in the spike; every 6 hours from the result);
   - measured database compute-hours, Function capacity-hours and invocations, Object Storage use and transfer, extrapolated to a month and a race weekend.
-- **Exit:** a short written result in `docs/spikes/M1-scheduler.md`. Either the tick fits the free tier as designed, or we change the design. The spike's code is deleted; the result and any design changes carry on.
+- **Exit:** a short written result in `docs/spikes/M1-scheduler.md`. Either the tick fits the free tier as designed, or we change the design. The spike's code is kept on branch `spike/m1-scheduler`, which is never merged; the result and any design changes carry on.
+- **Result (2026-10-29): fits the free tier**, with the safety tick moved to every 6 hours and the due-times file in Neon Object Storage (about 11 of 100 CU-hours a month for the scheduler). See [spikes/M1-scheduler.md](../spikes/M1-scheduler.md).
 - **Approval given (2026-10-28):** the `gridlocked-staging` Neon project, Free plan, AWS US East 1.
 - **Plan:** [plans/M1-spike.md](../plans/M1-spike.md).
 

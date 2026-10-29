@@ -247,9 +247,10 @@ Any failure holds the session as `under_review` and puts it in the admin queue. 
 The scheduler is a **once-a-minute tick** that looks at the calendar and enqueues due work: open threads, flip thread modes, start polling, send reminders. Work goes into a small Postgres-backed job table with uniqueness keys, so a duplicate tick can't double-act. The jobs' code lives in the shared modules, so it runs on whichever host we choose (§11).
 
 **The tick must not wake the database when nothing is due (proposed, 2026-10-27).** On Neon's free plan the database sleeps after 5 minutes idle, and its awake time is the main free-tier budget (§11.4). A tick that queried Postgres every minute would keep it awake all month, using about 180 compute-hours against a free allowance of 100. So:
-- The tick first reads a small **published due-times file**. This is a static JSON list of the next times anything is due, rewritten whenever the calendar, lock times or job queue change. It's kept somewhere that doesn't wake the database, such as Neon Object Storage or a static file on the CDN; phase 4 picks which.
+- The tick first reads a small **published due-times file**: a static JSON note of the next time anything is due, rewritten whenever the calendar, lock times or job queue change. **It lives in Neon Object Storage** (bucket `scheduler`, key `due-times.json`; decided by the M1 spike, 2026-10-29). Reading it never wakes the database and costs nothing per request.
 - The tick connects to Postgres only when a due time has passed. Between race weekends that's a few times a day; during a weekend it's around sessions, polling and the finalizer.
-- Correctness doesn't depend on this file. Lock is enforced at write time (§5.2), and the job table's uniqueness keys stop double work. If the file is stale, the worst case is a late thread or reminder, so an hourly safety tick also checks the job table directly.
+- Correctness doesn't depend on this file. Lock is enforced at write time (§5.2), and the job table's uniqueness keys stop double work. The tick republishes the file after every wake, and republishes a missing or malformed file at once (one wake). A safety tick **every 6 hours** also checks the job table directly and republishes it, as a backstop for an enqueue that skipped its republish. At worst such a job runs up to 6 hours late. M1's numbers put an hourly safety tick at about 15 CU-hours a month, the scheduler's largest single cost, which is why it's 6-hourly. A skipped cron minute, which M1 saw once, only delays due work by a minute.
+- **From M1 ([docs/spikes/M1-scheduler.md](../spikes/M1-scheduler.md)):** about 5 minutes of database compute per wake (inferred from measured awake time), a burst of 20 due jobs in one wake, and an estimated ~11 CU-hours a month for the whole scheduler with the 6-hourly safety tick.
 
 ---
 
@@ -524,7 +525,7 @@ Sources: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Netlify pricing](
 
 | Service | Free limit | What happens when exceeded |
 |---|---|---|
-| Neon | 100 compute-hours per project per month, about 400 awake hours at the smallest size (0.25 CU); 1 GB storage; 5 GB/month data transfer; sleeps after 5 min idle. Functions: 1M invocations plus a monthly compute allowance. Realtime is free during its beta | the database stops until next month (storage over 1 GB blocks writes) |
+| Neon | 100 compute-hours per project per month, about 400 awake hours at the smallest size (0.25 CU); 1 GB storage (the staging project reports a 512 MB branch limit, observed 2026-10-28); 5 GB/month data transfer; sleeps after 5 min idle. Functions: 1M invocations plus a monthly compute allowance. Realtime is free during its beta | the database stops until next month (storage over 1 GB blocks writes) |
 | Vercel Hobby | see §11.3 | the feature pauses for 30 days |
 | Resend | 100 emails/day, 3,000/month | sends fail; we queue and retry (§10) |
 | Ably (fallback only) | 200 simultaneous connections, 6M messages/month | connections refused |
@@ -532,7 +533,7 @@ Sources: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Netlify pricing](
 Going over a free limit never sends a bill; the service stops instead. The failure we care most about is **a race weekend using up the month's allowance and taking the site down mid-race**, so the changes below aim at that.
 
 **The changes:**
-1. **The scheduler doesn't wake the database when nothing is due** (§4.5).
+1. **The scheduler doesn't wake the database when nothing is due** (§4.5). Estimated by the M1 spike: ~11 of the 100 free CU-hours a month.
 2. **Email for account messages only;** notifications go in-app and by Web Push (§10). Web Push moves into launch scope (§15).
 3. **Cache aggressively.** Results, standings, leaderboards, hub pages and thread pages for logged-out visitors are served from Vercel's CDN with revalidation, so most visits never touch a function or the database. Signed-in views and writes still hit the database.
 4. **Ration production deploys.** Batch releases, with testing on free preview deploys. On Vercel this protects stability more than cost, since deploys don't use the allowance.
