@@ -1,6 +1,6 @@
 # M1 spike: the scheduler tick on Neon's free plan
 
-**Status:** in progress (started 2026-10-28). Plan: [plans/M1-spike.md](../plans/M1-spike.md).
+**Status:** complete (2026-10-28 to 2026-10-29). **Verdict: fits as designed, with one change** (the safety tick runs every 6 hours, not hourly). Plan: [plans/M1-spike.md](../plans/M1-spike.md).
 
 ## The question
 Can a once-a-minute scheduler tick run on Neon's free plan without keeping the database awake (HLD §4.5)? And where should the due-times file live?
@@ -44,10 +44,53 @@ The spike code is on branch [`spike/m1-scheduler`](https://github.com/psmak4/gri
 - **Quiet period**, 13:41–02:00: jobs at 16:00, 20:00 and 00:00, plus the hourly safety runs.
 - **Race-weekend window**, 02:00–08:00 on 29 Oct: a job every 10 minutes (36), plus a burst of 20 jobs all due at 05:03.
 
-_Results to fill in (Task 4)._
+### What the logs show (13:41 on 28 Oct to 09:07 on 29 Oct)
+- **Every minute without a due job slept.** The tick read the file (about 15–50 ms) and returned without touching Postgres.
+- **The database woke only for due jobs and the safety runs:**
+  - the 3 quiet jobs (16:00, 20:00, 00:00) and the hourly safety runs, 20 of them;
+  - all 36 weekend jobs, one every 10 minutes from 02:00 to 07:50.
+- **The burst worked.** All 20 jobs due at 05:03 were claimed and run in **one wake, in 246 ms**.
+- **After the last job**, the file said `next_due_at=null`, and from 08:00 only the safety runs woke the database.
+- **A woken tick** (claim, run, republish) takes 250–1,400 ms. The longer ones include the database waking from suspend.
+- **Neon's cron skipped one minute.** There was no invocation at all at 04:50, and the 04:51 tick picked the job up (`run_at <= now`), one minute late. In about 1,170 scheduled minutes that's the only skip visible, but a skipped minute with nothing due leaves no trace in the logs. Nothing depends on a tick running on time (HLD §3.3 rule 3), so a skip costs a minute of latency.
+
+### Usage
+| Measure | Spike window (~19.5 h) | Free allowance |
+|---|---|---|
+| Database awake time (`m1-spike`) | **5.22 h** (18,804 s), or **1.31 CU-hours** at 0.25 CU | 100 CU-hours a month |
+| …expected from wakes × ~5 min plus setup | ~4.9 h | |
+| `main` branch (untouched by the spike) | 316 s, all at project creation | |
+| Data transfer | 214 KB | 5 GB a month |
+| Function invocations | ~1,180 (one a minute plus the safety runs) | 1M a month |
+| Function time | sleeping ticks 80–155 ms, woken ticks ≤1.4 s; under 0.5 h in all | 10 active and 400 waiting capacity-hours |
+| Object Storage | one 96-byte file; a GET every minute and a PUT per wake | 5 GB; no per-request charge |
+
+The measured awake time matches the design's prediction, about 5 minutes of compute per wake (Neon suspends after 5 idle minutes), to within about 6%.
+
+### Monthly extrapolation (0.25 CU, scheduler only)
+| Source | Awake hours | CU-hours |
+|---|---|---|
+| Hourly safety runs (24 a day × 5 min) | ~60 | **15.0** |
+| Everyday jobs (about 5 a day: syncs, reminders) | ~12 | 3.1 |
+| Two race weekends (polls, roster and finalize checks; assumed ~10 h awake each) | ~20 | 5.0 |
+| **Total with hourly safety** | ~92 | **~23** of 100 |
+| **Total with 6-hourly safety** | ~42 | **~11** of 100 |
+
+Invocations come to about 44k a month (4% of the free 1M). Function time and transfer are negligible.
 
 ## Result
-_To fill in (Task 5)._
+- **The tick fits the free tier.** The scheduler leaves the database asleep between due times. Its compute is about 5 minutes per wake, and a burst of due work costs one wake.
+- **The biggest single cost is the safety run, not the minute tick.** At hourly it would use about 15 of the 100 CU-hours a month by itself.
+- **The due-times file lives in Neon Object Storage.** Reading it never wakes Postgres, it costs nothing per request, and it's on the same branch as the data. Credentials are injected into the function, with no secret to manage.
+- **Missed cron minutes happen and are harmless.** The `run_at <= now` check and the job table's dedupe keys cover them.
 
 ## Decision
-_To fill in (Task 5)._
+1. **The due-times file lives in Neon Object Storage**, bucket `scheduler`, key `due-times.json` (HLD §4.5).
+2. **The safety run moves from hourly to every 6 hours** (`7 */6 * * *`). That's about 2.5 CU-hours a month instead of 15. It's safe because the app also republishes the file whenever it changes job timing (enqueue, a moved session, a calendar sync), so the safety run is only a backstop for a missed republish.
+3. **The tick keeps the M1 shape:**
+   - it reads the file;
+   - it sleeps when nothing is due, and skips with a log line, never waking, when the file is missing or malformed;
+   - when something is due, it claims jobs and always republishes the file;
+   - it accepts only trigger calls (the `X-Neon-Trigger-Invocation-Id` header).
+4. **Production code uses the real drivers**, `@neondatabase/serverless` and an S3 client. The spike's tiny fetch-based clients only existed because of the MCP deploy route. M2 Task 12 deploys through the `neon` CLI from CI.
+5. **Cleanup (2026-10-29):** the spike's triggers, function and bucket are deleted, and staging's `main` branch has none. The empty `m1-spike` branch, holding only the spike's job table, is deleted once you confirm (Neon's tooling requires a confirmation for branch deletion). The code stays on branch `spike/m1-scheduler`, which is never merged.
