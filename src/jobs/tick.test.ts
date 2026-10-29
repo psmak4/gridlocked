@@ -4,6 +4,7 @@ import { createTestDb } from "../../tests/helpers/test-db";
 import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
 import { jobs } from "@/db/schema";
 import { ClockModeError } from "@/lib/resolve-clock";
+import type { Timer } from "@/lib/clock";
 import { DUE_KEY, type DueFile } from "./due-times";
 import { enqueue } from "./queue";
 import type { JobHandler } from "./runner";
@@ -282,6 +283,51 @@ describe("tick", () => {
       deps.handlers = factory;
       await expect(tick(deps, T0)).rejects.toBeInstanceOf(ClockModeError);
       expect(factory).not.toHaveBeenCalled();
+    });
+
+    it("gets the wake's timer and deadline, and the run stops claiming at it", async () => {
+      for (let i = 0; i < 4; i++) await job(`d${i}`, T0);
+      const { deps, seen } = setup({ stored: file(T0.toISOString()) });
+      let now = 5_000;
+      const timer: Timer = {
+        now: () => now,
+        sleep: async (ms) => void (now += ms),
+      };
+      deps.timer = timer;
+      let wake: { timer: Timer; deadlineAt?: number } | undefined;
+      deps.handlers = (_db, _clock, w) => {
+        wake = w;
+        return {
+          k: async (j) => {
+            seen.push(j.dedupeKey);
+            now += 400;
+          },
+        };
+      };
+
+      const result = await tick(deps, T0, {
+        leaseMs: 60_000,
+        maxJobs: 50,
+        deadlineMs: 1000,
+      });
+
+      expect(wake?.timer).toBe(timer);
+      expect(wake?.deadlineAt).toBe(5_000 + 1000);
+      // Claims at +0, +400, +800; the fourth would start at +1200.
+      expect(result).toMatchObject({ action: "wake", run: { ran: 3 } });
+      expect(seen).toHaveLength(3);
+    });
+
+    it("has no deadline unless the options set one", async () => {
+      await job("a", T0);
+      const { deps } = setup({ stored: file(T0.toISOString()) });
+      let wake: { deadlineAt?: number } | undefined;
+      deps.handlers = (_db, _clock, w) => {
+        wake = w;
+        return { k: async () => {} };
+      };
+      await tick(deps, T0);
+      expect(wake?.deadlineAt).toBeUndefined();
     });
 
     it("may be async (building the provider clients reads the database)", async () => {

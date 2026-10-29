@@ -1,8 +1,9 @@
 import { providerRequests } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { ProviderUnavailableError } from "@/jobs/ports";
 import type { Clock, Timer } from "@/lib/clock";
 import { newId } from "@/lib/ids";
-import type { RateLimiter } from "./rate-limiter";
+import { LimiterDeadlineError, type RateLimiter } from "./rate-limiter";
 import { storeSnapshot } from "../snapshots";
 
 export type ProviderName = "jolpica" | "openf1";
@@ -31,14 +32,25 @@ export interface ProviderClientOptions {
   provider: ProviderName;
   baseUrl: string;
   db: Db;
-  /** The app's "now", for the `requested_at` stamps only. */
+  /**
+   * The app's "now" (HLD decision 20), for the snapshots' times. Not for the
+   * request log: see `timer`.
+   */
   clock: Clock;
   /**
-   * Real time, for how long a call took, `Retry-After` and waiting. Apart from
-   * `clock` because a tick's clock is frozen at its scheduled minute. Give the
-   * limiter the same timer.
+   * Real time, for `provider_requests.requested_at` (the instant the limiter
+   * recorded the call: the log is operational rate accounting, and a tick's
+   * clock is frozen at its scheduled minute), how long a call took,
+   * `Retry-After` and waiting. Give the limiter the same timer.
    */
   timer: Timer;
+  /**
+   * The timer's epoch ms by which the current wake must be done. The client
+   * never sleeps past it, and starts no call after it: it throws
+   * `ProviderUnavailableError` instead, so the poll and finalize jobs treat it
+   * as "still awaiting" and the job runs again on a later tick.
+   */
+  deadlineAt?: number;
   fetch: typeof fetch;
   limiter: RateLimiter;
   /** Abort a request that has not finished after this long. Default 30 s. */
@@ -73,7 +85,7 @@ export class ProviderHttpError extends Error {
 const MAX_RETRIES = 3;
 const DEFAULT_RETRY_AFTER_MS = 30_000;
 /** A longer `Retry-After` is not waited out: the call fails instead. */
-const MAX_RETRY_AFTER_MS = 300_000;
+const MAX_RETRY_AFTER_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** `Retry-After` is seconds or an HTTP date. Anything else gets the default. */
@@ -95,11 +107,12 @@ function errorMessage(error: unknown): string {
 /**
  * The one way to call a provider (HLD §4.1). Every attempt waits for the rate
  * limiter, is logged to `provider_requests`, and a good response becomes a
- * snapshot. A 429 waits `Retry-After` (30 s if absent) and retries up to
- * three times; any other failure is logged and thrown.
+ * snapshot. A 429 waits `Retry-After` (30 s if absent, never more than 30 s:
+ * longer fails the call as `ProviderUnavailableError`) and retries up to three
+ * times; any other failure is logged and thrown.
  */
 export function createProviderClient(opts: ProviderClientOptions) {
-  const { provider, baseUrl, db, clock, limiter, timer } = opts;
+  const { provider, baseUrl, db, clock, limiter, timer, deadlineAt } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function get(
@@ -116,9 +129,25 @@ export function createProviderClient(opts: ProviderClientOptions) {
       url.searchParams.set(key, value);
     }
 
+    const unavailable = (why: string) =>
+      new ProviderUnavailableError(`${provider} ${endpoint}: ${why}`);
+
     for (let attempt = 0; ; attempt++) {
-      await limiter.acquire();
-      const requestedAt = clock.now();
+      if (deadlineAt !== undefined && timer.now() >= deadlineAt) {
+        throw unavailable("the wake's time budget is used up");
+      }
+      let recordedAt: number;
+      try {
+        recordedAt = await limiter.acquire(deadlineAt);
+      } catch (error) {
+        if (error instanceof LimiterDeadlineError) {
+          throw unavailable(
+            "the rate limit would hold this call past the wake's time budget",
+          );
+        }
+        throw error;
+      }
+      const requestedAt = new Date(recordedAt);
       const startedMs = timer.now();
 
       // Set once the response (or the failure) is in, before any database work.
@@ -184,9 +213,13 @@ export function createProviderClient(opts: ProviderClientOptions) {
           timer.now(),
         );
         if (waitMs > MAX_RETRY_AFTER_MS) {
-          throw new ProviderHttpError(
-            429,
-            `${provider} ${endpoint}: retry-after too long: ${Math.ceil(waitMs / 1000)}s`,
+          throw unavailable(
+            `retry-after too long: ${Math.ceil(waitMs / 1000)}s`,
+          );
+        }
+        if (deadlineAt !== undefined && timer.now() + waitMs > deadlineAt) {
+          throw unavailable(
+            `retry-after of ${Math.ceil(waitMs / 1000)}s would end after the wake's time budget`,
           );
         }
         await timer.sleep(waitMs);

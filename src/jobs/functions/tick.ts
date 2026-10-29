@@ -24,7 +24,10 @@ import { createDb } from "@/db/client";
 import { systemTimer } from "@/lib/clock";
 import { clockModeFromEnv } from "@/lib/resolve-clock";
 import { createPipelineHandlers } from "@/providers/pipeline";
-import { createPipelineClients } from "@/providers/pipeline/clients";
+import {
+  createPipelineClients,
+  createSharedLimiters,
+} from "@/providers/pipeline/clients";
 import { createDueStoreFromEnv } from "@/providers/storage/due-store";
 import type { DueStore } from "../due-times";
 import {
@@ -37,24 +40,34 @@ import {
 } from "../tick";
 
 /**
- * A tick runs at most 20 jobs. Handlers have no heartbeat, so everything a
- * tick claims has to finish inside the 5-minute lease or `reapExpired` will
- * hand the still-running jobs to the next tick. A job is a few provider calls
- * (the limiter lets at most 3 a second through, and a call times out after
- * 30 s) plus a transaction, which is a second or two when nothing is wrong,
- * so 20 jobs take under a minute and leave a 5x margin for slow provider
- * responses and a database waking from suspend. The M1 burst of 20 trivial
- * jobs took 246 ms. If more are due, the file still says "wake" after the
- * republish and the next minute's tick takes the rest.
+ * A wake is bounded in real time, because handlers have no heartbeat and
+ * everything a tick claims has to finish inside the 5-minute lease or
+ * `reapExpired` hands the still-running jobs to the next tick.
+ *
+ * - No job is claimed after `deadlineMs` (45 s) into the wake.
+ * - The provider clients (given the same deadline) never sleep past it, for
+ *   a rate-limit wait or a `Retry-After`, and start no call after it: they
+ *   throw `ProviderUnavailableError`, which poll and finalize treat as "still
+ *   awaiting", so the job runs again on a later tick.
+ * - So the latest a wake can end is the deadline plus the one call in flight
+ *   when it passes (at most the client's 30 s fetch timeout) plus that job's
+ *   database writes: about 75 s, a quarter of the lease.
+ *
+ * `maxJobs` is 20, a ceiling on top of that: a job is a few provider calls
+ * (3 a second at most through the limiter) and a transaction, so 20 normally
+ * take well under the deadline (the M1 burst of 20 trivial jobs took 246 ms).
+ * Jobs not reached stay due; the republished file still says "wake" and the
+ * next minute's tick takes them.
  */
 export const FUNCTION_TICK_OPTIONS: TickOptions = {
   ...DEFAULT_TICK_OPTIONS,
   maxJobs: 20,
+  deadlineMs: 45_000,
 };
 
 export type TickHandlerDeps = Pick<
   TickDeps,
-  "db" | "store" | "handlers" | "mode"
+  "db" | "store" | "handlers" | "mode" | "timer"
 > & { options?: TickOptions };
 
 /** The scheduled instant from a trigger call's body: `data.scheduled_at`. */
@@ -154,23 +167,32 @@ export function depsFromEnv(
   env: Record<string, string | undefined>,
   overrides: { store?: DueStore } = {},
 ): TickHandlerDeps {
-  const url = env.DATABASE_URL;
+  // The direct connection, as Neon advises for multi-round-trip transactions
+  // (the job queue's claims and the results writes); the pooled URL is the
+  // fallback.
+  const url = env.DATABASE_URL_UNPOOLED || env.DATABASE_URL;
   if (!url) {
     throw new Error("DATABASE_URL is not set (Neon injects it into functions)");
   }
   const mode = clockModeFromEnv(env);
   const store = overrides.store ?? createDueStoreFromEnv(env);
   const database = createDb(url);
+  // One limiter per provider for this isolate, re-seeded from the request log
+  // at each wake, so overlapping invocations on one warm process share them.
+  const limiters = createSharedLimiters(systemTimer);
   return {
     db: () => database.db(),
     store,
     mode,
-    handlers: async (db, clock) =>
+    timer: systemTimer,
+    handlers: async (db, clock, wake) =>
       createPipelineHandlers(
         await createPipelineClients({
           db,
           clock,
-          timer: systemTimer,
+          timer: wake.timer,
+          deadlineAt: wake.deadlineAt,
+          limiters,
           fetch: (input, init) => fetch(input, init),
         }),
       ),

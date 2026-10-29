@@ -13,6 +13,7 @@ import {
 import { newId } from "@/lib/ids";
 import { fixedClock, simulatedClock, type Timer } from "@/lib/clock";
 import { createProviderClient } from "./client";
+import { ProviderUnavailableError } from "@/jobs/ports";
 import { createRateLimiter } from "./rate-limiter";
 
 const start = new Date("2026-03-08T10:00:00.000Z");
@@ -51,7 +52,7 @@ describe("createProviderClient", () => {
   function setup(
     responses: Array<Response | Error | (() => Response)>,
     limits: { perSecond: number } = { perSecond: 100 },
-    extra: { timeoutMs?: number } = {},
+    extra: { timeoutMs?: number; deadlineAt?: number } = {},
   ) {
     const clock = simulatedClock(start);
     const sleeps: number[] = [];
@@ -149,9 +150,10 @@ describe("createProviderClient", () => {
     expect(req!.durationMs).toBe(250);
   });
 
-  it("stamps requested_at from the clock and measures time with the timer, even when the clock is frozen", async () => {
+  it("stamps requested_at from the timer (when the limiter recorded the call) and the snapshot from the clock", async () => {
     // System mode: the clock is the tick's scheduled instant, fixed for the
-    // whole tick, and only the timer sees time pass.
+    // whole tick, and only the timer sees time pass. The request log is rate
+    // accounting, so it carries real time; domain time stays on the clock.
     const clock = fixedClock(start);
     const real = simulatedClock(new Date("2026-03-08T10:00:20.000Z"));
     const timer = timerOn(real);
@@ -169,8 +171,10 @@ describe("createProviderClient", () => {
     });
     await client.get("/sessions");
     const [req] = await requests();
-    expect(req!.requestedAt).toEqual(start);
+    expect(req!.requestedAt).toEqual(new Date("2026-03-08T10:00:20.000Z"));
     expect(req!.durationMs).toBe(250);
+    const [snap] = await t.db.select().from(rawSnapshots);
+    expect(snap!.firstFetchedAt).toEqual(start);
   });
 
   it("works out an HTTP-date Retry-After from the timer's now", async () => {
@@ -292,14 +296,14 @@ describe("createProviderClient", () => {
     );
     expect(await requests()).toHaveLength(10);
   });
-  it("caps Retry-After at 5 minutes: a longer wait is logged and thrown, not slept", async () => {
+  it("caps Retry-After at 30 s: a longer wait fails fast as ProviderUnavailableError, not slept", async () => {
     const { client, sleeps, urls } = setup([
-      new Response("", { status: 429, headers: { "retry-after": "301" } }),
+      new Response("", { status: 429, headers: { "retry-after": "60" } }),
     ]);
-    await expect(client.get("/x")).rejects.toThrow(
-      "retry-after too long: 301s",
-    );
+    const error = await client.get("/x").catch((e: unknown) => e);
 
+    expect(error).toBeInstanceOf(ProviderUnavailableError);
+    expect((error as Error).message).toContain("retry-after too long: 60s");
     expect(sleeps).toEqual([]);
     expect(urls).toHaveLength(1);
     const rows = await requests();
@@ -307,13 +311,78 @@ describe("createProviderClient", () => {
     expect(rows[0]).toMatchObject({ outcome: "rate_limited", statusCode: 429 });
   });
 
-  it("still waits a Retry-After of exactly 5 minutes", async () => {
+  it("still waits a Retry-After of exactly 30 s", async () => {
     const { client, sleeps } = setup([
-      new Response("", { status: 429, headers: { "retry-after": "300" } }),
+      new Response("", { status: 429, headers: { "retry-after": "30" } }),
       json({ ok: 1 }),
     ]);
     await client.get("/x");
-    expect(sleeps).toEqual([300_000]);
+    expect(sleeps).toEqual([30_000]);
+  });
+
+  describe("with a deadline for the wake", () => {
+    const at = (ms: number) => start.getTime() + ms;
+
+    it("fails fast as ProviderUnavailableError when a limiter wait would end after it, sending nothing", async () => {
+      const { client, urls, sleeps } = setup(
+        [json({ a: 1 }), json({ a: 2 })],
+        { perSecond: 1 },
+        { deadlineAt: at(500) },
+      );
+      await client.get("/x"); // takes the one slot this second
+      const error = await client.get("/y").catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ProviderUnavailableError);
+      expect(urls).toHaveLength(1);
+      expect(sleeps).toEqual([]);
+      // The refused call is not logged: nothing was sent.
+      expect(await requests()).toHaveLength(1);
+    });
+
+    it("waits for a limiter slot that ends inside the budget", async () => {
+      const { client, sleeps } = setup(
+        [json({ a: 1 }), json({ a: 2 })],
+        { perSecond: 1 },
+        { deadlineAt: at(5_000) },
+      );
+      await client.get("/x");
+      await client.get("/y");
+      expect(sleeps).toEqual([1000]);
+    });
+
+    it("fails fast when a Retry-After would end after it", async () => {
+      const { client, sleeps, urls } = setup(
+        [new Response("", { status: 429, headers: { "retry-after": "10" } })],
+        undefined,
+        { deadlineAt: at(5_000) },
+      );
+      const error = await client.get("/x").catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ProviderUnavailableError);
+      expect(sleeps).toEqual([]);
+      expect(urls).toHaveLength(1);
+    });
+
+    it("waits a Retry-After that fits in the budget", async () => {
+      const { client, sleeps } = setup(
+        [
+          new Response("", { status: 429, headers: { "retry-after": "2" } }),
+          json({ ok: 1 }),
+        ],
+        undefined,
+        { deadlineAt: at(5_000) },
+      );
+      await client.get("/x");
+      expect(sleeps).toEqual([2000]);
+    });
+
+    it("does not start a call once the deadline has passed", async () => {
+      const { client, urls } = setup([json({ ok: 1 })], undefined, {
+        deadlineAt: at(0),
+      });
+      await expect(client.get("/x")).rejects.toBeInstanceOf(
+        ProviderUnavailableError,
+      );
+      expect(urls).toHaveLength(0);
+    });
   });
 
   it("passes an abort signal to fetch for the timeout", async () => {
@@ -359,7 +428,7 @@ describe("createProviderClient", () => {
       db: t.db,
       clock: fixedClock(start),
       fetch: (async () => json({ ok: 1 })) as typeof fetch,
-      limiter: { acquire: async () => {} },
+      limiter: { acquire: async () => start.getTime() },
       timer,
     });
     await client.get("/x");
@@ -380,7 +449,7 @@ describe("createProviderClient", () => {
       db: t.db,
       clock: fixedClock(start),
       fetch: (async () => json({ ok: 1 })) as typeof fetch,
-      limiter: { acquire: async () => {} },
+      limiter: { acquire: async () => start.getTime() },
       timer,
     });
     await client.get("/x");

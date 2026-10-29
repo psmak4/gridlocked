@@ -28,6 +28,8 @@ env:
 
 jobs:
   deploy:
+    # Only the reviewed code on main goes to staging, whatever ref was picked.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Holds the staging secrets: NEON_API_KEY_STAGING and DATABASE_URL_STAGING.

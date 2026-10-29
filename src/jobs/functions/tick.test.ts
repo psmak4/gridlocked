@@ -7,12 +7,12 @@ import type { JobHandler } from "../runner";
 
 // The real Pool opens a WebSocket on first use; here its constructor only
 // records that it was built.
-const pools: unknown[] = [];
+const pools: Array<{ config: { connectionString: string } }> = [];
 vi.mock("@neondatabase/serverless", () => ({
   Pool: class {
     on = vi.fn();
     end = vi.fn(async () => {});
-    constructor() {
+    constructor(readonly config: { connectionString: string }) {
       pools.push(this);
     }
   },
@@ -180,13 +180,40 @@ describe("the tick function", () => {
       );
     });
 
-    it("keeps a tick well inside the lease", () => {
+    it("bounds a wake in real time, well inside the lease", () => {
       // Handlers have no heartbeat, so a tick that outlives its lease would have
-      // its jobs reaped while still running.
-      const { leaseMs, maxJobs } = FUNCTION_TICK_OPTIONS;
+      // its jobs reaped while still running. No job is claimed after the
+      // deadline, no wait runs past it, and no call starts after it, so the
+      // latest a wake ends is the deadline plus the one call in flight (the
+      // 30 s fetch timeout) plus its database writes.
+      const { leaseMs, deadlineMs } = FUNCTION_TICK_OPTIONS;
       expect(leaseMs).toBe(5 * 60_000);
-      // 20 jobs leave 15 s each inside the lease.
-      expect(leaseMs / maxJobs).toBeGreaterThanOrEqual(15_000);
+      expect(deadlineMs).toBe(45_000);
+      expect(deadlineMs! + 30_000 + 30_000).toBeLessThan(leaseMs);
+    });
+
+    it("gives the handler factory the wake's budget: the function's timer and a deadline 45 s out", async () => {
+      await job("a");
+      const m = createMemoryDueStore({ [DUE_KEY]: file(T0.toISOString()) });
+      let budget: { timer: unknown; deadlineAt?: number } | undefined;
+      const now = 7_000;
+      const timer = { now: () => now, sleep: async () => {} };
+      const handle = createTickHandler(
+        {
+          db: () => t.db,
+          store: m.store,
+          timer,
+          mode: "system",
+          handlers: (_db, _clock, wake) => {
+            budget = wake;
+            return { k: async () => {} };
+          },
+        },
+        () => {},
+      );
+      await handle(post("/", { headers: TRIGGER }));
+      expect(budget?.timer).toBe(timer);
+      expect(budget?.deadlineAt).toBe(7_000 + 45_000);
     });
 
     it("logs a missing file's republish", async () => {
@@ -270,10 +297,39 @@ describe("the tick function", () => {
       expect(pools).toHaveLength(1);
     });
 
+    it("connects with DATABASE_URL_UNPOOLED when Neon injects it, else DATABASE_URL", () => {
+      depsFromEnv({
+        ...env,
+        DATABASE_URL_UNPOOLED: "postgres://user:pw@direct.invalid/db",
+      }).db();
+      depsFromEnv(env).db();
+      expect(pools.map((p) => p.config.connectionString)).toEqual([
+        "postgres://user:pw@direct.invalid/db",
+        "postgres://user:pw@example.invalid/db",
+      ]);
+    });
+
+    it("wires with only DATABASE_URL_UNPOOLED set", () => {
+      expect(() =>
+        depsFromEnv({
+          ...env,
+          DATABASE_URL: undefined,
+          DATABASE_URL_UNPOOLED: "postgres://user:pw@direct.invalid/db",
+        }),
+      ).not.toThrow();
+    });
+
     it("refuses to be wired without DATABASE_URL", () => {
       expect(() => depsFromEnv({ ...env, DATABASE_URL: undefined })).toThrow(
         "DATABASE_URL",
       );
+      expect(() =>
+        depsFromEnv({
+          ...env,
+          DATABASE_URL: undefined,
+          DATABASE_URL_UNPOOLED: "",
+        }),
+      ).toThrow("DATABASE_URL");
     });
 
     it("reads the clock mode from CLOCK_MODE, defaulting to system", () => {

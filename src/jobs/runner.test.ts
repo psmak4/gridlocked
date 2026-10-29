@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { jobs } from "@/db/schema";
-import { simulatedClock } from "@/lib/clock";
+import { simulatedClock, type Timer } from "@/lib/clock";
 import { claimNext, enqueue } from "./queue";
 import { runDue, type JobHandler } from "./runner";
 
@@ -197,5 +197,76 @@ describe("runDue", () => {
     };
     const res = await runDue(t.db, clock, { k: slow }, OPTS);
     expect(res).toEqual({ ran: 0, failed: 0, lost: 1 });
+  });
+
+  describe("deadlineMs", () => {
+    /** A timer on its own clock: only the handlers move it. */
+    function setup() {
+      let now = 1_000_000;
+      const timer: Timer = {
+        now: () => now,
+        sleep: async (ms) => void (now += ms),
+      };
+      return { timer, advance: (ms: number) => void (now += ms) };
+    }
+
+    it("stops claiming new jobs once the timer passes start + deadlineMs, and leaves the rest pending", async () => {
+      const { timer, advance } = setup();
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) ids.push((await job(`j${i}`)).id);
+      const seen: string[] = [];
+      const handler: JobHandler = async (j) => {
+        seen.push(j.id);
+        advance(400); // each job takes 400 ms of real time
+      };
+      const res = await runDue(
+        t.db,
+        simulatedClock(T0),
+        { k: handler },
+        { ...OPTS, deadlineMs: 1000, timer },
+      );
+      // Claims at +0, +400 and +800 ms; at +1200 ms the deadline has passed.
+      expect(res).toEqual({ ran: 3, failed: 0, lost: 0 });
+      expect(seen).toHaveLength(3);
+      const statuses = await Promise.all(ids.map((id) => row(id)));
+      expect(statuses.filter((r) => r.status === "pending")).toHaveLength(2);
+    });
+
+    it("finishes the job it is running when the deadline passes mid-job", async () => {
+      const { timer, advance } = setup();
+      const a = await job("a");
+      await job("b");
+      const res = await runDue(
+        t.db,
+        simulatedClock(T0),
+        { k: async () => advance(5_000) },
+        { ...OPTS, deadlineMs: 1000, timer },
+      );
+      expect(res.ran).toBe(1);
+      expect((await row(a.id)).status).toBe("succeeded");
+    });
+
+    it("claims nothing when the deadline is already used up", async () => {
+      const { timer } = setup();
+      await job("a");
+      const res = await runDue(
+        t.db,
+        simulatedClock(T0),
+        { k: async () => {} },
+        { ...OPTS, deadlineMs: 0, timer },
+      );
+      expect(res).toEqual({ ran: 0, failed: 0, lost: 0 });
+    });
+
+    it("has no deadline by default", async () => {
+      for (let i = 0; i < 4; i++) await job(`j${i}`);
+      const res = await runDue(
+        t.db,
+        simulatedClock(T0),
+        { k: async () => {} },
+        OPTS,
+      );
+      expect(res.ran).toBe(4);
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { simulatedClock, type Timer } from "@/lib/clock";
-import { createRateLimiter } from "./rate-limiter";
+import { createRateLimiter, LimiterDeadlineError } from "./rate-limiter";
 
 const start = new Date("2026-03-01T00:00:00.000Z");
 
@@ -99,13 +99,110 @@ describe("createRateLimiter", () => {
     // nothing forces it later than that.
     expect(clock.now().getTime() - start.getTime()).toBe(2000);
   });
-  it("throws when its time has not moved after a sleep, instead of looping forever", async () => {
-    const timer: Timer = { now: () => start.getTime(), sleep: async () => {} };
-    const limiter = createRateLimiter({ perSecond: 1 }, timer);
-    await limiter.acquire();
-    await expect(limiter.acquire()).rejects.toThrow(
-      "limiter clock is not advancing",
-    );
+  it("returns the time it recorded the call at, so the caller can stamp the request log with it", async () => {
+    const { limiter, clock } = setup({ perSecond: 1 });
+    expect(await limiter.acquire()).toBe(start.getTime());
+    // The second call waits a second; it is recorded at the end of the wait.
+    expect(await limiter.acquire()).toBe(start.getTime() + 1000);
+    expect(clock.now().getTime()).toBe(start.getTime() + 1000);
+  });
+
+  describe("a clock that does not advance", () => {
+    it("throws after three sleeps in a row that moved nothing, instead of looping forever", async () => {
+      let sleeps = 0;
+      const timer: Timer = {
+        now: () => start.getTime(),
+        sleep: async () => void sleeps++,
+      };
+      const limiter = createRateLimiter({ perSecond: 1 }, timer);
+      await limiter.acquire();
+      await expect(limiter.acquire()).rejects.toThrow(
+        "limiter clock is not advancing",
+      );
+      expect(sleeps).toBe(3);
+    });
+
+    it("tolerates a sleep that returns with the millisecond unchanged, then moves on", async () => {
+      // Date.now() can read the same value after a 1 ms timer. The second
+      // sleep gets the time moving, and the call goes through.
+      let time = start.getTime();
+      let sleeps = 0;
+      const timer: Timer = {
+        now: () => time,
+        sleep: async (ms) => {
+          sleeps++;
+          if (sleeps >= 2) time += ms;
+        },
+      };
+      const limiter = createRateLimiter({ perSecond: 1 }, timer);
+      await limiter.acquire();
+      await expect(limiter.acquire()).resolves.toBeGreaterThan(start.getTime());
+      expect(sleeps).toBe(2);
+    });
+  });
+
+  describe("with a deadline", () => {
+    it("fails fast, without sleeping, when the wait would end after the deadline", async () => {
+      const { limiter, sleeps, elapsed } = setup({ perSecond: 1 });
+      await limiter.acquire();
+      // The next slot is 1000 ms away; the budget is 500 ms.
+      await expect(
+        limiter.acquire(start.getTime() + 500),
+      ).rejects.toBeInstanceOf(LimiterDeadlineError);
+      expect(sleeps).toEqual([]);
+      expect(elapsed()).toBe(0);
+    });
+
+    it("waits when the wait ends exactly at the deadline, and records nothing for a failed call", async () => {
+      const { limiter, sleeps } = setup({ perSecond: 1 });
+      await limiter.acquire();
+      await expect(
+        limiter.acquire(start.getTime() + 999),
+      ).rejects.toBeInstanceOf(LimiterDeadlineError);
+      // The failed attempt took no slot: the wait is still one second.
+      await limiter.acquire(start.getTime() + 1000);
+      expect(sleeps).toEqual([1000]);
+    });
+
+    it("lets a call through with no wait even when the deadline is near", async () => {
+      const { limiter } = setup({ perSecond: 3 });
+      await expect(limiter.acquire(start.getTime() + 1)).resolves.toBe(
+        start.getTime(),
+      );
+    });
+  });
+
+  describe("seed() merges the log into what the limiter already holds", () => {
+    const ago = (ms: number) => start.getTime() - ms;
+
+    it("counts a call that is both in memory and in the log once", async () => {
+      const { limiter, sleeps } = setup({ perSecond: 2 });
+      await limiter.acquire(); // recorded at `start`
+      // The log has that same call (and nothing else).
+      limiter.seed([start.getTime()]);
+      await limiter.acquire(); // 2nd of 2: no wait
+      expect(sleeps).toEqual([]);
+      await limiter.acquire(); // 3rd: waits for the window
+      expect(sleeps).toEqual([1000]);
+    });
+
+    it("keeps calls that are only in memory (sent, not yet logged) and adds calls only in the log", async () => {
+      const { limiter, sleeps } = setup({ perSecond: 3 });
+      await limiter.acquire(); // memory only
+      limiter.seed([ago(100), ago(100)]); // log only
+      // 1 + 2 = 3 of 3 in the window.
+      await limiter.acquire();
+      expect(sleeps).toEqual([900]);
+    });
+
+    it("never lowers a count: two calls in the same millisecond stay two", async () => {
+      const { limiter, sleeps } = setup({ perSecond: 2 });
+      await limiter.acquire();
+      await limiter.acquire();
+      limiter.seed([start.getTime()]);
+      await limiter.acquire();
+      expect(sleeps).toEqual([1000]);
+    });
   });
 
   describe("seeded with the calls other invocations already made", () => {
