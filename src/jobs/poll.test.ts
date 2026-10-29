@@ -96,6 +96,28 @@ describe("the poll_session handler", () => {
       .where(eq(reviewItems.sessionId, sessionId))
       .orderBy(asc(reviewItems.dedupeKey));
 
+  it("holds a session whose answer is for another round, and writes no results", async () => {
+    // Round 17's race served at round 18's URL (a stale cache, say).
+    const race = await startPoll(18, "race", "r17-results.json");
+    expect(await run(race.scheduledEnd)).toEqual({
+      ran: 1,
+      failed: 0,
+      lost: 0,
+    });
+
+    expect(await t.db.select().from(results)).toEqual([]);
+    const [item] = await items(race.id);
+    expect(item).toMatchObject({
+      kind: "validation_failed",
+      severity: "blocking",
+      details: {
+        asked: { season: 2026, round: 18, date: "2026-10-25" },
+        got: { season: 2026, round: 17, date: "2026-10-11" },
+      },
+    });
+    expect((await state(race.id))!.status).toBe("under_review");
+  });
+
   it("fetches, normalizes and advances: published results become provisional and polling stops", async () => {
     const race = await startPoll(18, "race", "r18-results.json");
     expect(await run(race.scheduledEnd)).toEqual({

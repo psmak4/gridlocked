@@ -1,11 +1,16 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { providerIds } from "@/db/schema";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { providerIds, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { openReviewItem } from "@/reference/review";
 import { normalizeSession } from "@/results/normalize";
 import { getSessionContext } from "@/results/session-context";
 import type { ResultRow } from "@/results/types";
-import { parseJolpicaResults, type JolpicaResultRow } from "./results";
+import {
+  parseJolpicaResults,
+  type ExpectedRace,
+  type JolpicaResultRow,
+} from "./results";
+import { jolpicaEventKey } from "./event-key";
 
 const PROVIDER = "jolpica";
 
@@ -67,8 +72,43 @@ export async function mapJolpicaKeys(
 }
 
 /**
+ * What we asked Jolpica for the event: the season and round of its key, and
+ * the date of its race (UTC). Null when the event has no Jolpica key, which
+ * means nothing was asked of Jolpica, so there is nothing to check.
+ */
+async function expectedRace(
+  db: Db,
+  eventId: string,
+): Promise<ExpectedRace | null> {
+  const key = await jolpicaEventKey(db, eventId);
+  const m = key === null ? null : /^(\d+)\/(\d+)$/.exec(key);
+  if (!m) return null;
+  const [race] = await db
+    .select({ start: sessions.scheduledStart })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.eventId, eventId),
+        eq(sessions.kind, "race"),
+        ne(sessions.status, "cancelled"),
+      ),
+    )
+    .orderBy(asc(sessions.scheduledStart))
+    .limit(1);
+  return {
+    season: Number(m[1]),
+    round: Number(m[2]),
+    date: race ? race.start.toISOString().slice(0, 10) : null,
+  };
+}
+
+/**
  * The job's entry point: parses a Jolpica response for the session, maps its
  * driver and constructor keys to our ids and normalizes it.
+ *
+ * A body for another season, round or date than the event's (see
+ * `parseJolpicaResults`) holds the session as a `validation_failed` item with
+ * `asked` and `got` in its details; nothing is written.
  *
  * A key with no `provider_ids` row holds the whole session: nothing is
  * written, and each such key opens one blocking `unknown_driver` or
@@ -82,7 +122,8 @@ export async function normalizeJolpicaSession(
   body: unknown,
 ): Promise<{ changed: number }> {
   const ctx = await getSessionContext(db, sessionId);
-  const parsed = parseJolpicaResults(ctx.kind, body);
+  const expected = await expectedRace(db, ctx.eventId);
+  const parsed = parseJolpicaResults(ctx.kind, body, expected ?? undefined);
   if (!parsed.ok) {
     return normalizeSession(db, now, sessionId, snapshotId, parsed);
   }

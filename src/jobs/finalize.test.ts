@@ -56,6 +56,20 @@ describe("the finalize_check handler", () => {
   const after = (d: Date, hours: number) =>
     new Date(d.getTime() + hours * HOUR);
 
+  /**
+   * Round 18's recorded qualifying relabelled as round 2's (the recordings
+   * have no round 2 qualifying), so it passes the check that a body is for
+   * the event asked.
+   */
+  function round2Qualifying() {
+    const body = loadBody("jolpica/2026/r18-qualifying.json");
+    Object.assign(body.MRData.RaceTable.Races[0]!, {
+      round: "2",
+      date: "2026-03-15",
+    });
+    return body;
+  }
+
   const RACE = "/ergast/f1/2026/18/results.json";
   const QUALI = "/ergast/f1/2026/18/qualifying.json";
 
@@ -183,10 +197,7 @@ describe("the finalize_check handler", () => {
       "/ergast/f1/2026/2/sprint.json",
       jolpicaFixture("r02-sprint.json"),
     );
-    pipeline.serve(
-      "/ergast/f1/2026/2/qualifying.json",
-      jolpicaFixture("r18-qualifying.json"),
-    );
+    pipeline.serve("/ergast/f1/2026/2/qualifying.json", round2Qualifying());
 
     await run(after(race.scheduledEnd, 2));
     expect(pipeline.calls).toEqual(
@@ -538,10 +549,7 @@ describe("the finalize_check handler", () => {
       const by = Object.fromEntries(all.map((s) => [s.kind, s]));
       await seedEntriesFor(t.db, by.race!.id);
       await planEventJobs(t.db, event.id);
-      pipeline.serve(
-        "/ergast/f1/2026/2/qualifying.json",
-        jolpicaFixture("r18-qualifying.json"),
-      );
+      pipeline.serve("/ergast/f1/2026/2/qualifying.json", round2Qualifying());
       pipeline.serve(
         "/ergast/f1/2026/2/sprint.json",
         jolpicaFixture("r02-sprint.json"),
