@@ -71,6 +71,12 @@ export type TickResult =
  * - the store cannot be read at all (a 5xx, the network, a timeout): it cannot
  *   be written either, so the tick logs and skips without waking anything.
  *
+ * `scheduledAt` is the instant the sleep decision compares the file with, and
+ * in system mode the clock the jobs run on. In replay mode the due times are
+ * simulated, so the caller must pass the SIMULATED minute as `scheduledAt`
+ * (the replay harness does). A real cron on a replay deployment would pass
+ * real time and wake every minute while the simulated clock is behind it.
+ *
  * If the clock check or the run throws, the file is left alone: it still says
  * "due", so the next tick tries again.
  */
@@ -96,6 +102,9 @@ export async function tick(
   const clock = await resolveClock({ mode: deps.mode, db, scheduledAt });
   if (decision.action === "skip") {
     const file = await publishDueTimes(db, deps.store, clock.now());
+    (deps.log ?? console.error)(
+      `tick: republished due-times file (${decision.reason})`,
+    );
     return { action: "republished", reason: decision.reason, file };
   }
   const run = await runDue(db, clock, deps.handlers, opts);

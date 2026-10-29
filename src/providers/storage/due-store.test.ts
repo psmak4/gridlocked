@@ -116,6 +116,13 @@ describe("createS3ClientFromEnv", () => {
   it("builds a path-style client for the injected endpoint", async () => {
     const client = createS3ClientFromEnv(env);
     expect(client.config.forcePathStyle).toBe(true);
+    // S3-compatible stores can reject the SDK v3 default checksum headers.
+    expect(await client.config.requestChecksumCalculation()).toBe(
+      "WHEN_REQUIRED",
+    );
+    expect(await client.config.responseChecksumValidation()).toBe(
+      "WHEN_REQUIRED",
+    );
     expect(await client.config.region()).toBe("us-east-1");
     expect((await client.config.endpoint?.())?.hostname).toBe(
       "storage.example.test",

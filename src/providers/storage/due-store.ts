@@ -82,6 +82,9 @@ export function createS3ClientFromEnv(
       secretAccessKey: env.AWS_SECRET_ACCESS_KEY!,
     },
     forcePathStyle: true,
+    // S3-compatible stores can reject the SDK v3 default checksum headers.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
 }
 

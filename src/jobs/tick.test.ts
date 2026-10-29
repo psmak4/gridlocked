@@ -109,6 +109,22 @@ describe("tick", () => {
     expect(seen).toEqual([]);
   });
 
+  it("logs a republish with its reason", async () => {
+    const log = vi.fn();
+    const { deps } = setup({ stored: "{" });
+    await tick({ ...deps, log }, T0);
+    expect(log).toHaveBeenCalledWith(
+      "tick: republished due-times file (malformed)",
+    );
+
+    const missing = setup();
+    const log2 = vi.fn();
+    await tick({ ...missing.deps, log: log2 }, T0);
+    expect(log2).toHaveBeenCalledWith(
+      "tick: republished due-times file (missing)",
+    );
+  });
+
   it("republishes a missing file as null when nothing is due", async () => {
     const { m, deps } = setup();
     await tick(deps, T0);
@@ -227,6 +243,66 @@ describe("tick", () => {
     };
     await tick(deps, T0);
     expect(clockNow).toEqual(T0);
+  });
+
+  describe("in replay mode, scheduledAt is the simulated minute", () => {
+    async function simulate(now: Date) {
+      await t.client.query(
+        "insert into settings (key, value) values ('simulated_clock', $1::jsonb)",
+        [JSON.stringify({ at: now.toISOString() })],
+      );
+    }
+
+    it("sleeps while next_due_at is after the simulated time", async () => {
+      await simulate(T0);
+      await job("later", at(5));
+      const { db, seen, deps } = setup({
+        stored: file(at(5).toISOString()),
+        mode: "replay",
+      });
+      expect(await tick(deps, T0)).toEqual({ action: "sleep" });
+      expect(db).not.toHaveBeenCalled();
+      expect(seen).toEqual([]);
+    });
+
+    it("wakes when next_due_at is due at the simulated time, and runs on the simulated clock", async () => {
+      await simulate(T0);
+      await job("now", T0);
+      let clockNow: Date | undefined;
+      const { db, deps } = setup({
+        stored: file(T0.toISOString()),
+        mode: "replay",
+      });
+      deps.handlers = {
+        k: async (_job, ctx) => {
+          clockNow = ctx.clock.now();
+        },
+      };
+      const result = await tick(deps, T0);
+      expect(result).toMatchObject({ action: "wake", run: { ran: 1 } });
+      expect(db).toHaveBeenCalledTimes(1);
+      expect(clockNow).toEqual(T0);
+    });
+  });
+
+  it("propagates a database failure in runDue and writes nothing", async () => {
+    await job("a", T0);
+    const { m, deps } = setup({ stored: file(T0.toISOString()) });
+    // The clock check (a select) works; reapExpired's update fails.
+    const broken = new Proxy(t.db, {
+      get(target, prop) {
+        if (prop === "update") {
+          return () => {
+            throw new Error("connection terminated");
+          };
+        }
+        return Reflect.get(target, prop, target);
+      },
+    });
+    await expect(tick({ ...deps, db: () => broken }, T0)).rejects.toThrow(
+      "connection terminated",
+    );
+    expect(m.puts).toHaveLength(0);
   });
 
   it("throws ClockModeError on wake in system mode when simulated_clock is set, and runs nothing", async () => {
