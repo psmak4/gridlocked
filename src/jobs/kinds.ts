@@ -49,9 +49,14 @@ export const finalizePayload = z.object({
 });
 export type FinalizePayload = z.infer<typeof finalizePayload>;
 
+/**
+ * `attempt` is absent on the planned check, then 1, 2, ... on the re-checks of
+ * a session OpenF1 could not yet answer for.
+ */
 export const rosterPayload = z.object({
   eventId: z.string().min(1),
   sessionId: z.string().min(1),
+  attempt: z.number().int().min(1).optional(),
 });
 export type RosterPayload = z.infer<typeof rosterPayload>;
 
@@ -68,6 +73,12 @@ export const finalizeHeldKey = (eventId: string, n: number) =>
   `finalize:${eventId}:held:${n}`;
 export const rosterKey = (eventId: string, kind: RosterKind) =>
   `roster:${eventId}:${kind}`;
+/** The `n`th re-check of a roster check OpenF1 could not answer yet. */
+export const rosterRetryKey = (
+  eventId: string,
+  kind: RosterKind,
+  attempt: number,
+) => `roster:${eventId}:${kind}:retry:${attempt}`;
 
 export const syncCalendarPayload = z.object({
   season: z.number().int().positive(),

@@ -7,6 +7,7 @@ import { and, asc, eq, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { jobs } from "@/db/schema";
 import { newId } from "@/lib/ids";
+import { openReviewItem } from "@/reference/review";
 
 /**
  * The queue is generic. The pipeline's own kinds are the union in `kinds.ts`;
@@ -120,27 +121,56 @@ export async function claimNext(
 }
 
 /**
+ * A dead job is an alert: a warning review item `job_dead` (dedupe key
+ * `job_dead:<job id>`) says which job gave up and why, so it reaches the
+ * admin queue instead of sitting in the job table. Opened in the same
+ * transaction that marks the job dead.
+ */
+async function alertDead(
+  db: JobsDb,
+  now: Date,
+  job: Pick<Job, "id" | "kind" | "dedupeKey" | "attempts" | "lastError">,
+) {
+  await openReviewItem(db, now, {
+    kind: "job_dead",
+    severity: "warning",
+    seasonId: null,
+    details: {
+      kind: job.kind,
+      dedupe_key: job.dedupeKey,
+      attempts: job.attempts,
+      last_error: job.lastError,
+    },
+    dedupeKey: `job_dead:${job.id}`,
+  });
+}
+
+/**
  * Dead-letters `running` jobs whose lease expired with no attempts left (the
- * worker died on its last try, so `fail` never ran). Returns how many.
+ * worker died on its last try, so `fail` never ran), opening a `job_dead`
+ * alert for each in the same transaction. Returns how many.
  */
 export async function reapExpired(db: JobsDb, now: Date): Promise<number> {
-  const reaped = await db
-    .update(jobs)
-    .set({
-      status: "dead",
-      lastError: "lease expired after max attempts",
-      lockedUntil: null,
-      finishedAt: now,
-    })
-    .where(
-      and(
-        eq(jobs.status, "running"),
-        lte(jobs.lockedUntil, now),
-        gte(jobs.attempts, jobs.maxAttempts),
-      ),
-    )
-    .returning({ id: jobs.id });
-  return reaped.length;
+  return db.transaction(async (tx) => {
+    const reaped = await tx
+      .update(jobs)
+      .set({
+        status: "dead",
+        lastError: "lease expired after max attempts",
+        lockedUntil: null,
+        finishedAt: now,
+      })
+      .where(
+        and(
+          eq(jobs.status, "running"),
+          lte(jobs.lockedUntil, now),
+          gte(jobs.attempts, jobs.maxAttempts),
+        ),
+      )
+      .returning();
+    for (const job of reaped) await alertDead(tx, now, job);
+    return reaped.length;
+  });
 }
 
 /**
@@ -170,8 +200,9 @@ export async function complete(
 /**
  * Records a failed attempt of a claimed job. The job goes back to `failed`
  * and is retried at `now + backoff(attempts)`; once `attempts >=
- * max_attempts` it is `dead`. Fenced like `complete`: returns false and
- * changes nothing if the claim was lost.
+ * max_attempts` it is `dead`, and a `job_dead` alert opens in the same
+ * transaction. Fenced like `complete`: returns false and changes nothing if
+ * the claim was lost.
  */
 export async function fail(
   db: JobsDb,
@@ -180,30 +211,33 @@ export async function fail(
   error: string,
 ): Promise<boolean> {
   const dead = job.attempts >= job.maxAttempts;
-  const rows = await db
-    .update(jobs)
-    .set(
-      dead
-        ? {
-            status: "dead",
-            lastError: error,
-            lockedUntil: null,
-            finishedAt: now,
-          }
-        : {
-            status: "failed",
-            lastError: error,
-            lockedUntil: null,
-            runAt: new Date(now.getTime() + backoffMs(job.attempts)),
-          },
-    )
-    .where(
-      and(
-        eq(jobs.id, job.id),
-        eq(jobs.status, "running"),
-        eq(jobs.attempts, job.attempts),
-      ),
-    )
-    .returning({ id: jobs.id });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(jobs)
+      .set(
+        dead
+          ? {
+              status: "dead",
+              lastError: error,
+              lockedUntil: null,
+              finishedAt: now,
+            }
+          : {
+              status: "failed",
+              lastError: error,
+              lockedUntil: null,
+              runAt: new Date(now.getTime() + backoffMs(job.attempts)),
+            },
+      )
+      .where(
+        and(
+          eq(jobs.id, job.id),
+          eq(jobs.status, "running"),
+          eq(jobs.attempts, job.attempts),
+        ),
+      )
+      .returning();
+    if (rows.length > 0 && dead) await alertDead(tx, now, rows[0]!);
+    return rows.length > 0;
+  });
 }

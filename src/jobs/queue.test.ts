@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
-import { jobs } from "@/db/schema";
+import { jobs, reviewItems } from "@/db/schema";
 import { claimNext, complete, enqueue, fail, reapExpired } from "./queue";
 
 const T0 = new Date("2026-03-01T10:00:00.000Z");
@@ -255,6 +255,66 @@ describe("job queue", () => {
       expect(await claimNext(t.db, now, LEASE)).toBeNull();
     });
   });
+  describe("a dead job raises an alert", () => {
+    const items = () => t.db.select().from(reviewItems);
+
+    it("fail opens a warning job_dead item when the last attempt fails", async () => {
+      const a = await enqueue(t.db, { ...base, maxAttempts: 2 });
+      await claimNext(t.db, T0, LEASE);
+      await failId(a.id, T0, "boom 1");
+      expect(await items()).toEqual([]);
+
+      await claimNext(t.db, minutes(1), LEASE);
+      await failId(a.id, minutes(1), "boom 2");
+      expect(await items()).toMatchObject([
+        {
+          kind: "job_dead",
+          severity: "warning",
+          status: "open",
+          dedupeKey: `job_dead:${a.id}`,
+          createdAt: minutes(1),
+          details: {
+            kind: "poll_session",
+            dedupe_key: "poll:s1:1",
+            attempts: 2,
+            last_error: "boom 2",
+          },
+        },
+      ]);
+    });
+
+    it("reapExpired opens one for each job it dead-letters, once", async () => {
+      const a = await enqueue(t.db, { ...base, maxAttempts: 1 });
+      await claimNext(t.db, T0, LEASE);
+      const later = new Date(T0.getTime() + LEASE);
+      expect(await reapExpired(t.db, later)).toBe(1);
+      expect(await items()).toMatchObject([
+        {
+          kind: "job_dead",
+          severity: "warning",
+          dedupeKey: `job_dead:${a.id}`,
+          createdAt: later,
+          details: {
+            kind: "poll_session",
+            dedupe_key: "poll:s1:1",
+            attempts: 1,
+            last_error: "lease expired after max attempts",
+          },
+        },
+      ]);
+      expect(await reapExpired(t.db, later)).toBe(0);
+      expect(await items()).toHaveLength(1);
+    });
+
+    it("a stale claim that cannot kill the job opens nothing", async () => {
+      await enqueue(t.db, { ...base, maxAttempts: 1 });
+      const first = (await claimNext(t.db, T0, LEASE))!;
+      const stale = { ...first, attempts: first.attempts + 1 };
+      expect(await fail(t.db, stale, T0, "stale")).toBe(false);
+      expect(await items()).toEqual([]);
+    });
+  });
+
   describe("expired leases past max_attempts", () => {
     it("is not reclaimed past the limit and reapExpired dead-letters it", async () => {
       const a = await enqueue(t.db, { ...base, maxAttempts: 2 });
