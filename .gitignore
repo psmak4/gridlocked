@@ -45,3 +45,7 @@ yarn-error.log*
 # TanStack Start / Nitro build output
 /.output/
 /dist/
+
+# Spike host build output
+.wrangler
+.netlify

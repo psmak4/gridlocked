@@ -18,7 +18,10 @@ export default defineConfig({
     nitro(
       process.env.VITE_SPIKE_LOCAL === "1"
         ? { traceDeps: ["@electric-sql/pglite*"] }
-        : {},
+        : // Neon Functions serve no static files: SPIKE_INLINE_STATIC=1 bundles them.
+          process.env.SPIKE_INLINE_STATIC === "1"
+          ? { serveStatic: "inline" }
+          : {},
     ),
     viteReact(),
   ],
