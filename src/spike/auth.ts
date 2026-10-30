@@ -24,6 +24,10 @@ export function createAuth(db: Db) {
         "*.neon.tech",
       ],
     },
+    // With a dynamic baseURL Better Auth can't tell https from http, and falls
+    // back to NODE_ENV, which no host here sets for it: the session cookie
+    // went out without Secure. Browsers accept Secure on http://localhost.
+    advanced: { useSecureCookies: true },
     database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
     emailAndPassword: { enabled: true },
     plugins: [admin(), tanstackStartCookies()],

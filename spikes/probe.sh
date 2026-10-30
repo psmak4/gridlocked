@@ -33,11 +33,11 @@ echo "-- /results/18 second request headers:"; show_headers "$TMP/h2"
 
 W="probe-$RANDOM$RANDOM"
 start=$(date +%s)
-for _ in $(seq 30); do
-  curl -s -o /dev/null -D "$TMP/hc" "$BASE/api/threads/1/latest?w=$W"
-done
+# All 30 at once, as 30 people refreshing the same chat window would.
+seq 30 | xargs -P 30 -I{} curl -s -o /dev/null -D "$TMP/hc{}" "$BASE/api/threads/1/latest?w=$W"
 end=$(date +%s)
-echo "-- chat window w=$W: 30 requests in $((end - start)) s; last response headers:"; show_headers "$TMP/hc"
+echo "-- chat window w=$W: 30 parallel requests in $((end - start)) s; one response's headers:"; show_headers "$TMP/hc30"
+echo "   cache hits among the 30: $(cat "$TMP"/hc[0-9]* | grep -ciE '^(cf-cache-status|x-vercel-cache): *(hit|stale)|^cache-status:.*; *hit' || true)"
 echo "   then: select count(*) from spike_hits where path like '%w=$W'   (expected 1)"
 
 EMAIL="probe-$RANDOM$RANDOM@example.test"
