@@ -41,3 +41,7 @@ yarn-error.log*
 
 # local agent workflow files
 .superpowers/
+
+# TanStack Start / Nitro build output
+/.output/
+/dist/

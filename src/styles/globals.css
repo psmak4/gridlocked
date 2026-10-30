@@ -1,5 +1,20 @@
 @import "tailwindcss";
-@import "../styles/tokens.css";
+@import "./tokens.css";
+/* Self-hosted fonts (next/font did this before the spike). */
+@import "@fontsource/anton/400.css";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow/700.css";
+@import "@fontsource/barlow-semi-condensed/500.css";
+@import "@fontsource/barlow-semi-condensed/600.css";
+@import "@fontsource/barlow-semi-condensed/700.css";
+
+:root {
+  --font-anton: "Anton";
+  --font-barlow: "Barlow";
+  --font-barlow-semi: "Barlow Semi Condensed";
+}
 
 @theme inline {
   /* Drop Tailwind's default palette; only token colours exist. */

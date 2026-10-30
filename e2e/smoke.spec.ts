@@ -38,7 +38,7 @@ test.describe("light device preference", () => {
   test("html has no data-theme when nothing was chosen (negative control)", async ({
     page,
   }) => {
-    await page.route("**/_next/static/**", (route) => route.abort());
+    await page.route("**/assets/**", (route) => route.abort());
     await page.goto("/");
     await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.*/);
   });
@@ -51,7 +51,7 @@ test.describe("light device preference", () => {
       THEME_KEY,
     );
     // Block every client bundle: only server HTML and the inline script run.
-    await page.route("**/_next/static/**", (route) => route.abort());
+    await page.route("**/assets/**", (route) => route.abort());
     await page.goto("/");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   });
