@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as MeRouteImport } from './routes/me'
 import { Route as PicksRouteImport } from './routes/picks'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as ApiSpikeCpuRouteImport } from './routes/api/spike-cpu'
 import { Route as ResultsRoundRouteImport } from './routes/results.$round'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiThreadsIdLatestRouteImport } from './routes/api/threads.$id.latest'
@@ -37,6 +38,11 @@ const SignInRoute = SignInRouteImport.update({
   path: '/sign-in',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSpikeCpuRoute = ApiSpikeCpuRouteImport.update({
+  id: '/api/spike-cpu',
+  path: '/api/spike-cpu',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ResultsRoundRoute = ResultsRoundRouteImport.update({
   id: '/results/$round',
   path: '/results/$round',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/me': typeof MeRoute
   '/picks': typeof PicksRoute
   '/sign-in': typeof SignInRoute
+  '/api/spike-cpu': typeof ApiSpikeCpuRoute
   '/results/$round': typeof ResultsRoundRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/threads/$id/latest': typeof ApiThreadsIdLatestRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/me': typeof MeRoute
   '/picks': typeof PicksRoute
   '/sign-in': typeof SignInRoute
+  '/api/spike-cpu': typeof ApiSpikeCpuRoute
   '/results/$round': typeof ResultsRoundRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/threads/$id/latest': typeof ApiThreadsIdLatestRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/me': typeof MeRoute
   '/picks': typeof PicksRoute
   '/sign-in': typeof SignInRoute
+  '/api/spike-cpu': typeof ApiSpikeCpuRoute
   '/results/$round': typeof ResultsRoundRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/threads/$id/latest': typeof ApiThreadsIdLatestRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/me'
     | '/picks'
     | '/sign-in'
+    | '/api/spike-cpu'
     | '/results/$round'
     | '/api/auth/$'
     | '/api/threads/$id/latest'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/me'
     | '/picks'
     | '/sign-in'
+    | '/api/spike-cpu'
     | '/results/$round'
     | '/api/auth/$'
     | '/api/threads/$id/latest'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/me'
     | '/picks'
     | '/sign-in'
+    | '/api/spike-cpu'
     | '/results/$round'
     | '/api/auth/$'
     | '/api/threads/$id/latest'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   MeRoute: typeof MeRoute
   PicksRoute: typeof PicksRoute
   SignInRoute: typeof SignInRoute
+  ApiSpikeCpuRoute: typeof ApiSpikeCpuRoute
   ResultsRoundRoute: typeof ResultsRoundRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiThreadsIdLatestRoute: typeof ApiThreadsIdLatestRoute
@@ -151,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignInRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/spike-cpu': {
+      id: '/api/spike-cpu'
+      path: '/api/spike-cpu'
+      fullPath: '/api/spike-cpu'
+      preLoaderRoute: typeof ApiSpikeCpuRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/results/$round': {
       id: '/results/$round'
       path: '/results/$round'
@@ -180,6 +200,7 @@ const rootRouteChildren: RootRouteChildren = {
   MeRoute: MeRoute,
   PicksRoute: PicksRoute,
   SignInRoute: SignInRoute,
+  ApiSpikeCpuRoute: ApiSpikeCpuRoute,
   ResultsRoundRoute: ResultsRoundRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiThreadsIdLatestRoute: ApiThreadsIdLatestRoute,

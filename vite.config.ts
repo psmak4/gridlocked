@@ -14,7 +14,12 @@ export default defineConfig({
     tanstackStart(),
     // Spike: PGlite (local runs only, ledger R1) loads its WASM and data
     // files from its own package folder, so it's traced, not bundled.
-    nitro({ traceDeps: ["@electric-sql/pglite*"] }),
+    // PGlite (and its data files) only in VITE_SPIKE_LOCAL builds; hosts never load it.
+    nitro(
+      process.env.VITE_SPIKE_LOCAL === "1"
+        ? { traceDeps: ["@electric-sql/pglite*"] }
+        : {},
+    ),
     viteReact(),
   ],
 });
