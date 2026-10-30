@@ -55,6 +55,9 @@ function Picks() {
             <button
               type="button"
               aria-pressed={chosen === d.driverId}
+              // Server-rendered buttons do nothing until hydration; enabling
+              // them once this user's picks have loaded covers both.
+              disabled={!picks.isSuccess}
               onClick={() => pick.mutate(d.driverId)}
             >
               {chosen === d.driverId ? "✓ " : ""}
