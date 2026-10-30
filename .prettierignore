@@ -9,3 +9,6 @@ src/db/migrations/
 .output
 dist
 src/routeTree.gen.ts
+.vercel
+.netlify
+.wrangler
