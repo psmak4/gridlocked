@@ -10,33 +10,64 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PicksRouteImport } from './routes/picks'
+import { Route as ResultsRoundRouteImport } from './routes/results.$round'
+import { Route as ApiThreadsIdLatestRouteImport } from './routes/api/threads.$id.latest'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PicksRoute = PicksRouteImport.update({
+  id: '/picks',
+  path: '/picks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResultsRoundRoute = ResultsRoundRouteImport.update({
+  id: '/results/$round',
+  path: '/results/$round',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiThreadsIdLatestRoute = ApiThreadsIdLatestRouteImport.update({
+  id: '/api/threads/$id/latest',
+  path: '/api/threads/$id/latest',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/picks': typeof PicksRoute
+  '/results/$round': typeof ResultsRoundRoute
+  '/api/threads/$id/latest': typeof ApiThreadsIdLatestRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/picks': typeof PicksRoute
+  '/results/$round': typeof ResultsRoundRoute
+  '/api/threads/$id/latest': typeof ApiThreadsIdLatestRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/picks': typeof PicksRoute
+  '/results/$round': typeof ResultsRoundRoute
+  '/api/threads/$id/latest': typeof ApiThreadsIdLatestRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/picks' | '/results/$round' | '/api/threads/$id/latest'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/picks' | '/results/$round' | '/api/threads/$id/latest'
+  id:
+    '__root__' | '/' | '/picks' | '/results/$round' | '/api/threads/$id/latest'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PicksRoute: typeof PicksRoute
+  ResultsRoundRoute: typeof ResultsRoundRoute
+  ApiThreadsIdLatestRoute: typeof ApiThreadsIdLatestRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +79,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/picks': {
+      id: '/picks'
+      path: '/picks'
+      fullPath: '/picks'
+      preLoaderRoute: typeof PicksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/results/$round': {
+      id: '/results/$round'
+      path: '/results/$round'
+      fullPath: '/results/$round'
+      preLoaderRoute: typeof ResultsRoundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/threads/$id/latest': {
+      id: '/api/threads/$id/latest'
+      path: '/api/threads/$id/latest'
+      fullPath: '/api/threads/$id/latest'
+      preLoaderRoute: typeof ApiThreadsIdLatestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PicksRoute: PicksRoute,
+  ResultsRoundRoute: ResultsRoundRoute,
+  ApiThreadsIdLatestRoute: ApiThreadsIdLatestRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

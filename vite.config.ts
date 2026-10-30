@@ -9,5 +9,12 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   // Start must come before React. Nitro builds the Node server that
   // `pnpm start` runs (.output/server/index.mjs).
-  plugins: [tailwindcss(), tanstackStart(), nitro(), viteReact()],
+  plugins: [
+    tailwindcss(),
+    tanstackStart(),
+    // Spike: PGlite (local runs only, ledger R1) loads its WASM and data
+    // files from its own package folder, so it's traced, not bundled.
+    nitro({ traceDeps: ["@electric-sql/pglite*"] }),
+    viteReact(),
+  ],
 });
