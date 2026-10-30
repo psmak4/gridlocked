@@ -1,13 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { cacheControl } from "@/spike/cache";
 import type { Pick } from "@/spike/picks";
 import { getPicks, getRaceResults, makePick } from "@/spike/server-fns";
+import { getSessionUser } from "@/spike/session";
 
 const ROUND = 19;
 
 export const Route = createFileRoute("/picks")({
+  beforeLoad: async () => {
+    if (!(await getSessionUser())) throw redirect({ to: "/sign-in" });
+  },
   // The drivers to choose from: round 18's finishers.
   loader: () => getRaceResults({ data: { round: 18 } }),
   headers: () => ({ "Cache-Control": cacheControl("private") }),

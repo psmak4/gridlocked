@@ -4,6 +4,8 @@ const PORT = 3100;
 
 export default defineConfig({
   testDir: "e2e",
+  // Spike specs need a VITE_SPIKE_LOCAL build and a secret: SPIKE_E2E=1 runs them.
+  testIgnore: process.env.SPIKE_E2E ? [] : ["spike/**"],
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }]],

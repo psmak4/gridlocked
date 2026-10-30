@@ -4,6 +4,7 @@
  * connection string is ever needed on this machine. Paths come from the
  * working directory because the production build moves this file.
  */
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
@@ -28,5 +29,10 @@ export async function localDb(): Promise<Db> {
     round int not null, driver_id text not null, primary key (user_id, round))`);
   await db.execute(sql`create table spike_hits (path text not null,
     at timestamptz not null default clock_timestamp())`);
+  // Better Auth's tables (generated SQL, src/spike/auth.sql).
+  const authSql = await readFile(path.join(root, "src/spike/auth.sql"), "utf8");
+  for (const statement of authSql.split("--> statement-breakpoint")) {
+    if (statement.trim()) await db.execute(sql.raw(statement));
+  }
   return db as unknown as Db;
 }

@@ -4,23 +4,23 @@ import { z } from "zod";
 import { withDb } from "./db";
 import { listPicks, pickInput, savePick } from "./picks";
 import { raceResults } from "./results";
-
-/** Task 3 has no sign-in yet; Task 4 replaces this with the session user. */
-const SPIKE_USER = "spike-anon";
+import { requireUser } from "./session";
 
 export const getRaceResults = createServerFn({ method: "GET" })
   .validator(z.object({ round: z.number().int().min(1).max(23) }))
   .handler(({ data }) => withDb((db) => raceResults(db, data.round)));
 
-export const getPicks = createServerFn({ method: "GET" }).handler(() =>
-  withDb((db) => listPicks(db, SPIKE_USER)),
-);
+export const getPicks = createServerFn({ method: "GET" }).handler(async () => {
+  const user = await requireUser();
+  return withDb((db) => listPicks(db, user.id));
+});
 
 export const makePick = createServerFn({ method: "POST" })
   .validator(pickInput)
-  .handler(({ data }) =>
-    withDb(async (db) => {
-      await savePick(db, SPIKE_USER, data);
-      return listPicks(db, SPIKE_USER);
-    }),
-  );
+  .handler(async ({ data }) => {
+    const user = await requireUser();
+    return withDb(async (db) => {
+      await savePick(db, user.id, data);
+      return listPicks(db, user.id);
+    });
+  });
