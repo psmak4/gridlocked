@@ -1,5 +1,21 @@
 @import "tailwindcss";
-@import "../styles/tokens.css";
+@import "./tokens.css";
+/* Self-hosted fonts: the weights the Next.js layout loaded before the move. */
+@import "@fontsource/anton/400.css";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow/700.css";
+@import "@fontsource/barlow-semi-condensed/500.css";
+@import "@fontsource/barlow-semi-condensed/600.css";
+@import "@fontsource/barlow-semi-condensed/700.css";
+
+/* tokens.css reads these family names. */
+:root {
+  --font-anton: "Anton";
+  --font-barlow: "Barlow";
+  --font-barlow-semi: "Barlow Semi Condensed";
+}
 
 @theme inline {
   /* Drop Tailwind's default palette; only token colours exist. */

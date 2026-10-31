@@ -8,10 +8,9 @@
 !.yarn/releases
 !.yarn/versions
 
-# next.js
-/.next/
-/out/
-/build
+# TanStack Start / Nitro build output
+/.output/
+/dist/
 
 # testing
 /coverage
@@ -28,7 +27,6 @@
 .DS_Store
 *.pem
 *.tsbuildinfo
-next-env.d.ts
 
 # logs
 npm-debug.log*

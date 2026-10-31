@@ -14,9 +14,9 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   webServer: {
     // CI builds before running e2e; locally, build first so the run is self-contained.
-    command: process.env.CI
-      ? `pnpm start --port ${PORT}`
-      : `pnpm build && pnpm start --port ${PORT}`,
+    // The Nitro server reads its port from PORT.
+    command: process.env.CI ? "pnpm start" : "pnpm build && pnpm start",
+    env: { PORT: String(PORT) },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,
