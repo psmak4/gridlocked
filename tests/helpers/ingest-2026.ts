@@ -1,7 +1,7 @@
 // Test helper for the validator and status tests: a 2026 world with seats and
 // event entries, and a one-call "a provider response arrives" for a session.
 import { and, eq } from "drizzle-orm";
-import { providerIds } from "@/db/schema";
+import { eventEntries, providerIds } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { normalizeSession } from "@/results/normalize";
 import { getSessionContext } from "@/results/session-context";
@@ -10,6 +10,7 @@ import { syncEventEntries } from "@/reference/sync-event-entries";
 import {
   loadBody,
   parsedFor,
+  rowsOf,
   seedResultsWorld,
   sessionIdFor,
   storeResultsSnapshot,
@@ -76,4 +77,42 @@ export async function idFor(
     );
   if (!row) throw new Error(`no ${entityType} ${key}`);
   return row.id;
+}
+
+/**
+ * A mid-weekend substitution (DM 1.9): `sub` gets an `admin` entry at
+ * `constructorKey` beside the seat entries, and the recorded body is ingested
+ * with `replaced`'s row driven by `sub`. Both drivers then have entries.
+ */
+export async function ingestWithSubstitute(
+  db: Db,
+  now: Date,
+  round: number,
+  kind: SessionKind,
+  file: string,
+  swap: { replaced: string; sub: string; constructorKey: string; car: number },
+) {
+  const sessionId = await sessionIdFor(db, round, kind);
+  const eventId = await seedEntriesFor(db, sessionId);
+  await db.insert(eventEntries).values({
+    eventId,
+    driverId: await idFor(db, "driver", swap.sub),
+    constructorId: await idFor(db, "constructor", swap.constructorKey),
+    carNumber: swap.car,
+    source: "admin",
+    createdAt: now,
+    updatedAt: now,
+  });
+  const body = loadBody(`jolpica/2026/${file}`);
+  const rows =
+    kind === "qualifying"
+      ? rowsOf(body, "QualifyingResults")
+      : rowsOf(body, "Results");
+  const row = rows.find(
+    (r) => (r.Driver as { driverId: string }).driverId === swap.replaced,
+  );
+  if (!row) throw new Error(`no ${swap.replaced} row in ${file}`);
+  (row.Driver as { driverId: string }).driverId = swap.sub;
+  await ingest(db, now, sessionId, kind, body);
+  return { sessionId, eventId };
 }

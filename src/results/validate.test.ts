@@ -4,6 +4,7 @@ import {
   idFor,
   ingest,
   ingestRecorded,
+  ingestWithSubstitute,
   seedEntriesFor,
   seedWorldWithSeats,
 } from "../../tests/helpers/ingest-2026";
@@ -121,6 +122,61 @@ describe("validateSession", () => {
             expected: 22,
             actual: 21,
             missingDriverIds: [russell],
+          },
+        },
+      ]);
+    });
+  });
+
+  describe("a mid-weekend substitute (DM 1.9: three drivers, two cars)", () => {
+    // Mexico City 2026: Hirakawa in Ocon's Haas car. Tsunoda, with no race
+    // seat at round 18, stands in for the reserve.
+    const swap = {
+      replaced: "ocon",
+      sub: "tsunoda",
+      constructorKey: "haas",
+      car: 22,
+    };
+
+    it("a mid-weekend substitute with both entries is complete", async () => {
+      const { sessionId } = await ingestWithSubstitute(
+        t.db,
+        T0,
+        18,
+        "race",
+        "r18-results.json",
+        swap,
+      );
+      expect(await validateSession(t.db, sessionId)).toEqual([]);
+    });
+
+    it("a team short of a car reports only its own absent entrants", async () => {
+      const { sessionId } = await ingestWithSubstitute(
+        t.db,
+        T0,
+        18,
+        "race",
+        "r18-results.json",
+        swap,
+      );
+      const bearman = await idFor(t.db, "driver", "bearman");
+      await addOverride(t.db, T1, {
+        sessionId,
+        driverId: bearman,
+        kind: "suppress",
+        reason: "drop one",
+        createdBy: ADMIN,
+      });
+      const ocon = await idFor(t.db, "driver", "ocon");
+      const problems = await validateSession(t.db, sessionId);
+      expect(problems).toEqual([
+        {
+          kind: "incomplete",
+          severity: "warning",
+          details: {
+            expected: 22,
+            actual: 21,
+            missingDriverIds: [bearman, ocon].sort(),
           },
         },
       ]);
