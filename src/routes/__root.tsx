@@ -28,7 +28,16 @@ export const Route = createRootRoute({
   }),
   shellComponent: RootDocument,
   component: Outlet,
+  notFoundComponent: NotFound,
 });
+
+function NotFound() {
+  return (
+    <main className="p-space-4">
+      <h1 className="font-display text-[32px] uppercase">Page not found</h1>
+    </main>
+  );
+}
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
