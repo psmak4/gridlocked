@@ -423,6 +423,11 @@ The roster checker runs on a schedule and can also be triggered by an admin:
 - **Before lock,** to catch changes while users can still react:
   - OpenF1 participants from **FP2 and FP3 only**. FP1 rookie and young-driver runs would be false positives, so FP1 is used only as a weak signal.
   - Admin-entered announcements. Team announcements have no free data feed, so an admin is the main source here.
+  - **Until the staff screens (M8),** staff record an announcement with `pnpm staff` (on staging, the manual **Staff action** workflow). There are two actions:
+    - **A substitution for one event:** the substitute gets an `admin` entry, and the replaced driver is `unavailable`.
+    - **A seat change from an event onward:** race seats close and open.
+
+    Each action is audited with a reason, then the event is checked again at once. Recording a swap before the cars run lets the checks expect the substitute. Afterwards, it clears the hold its surprise caused. (Added 2026-10-31, from Mexico City 2026, where Hirakawa replaced Ocon from FP3.)
 - **After each session,** compare the result rows (driver, constructor) with the expected entry list.
 
 | Signal | Action |
@@ -430,6 +435,8 @@ The roster checker runs on a schedule and can also be triggered by an admin:
 | A driver ID we've never seen | Queue: "new driver" (add to pool? set price?) |
 | A known driver with a different constructor | Queue: "team change" (update entry for this event and onward?) |
 | A pool driver missing from a session | Queue: "missing driver" (set unavailable? scoring proceeds with the NC penalty) |
+
+**Missing means missing from the latest practice session.** A driver absent from FP3 after running FP2 is flagged, unless his team's cars are all accounted for: a recorded substitute fills the car.
 
 **No silent guesses.** Any surprise holds the affected sessions' scoring as `under_review` until an admin resolves the queue item. The poller and the results thread aren't blocked.
 

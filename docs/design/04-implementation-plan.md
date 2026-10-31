@@ -114,6 +114,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
     - overrides and effective results;
     - review items, the job table, the scheduler and due-times file, and the poller and finalizer.
   - **The 2026 import and the replay harness.**
+  - **Staff actions for a substitution and a seat change** (added 2026-10-31): audited, run with `pnpm staff` and the staging Staff action workflow. [Plan](../plans/M2-driver-swap.md).
 - **Key tests:**
   - every Part 1 and Part 2 scenario table row has a test, for example the renumbered 2026 rounds, "retired but classified", a Q3 driver with no time, and a pit-lane start (synthetic);
   - provider-after-manual;
@@ -242,7 +243,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - the dry run and approval;
   - the moderation queue;
   - calendar and lock times;
-  - seats and availability;
+  - seats and availability, built on M2's staff roster actions (`src/staff/roster.ts`);
   - the price publish;
   - settings, feature flags and usage meters;
   - the audit log.
