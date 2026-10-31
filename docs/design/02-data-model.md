@@ -265,6 +265,7 @@ For the 2026 swap (HLD §8.1), effective from the Dutch GP (round 12, 2026-08-21
 - **Event entries** drive the team builder's warnings, the roster checker and the validator. A result row whose driver–constructor pair isn't in `event_entries` is a roster surprise, and it holds scoring for admin review (HLD §8.2).
 - FP1 young-driver runs don't affect either, because practice isn't scored. The roster checker treats FP1 as a weak signal (HLD §8.2).
 - **A mid-weekend substitution** (e.g. Bearman replacing Sainz from FP3 at Jeddah 2024): both drivers have entries for that event with the same constructor. The validator checks car counts **per session** against the results, not per event, so three drivers sharing two cars over a weekend is valid.
+  - **Completeness (decided 2026-10-31):** a team is expected to run `min(its entries, validator_thresholds.carsPerConstructor)` cars. A session is complete when it has a row for every expected car. Only a team short of a car has missing drivers, and those are its absent entrants. The roster check uses the same rule on the latest practice session.
 
 ### 1.10 `driver_availability` (per-event status of pool drivers; decided, HLD §8.1)
 | Column | Type | Notes |
@@ -1578,9 +1579,10 @@ erDiagram
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | UUIDv7, so ordered by time |
-| actor_user_id | uuid FK, nullable | Null for jobs |
+| actor_user_id | uuid FK, nullable | Null for jobs. The FK to `users` arrives in M5 |
+| actor_label | text, nullable | Who acted while there are no user rows: the staff workflow's GitHub login (added 2026-10-31) |
 | actor_kind | text: `admin`, `moderator`, `user`, `system`, `job` | |
-| impersonating_user_id | uuid FK, nullable | Set when an admin acted while impersonating |
+| impersonating_user_id | uuid FK, nullable | Set when an admin acted while impersonating. The FK to `users` arrives in M5 |
 | action | text | Dotted names, e.g. `event.lock_at.update`, `result_override.create`, `review_item.resolve`, `user.role.update`, `ruleset.correction.apply`, `scoring.rescore.approve` |
 | entity_type, entity_id | text, uuid | Polymorphic, like `provider_ids` (1.11) |
 | before, after | jsonb, nullable | Only the changed fields. **Personal fields** (email, IP) are stored as `"[redacted]"`, so the log never becomes a second copy of personal data |
