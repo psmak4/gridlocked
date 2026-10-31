@@ -1,6 +1,6 @@
 # Spike: framework and hosting
 
-**Plan:** [docs/plans/framework-hosting-spike.md](../plans/framework-hosting-spike.md). **Started:** 2026-10-30. **Status:** in progress (Task 1 done).
+**Plan:** [docs/plans/framework-hosting-spike.md](../plans/framework-hosting-spike.md). **Started:** 2026-10-30. **Status:** measured; recommendation awaiting your decision (Tasks 1–6 done, 2026-10-31).
 
 ## Questions
 
@@ -14,8 +14,8 @@ Each row comes from the host's own pricing, limits or terms pages unless marked 
 | Host | Free allowance (per month unless stated) | Over the limit | Commercial use on free | TanStack Start | CDN caching of SSR and API responses |
 |---|---|---|---|---|---|
 | **Vercel Hobby** | 1M function invocations; 4 Active CPU-hours; 360 GB-hours memory; **1M CDN requests**; 100 GB Fast Data Transfer; 10 GB Fast Origin Transfer; 100 deploys/day; functions up to 300 s; runtime logs kept 1 hour | the feature pauses for 30 days | **No**: "non-commercial, personal use only". Pro is $20 per developer seat per month | supported through the Nitro `vercel` preset (Vercel's own guide); not a TanStack hosting partner | honours `s-maxage` and `stale-while-revalidate` from function responses; never caches `Set-Cookie`, `private`, `no-store`, `Vary: Cookie` or requests with `Authorization`; cache is per region; `x-vercel-cache` shows the result |
-| **Netlify Free** | 300 credits: a production deploy costs 15, 1 GB bandwidth 20, **10k web requests 2**, 1 GB-hour of functions 10; previews and branch deploys free | **every site on the account is paused** ("Site not available") until credits reset; no top-ups on Free | not restricted in the terms of use; plan terms sit in the Self-Serve Subscription Agreement (not checked). Personal is $9 for 1,000 credits | **official partner**, through `@netlify/vite-plugin-tanstack-start` | function responses are not cached by default. `Netlify-CDN-Cache-Control` / `CDN-Cache-Control` / `Cache-Control` honoured (`s-maxage`, `stale-while-revalidate`, `durable`); query strings are in the key, cookies are not; `Netlify-Vary` for finer keys; `Set-Cookie` handling not documented (Task 6 checks) |
-| **Cloudflare Workers Free** | **100k requests per day**; **10 ms CPU per request**; 128 MB memory; 64 MiB uncompressed size; 50 subrequests per request; Durable Objects free (100k requests/day, 13,000 GB-s/day) | Error 1027 for the rest of the UTC day; no bill | yes | **official partner**, through `@cloudflare/vite-plugin` and Wrangler | the Cache API is explicit and per data center; **Workers Cache** returns cached Worker responses without running the Worker, honours `Cache-Control` (RFC 9111, including `stale-while-revalidate`), is tiered, and never caches `Set-Cookie`. **A cache hit is still billed as a Worker request**, so it likely counts toward the daily 100k (Task 6 checks) |
+| **Netlify Free** | 300 credits: a production deploy costs 15, 1 GB bandwidth 20, **10k web requests 2**, 1 GB-hour of functions 10; previews and branch deploys free | **every site on the account is paused** ("Site not available") until credits reset; no top-ups on Free | not restricted in the terms of use; plan terms sit in the Self-Serve Subscription Agreement (not checked). Personal is $9 for 1,000 credits | **official partner**, through `@netlify/vite-plugin-tanstack-start` | function responses are not cached by default. `Netlify-CDN-Cache-Control` / `CDN-Cache-Control` / `Cache-Control` honoured (`s-maxage`, `stale-while-revalidate`, `durable`); query strings are in the key, cookies are not; `Netlify-Vary` for finer keys; `Set-Cookie` responses were not cached in Task 6 (auth POSTs came back `no-cache`) |
+| **Cloudflare Workers Free** | **100k requests per day**; **10 ms CPU per request** (Task 6: sign-in used 106–160 ms and still returned 200; not enforced strictly, but not to be relied on); 128 MB memory; 64 MiB uncompressed size; 50 subrequests per request; Durable Objects free (100k requests/day, 13,000 GB-s/day) | Error 1027 for the rest of the UTC day; no bill | yes | **official partner**, through `@cloudflare/vite-plugin` and Wrangler | the Cache API is explicit and per data center; **Workers Cache** returns cached Worker responses without running the Worker, honours `Cache-Control` (RFC 9111, including `stale-while-revalidate`), is tiered, and never caches `Set-Cookie`. **A cache hit is still billed as a Worker request**, so it likely counts toward the daily 100k (not tested: the spike used workers.dev with no cache in front) |
 | **Cloudflare Workers Paid** | $5/month: 10M requests and 30M CPU-ms included, then $0.30 per M requests and $0.02 per M CPU-ms; CPU per request up to 5 min (default 30 s); no egress charges | bills the overage | yes | as above | as above |
 | **Neon Functions** | per project: 1M invocations, 10 active and 400 waiting capacity-hours; 100 concurrent invocations **per account** (shared with the scheduler tick); 2 GiB memory; Node 24 | not stated on the plans page (the database stops at its own limits) | not stated on the plans page | not documented by Neon; a third-party tool (Alchemy) documents TanStack Start on Neon Functions through Nitro's Node target | **no CDN in front**; every request is an invocation unless a CDN is put in front |
 | **Railway** | Free: $1 of usage per month (0.5 GB RAM, 1 vCPU per service); Hobby $5/month including $5 of usage; vCPU $20/month, RAM $10/GB/month, egress $0.05/GB | bills (Hobby and Pro) | yes (paid plans) | **official partner** | none built in; an always-on container, no scale to zero documented |
@@ -48,16 +48,123 @@ Each row comes from the host's own pricing, limits or terms pages unless marked 
 
 ## Setup
 
-_(Task 3 onwards: the `fw-spike` branch id, host project names. No credentials are recorded.)_
+- Code: branch `spike/framework-start` (never merged). The conversion is commit a1b4edd; the spike routes, auth, probes and fixes follow it.
+- Database: Neon `gridlocked-staging`, child branch `fw-spike` (`br-proud-cherry-b8417its`, 0.25 CU). Spike tables `spike_picks` and `spike_hits`, plus Better Auth's four tables. It inherited the `tick` function and both triggers, which came across disabled. Nothing touched staging `main`.
+- Hosts (free plans, CLI deploys of the same commit): Vercel project `gridlocked-spike`, Netlify project `gridlocked-spike`, Cloudflare Worker `gridlocked-spike`, Neon Function `web` on `fw-spike`. No credentials are recorded here.
 
 ## Migration cost (Task 2)
+
+- **Small.** The conversion itself is 16 files, +194/−113, without the lockfile (a1b4edd). The whole spike branch, with the spike routes, auth, probes and fixes, is 45 files, +1,629/−120. No step took more than 15 minutes.
+- Removed: `next`, `eslint-config-next`, `@tailwindcss/turbopack`. Added: `@tanstack/react-start` 1.169.2, `@tanstack/react-router` 1.170.44, `vite` 8.3.4, `@vitejs/plugin-react`, `@tailwindcss/vite`, `nitro` 3.0.260903-beta, `typescript-eslint`, `eslint-plugin-react-hooks`, Fontsource for the three fonts.
+- Mapping: `next/font` → self-hosted Fontsource (same families and CSS variables); `metadata` → root route `head()`; Next routes → file routes (`src/routeTree.gen.ts` is generated and committed); scripts → `vite dev` / `vite build` / `node .output/server/index.mjs`.
+- Unchanged: Vitest (839 tests passed, the same as main), Drizzle, the providers, `src/jobs` and `neon.ts`. The scheduler's `tick` function is bundled separately and didn't notice.
+- Lost: `eslint-config-next` brought eslint-plugin-react, a jsx-a11y subset and `@next/next` rules. A real migration should add eslint-plugin-react and eslint-plugin-jsx-a11y back.
+- Risks:
+  - **Nitro v3 is pre-release.** Start's Node, Vercel, Netlify-functions and Workers outputs here all went through it.
+  - 20 harmless "use client" warnings from inside TanStack Router on every build.
+- shadcn/ui: `shadcn init -t start` works. Its default primitives are now **Base UI, not Radix**, which is true for Next too.
 
 ## Measurements
 
 ### Local (Task 5)
 
+Node 24 on this Mac, CPU per request (`process.cpuUsage`), with the local in-process PGlite counted in, so these are upper bounds for page renders:
+
+| Request | p50 | p95 |
+|---|---|---|
+| `/` (no database) | 0.96 ms | 3.07 ms |
+| `/results/18` (SSR + database) | 2.54 ms | 4.86 ms |
+| chat endpoint (JSON + database) | 1.61 ms | 3.06 ms |
+| sign-up / sign-in (scrypt) | 51 / 50 ms | 54 / 56 ms |
+
+Server bundle (Node output, without PGlite): 3.4 MB raw, **0.78 MB gzip**. The Workers upload was 3.2 MiB / **727 KiB gzip**, under Workers Free's 3 MiB limit.
+
 ### Per host (Task 6)
+
+From this Mac to the us-east hosts. Cold means the first request after 16 idle minutes, cache-busted, one sample each. The `fw-spike` database had also gone to sleep, so the first host probed (Vercel) probably paid for waking it.
+
+| | Vercel Hobby | Netlify Free | Cloudflare Workers Free | Neon Functions |
+|---|---|---|---|---|
+| Deploy (prebuilt, CLI) | 6–9 s | 9–10 s | ~10 s | 5 s |
+| `/results/18` warm TTFB p50 / p95 | **142–149 / 231–263 ms** | 186–228 / 275–298 ms | 361–399 / 681–834 ms | **136–138 / 219–229 ms** |
+| `/results/18` cold | 2.08 s | 1.79 s | 0.65 s | 1.26 s |
+| Chat: origin hits per 30 simultaneous requests | 29 | 20–24 | 30 | 30 |
+| Chat: origin hits per 30 requests over 3 s | **3** | 20 | 30 | 30 |
+| CPU for sign-up / sign-in | not metered (Node, ~50 ms locally) | same | **87–151 / 106–160 ms**, against 10 ms, but all 200 | not metered |
+| Signed-in `/me` | `private, no-store`, never cached | same | same | same |
+| Logged-out page fetched with a session cookie | cache HIT (correct: same page for everyone, no `Set-Cookie`) | cache HIT | no cache in front | no CDN |
+| Session cookie | `__Secure-…; HttpOnly; Secure; SameSite=Lax` on all four, after the fix below | | | |
+| Sign up, sign in, pick, sign out (Playwright) | pass | pass | pass | pass |
+| Logs | dashboard only: the CLI returned no records, the connector got a 403 | `netlify logs:function` | `wrangler tail` (gives CPU per request) | Neon console / MCP |
+
+**Bugs the hosts found, fixed on the spike branch:**
+- **The session cookie had no `Secure` flag on any host.** When the base URL is derived from the request, Better Auth decides `Secure` from `NODE_ENV`. The fix is `advanced: { useSecureCookies: true }`, with a test that failed first. The real app must keep it.
+- **On slower hosts the first pick click did nothing.** It landed before hydration. The pick buttons now stay disabled until the user's picks have loaded. The real app needs the same rule for every server-rendered control.
+- **Route `headers()` also apply to error responses** (from Task 3). A 500 went out marked `public, s-maxage=60, stale-while-revalidate=300`. Vercel doesn't cache a 5xx, but other CDNs do. The real app must send `no-store` on errors.
+- One thing not explained: for about 2 minutes after a Vercel redeploy, the bare `/results/18` URL returned 500 straight from the function (`x-vercel-cache: MISS`) while a cache-busted URL returned 200. Then it cleared.
+
+**Traps for the runbook:**
+- Piping a secret from `pnpm dlx neon …` into `vercel env add` races the download and stores the wrong value. Fetch it into a variable first.
+- Deleting `.netlify/` deletes the project link, and the next `netlify deploy` creates a new project on its own. Always pass `--site`.
+- The first Workers deploy registers the account's workers.dev subdomain, and HTTPS fails for its first minutes.
+- The Neon Function must bundle the client assets (`serveStatic: "inline"`), because Neon serves no static files.
 
 ## Result
 
+**Framework: TanStack Start can replace Next.js.** Every feature the design needs ran on it:
+- SSR with per-route title and description;
+- server functions validated with Zod;
+- API routes;
+- per-route cache headers;
+- TanStack Query with optimistic updates;
+- Better Auth email and password, with the admin plugin and protected routes;
+- shadcn/ui.
+
+Magic link, Discord sign-in and Turnstile go through the same `/api/auth/$` handler, with no Start-specific step. Web Push needs a hand-written `public/sw.js` rather than vite-plugin-pwa, because Start renders on the server (Task 4 notes).
+
+The same commit ran on four hosts with only a build-preset change. Next.js runs elsewhere through adapters, but Vercel is the host it is built and tested against.
+
+**Host scorecard:**
+
+| | Vercel Hobby | Netlify Free | Cloudflare Workers | Neon Functions |
+|---|---|---|---|---|
+| Free headroom | 1M CDN requests and 1M invocations a month | 300 credits, shared with **every site on the team** | 100k requests a day; 10 ms CPU | 1M invocations; 100 concurrent per account, shared with the scheduler |
+| Over the limit | the feature pauses for 30 days | **every site on the team pauses**, including your existing live sites | error 1027 until the next UTC day | not stated |
+| Commercial path | Pro, $20 per seat a month (needed before ads) | free allows it; Personal $9 | Paid, $5 a month (10M requests, 30 s CPU) | not stated |
+| Start support | Nitro preset, beta | official partner | official partner | not documented; works through Nitro `standard` |
+| CDN correctness | ✔ private pages never cached; absorbs steady chat (3/30) | ✔ private pages; chat leaks (20/30) | no cache in front on workers.dev (Workers Cache not tested) | no CDN |
+| Auth | ✔ | ✔ | ✔ works, but sign-in is 9–16× over Free's CPU limit | ✔ |
+| Warm latency (target p50 < 300 ms) | ✔ ~145 ms | ✔ ~200 ms | ✘ ~380 ms (a new database socket per request) | ✔ ~137 ms |
+| Developer loop | 6–9 s deploys; logs dashboard-only | ~10 s; link trap | ~10 s; best live logs | 5 s; no static files |
+
 ## Decision
+
+**Recommendation** (yours to decide):
+
+1. **Switch the framework to TanStack Start, before M3.**
+   - Why: the conversion is small now and grows with every screen; it removes the Next-on-Vercel coupling, and everything the design needs worked.
+   - If wrong: Nitro v3 or Start trips us before M3, and we convert back. That is about the same 16 files, a day's work while the app is still a placeholder, and it gets more expensive after M3.
+2. **Keep Vercel Hobby as the host** (HLD §11.2 is unchanged), moving to Pro before the first ad, as already planned.
+   - Why: it was the only host that met every expectation measured, and the only one whose cache absorbed a steady stream of chat refreshes.
+   - If wrong: Hobby's 1M CDN requests a month caps chat mode at about 50 people across a month of races (see the arithmetic above). Past that, the fix is Pro, or Cloudflare's free CDN in front with our own domain. Changing host is a preset and four env vars: about 10 seconds of deploy and a probe run.
+3. **Not chosen:**
+   - **Netlify:** its credit pause takes down every site on the team, and its cache let most chat refreshes through.
+   - **Neon Functions as the web host:** no CDN, so every chat refresh is an invocation and a database read. It stays the scheduler's host.
+   - **Cloudflare Workers:** Free can't take sign-in CPU. Paid ($5) is the cheapest commercial path, but it missed the latency target as configured. Worth one retest with Hyperdrive or Smart Placement only if the $15 a month difference from Vercel Pro matters once ads are near.
+
+**Design changes this would trigger (not made yet):**
+- **HLD decision 3 and §11.5:**
+  - Framework → TanStack Start (Vite, Nitro), pinned versions, with the Nitro pre-release noted as a risk.
+  - UI → shadcn/ui on Base UI (its new default), not Radix.
+  - ESLint → typescript-eslint, react-hooks, eslint-plugin-react and jsx-a11y.
+- **HLD §11.2:** "hosts the Next.js app" → "hosts the TanStack Start app (Nitro `vercel` preset)". The host is unchanged.
+- **HLD §11.4 correction:**
+  - The chat refresh costs a Vercel **CDN request** every time, even when cached. 2,400 requests per person per race counts against Hobby's 1M CDN requests a month, so chat mode fits about 50 people, not 500.
+  - The "about 2,400 invocations" figure holds only for refreshes spread across the window. Simultaneous requests are not collapsed (29 of 30 reached the app).
+  - Add: error responses `no-store`; Better Auth `useSecureCookies: true`; server-rendered controls disabled until hydrated.
+- **HLD §11.3:** add the measured rows, and Netlify's team-wide pause.
+- **Decision 19:** unchanged. No host made live chat cheap at launch. Workers Paid with Durable Objects could, if Workers is ever chosen.
+- **Roadmap:**
+  - a migration task before M3 (convert, restore the lost lint rules, port the e2e);
+  - M5's deploy target becomes the Nitro `vercel` preset, deployed prebuilt from CI;
+  - M7's chat measurement keeps the staggered-load probe from this spike.
