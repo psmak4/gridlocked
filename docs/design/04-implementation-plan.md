@@ -59,7 +59,7 @@ This is the roadmap for phase 5, the build. It splits the work into milestones t
 ### Environments
 | Environment | What | When it exists |
 |---|---|---|
-| Local | Next.js dev server and PGlite. No cloud accounts needed | M0 |
+| Local | Vite dev server (TanStack Start) and PGlite; Next.js until the framework move. No cloud accounts needed | M0 |
 | Staging | Its own free Neon project, `gridlocked-staging` in AWS US East 1 (HLD §11.4), plus Vercel preview deploys | Neon from M1 (approved 2026-10-28); Vercel from M5 |
 | Production | Vercel Hobby plus the production Neon project | M9, on approval |
 
@@ -124,6 +124,18 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Approval needed:** a Neon API key for `gridlocked-staging` and its database URL, stored as GitHub Actions secrets, so CI can run migrations and deploy the staging jobs (Task 12 of the plan). The Vercel project moved again, to M5, the first milestone with pages to preview (2026-10-28).
 - **Plan:** [plans/M2-reference-and-results.md](../plans/M2-reference-and-results.md).
 
+### M2.5 — Move to TanStack Start (before M3; added 2026-10-31)
+- **Goal:** the app runs on TanStack Start with every M0–M2 guard rail intact, before M3 adds screens that would make the move bigger (HLD decision 3, §11.5).
+- **Scope:**
+  - convert the app, with the unmerged `spike/framework-start` branch as the reference (16 files there);
+  - pinned versions of Start, Router, Vite and Nitro; shadcn/ui on Base UI;
+  - restore the lint rules `eslint-config-next` provided: typescript-eslint, react-hooks, eslint-plugin-react and jsx-a11y;
+  - port the Playwright e2e (client bundles move from `/_next/static/` to `/assets/`);
+  - the response rules from HLD §11.4: `private, no-store` on errors, `useSecureCookies` once Better Auth arrives (M5), controls disabled until hydrated;
+  - the scheduler (`neon.ts`, `src/jobs`, `src/providers`, `src/db`) stays untouched.
+- **Exit:** CI green on the converted app, with the full test suite and e2e passing, and the staging scheduler deploy unchanged.
+- **Approval needed:** none. No cloud resources.
+
 ### M3 — Fantasy core (target 11 Dec)
 - **Goal:** teams can be built, locked and changed exactly by the rules.
 - **Scope (DM Part 3):**
@@ -166,7 +178,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 ### M5 — Identity and accounts (target 8 Jan; can start alongside M3–M4)
 - **Goal:** people can sign up safely, and staff accounts are secured.
 - **Scope (DM Part 6, UI wave 4 sign-up):**
-  - Better Auth self-hosted, with the table renames;
+  - Better Auth self-hosted, with the table renames, `advanced.useSecureCookies: true` and `private, no-store` on every `/api/auth/*` response (HLD §11.4);
   - email + password, magic link and Discord sign-in;
   - Turnstile;
   - the age confirmation and legal acceptances;
@@ -187,7 +199,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a Resend account, Free;
   - a Cloudflare Turnstile site key, free;
   - a Discord application, for OAuth;
-  - a Vercel project, Hobby, linked to the repo for preview deploys against `gridlocked-staging` (moved here from M1 and M2 on 2026-10-28). You install Vercel's GitHub app.
+  - a Vercel project, Hobby, linked to the repo for preview deploys against `gridlocked-staging` (moved here from M1 and M2 on 2026-10-28). You install Vercel's GitHub app. The app deploys with Nitro's `vercel` preset, built in CI and uploaded prebuilt (framework and hosting spike, 2026-10-31).
 
 ### M6 — Fantasy screens (target 22 Jan)
 - **Goal:** the game is playable on a phone.
@@ -208,7 +220,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Scope:**
   - DM Part 5: categories, threads, nested posts, votes, search (if you approve it at this milestone), watch marks;
   - chat-mode threads that refresh every few seconds through the `RealtimeChannel` interface, cached per thread on the CDN (HLD decision 19), and the 30-day archive;
-  - a staging load test that the CDN absorbs a race start's refreshes within Vercel Hobby's limits;
+  - a staging load test that the CDN absorbs a race start's refreshes within Vercel Hobby's limits, counting CDN requests as well as invocations (HLD §11.4: about 50 people in chat a month on Hobby), with refreshes spread across the window as in the framework and hosting spike's staggered probe;
   - reports, the moderation queue and filters;
   - notifications, broadcasts, Web Push and the email outbox;
   - UI waves 2 and 4.
