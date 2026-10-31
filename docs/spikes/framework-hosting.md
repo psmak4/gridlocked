@@ -1,6 +1,6 @@
 # Spike: framework and hosting
 
-**Plan:** [docs/plans/framework-hosting-spike.md](../plans/framework-hosting-spike.md). **Started:** 2026-10-30. **Status:** measured; recommendation awaiting your decision (Tasks 1–6 done, 2026-10-31).
+**Plan:** [docs/plans/framework-hosting-spike.md](../plans/framework-hosting-spike.md). **Started:** 2026-10-30. **Status:** measured and cleaned up; recommendation awaiting your decision (2026-10-31).
 
 ## Questions
 
@@ -170,3 +170,14 @@ The same commit ran on four hosts with only a build-preset change. Next.js runs 
   - a migration task before M3 (convert, restore the lost lint rules, port the e2e);
   - M5's deploy target becomes the Nitro `vercel` preset, deployed prebuilt from CI;
   - M7's chat measurement keeps the staggered-load probe from this spike.
+
+## Cleanup (2026-10-31)
+
+Deleted after the measurements:
+- Vercel project `gridlocked-spike` (`prj_FmkKFrulFxLRFR0yhizpFUJo4iGA`), with its deployments and env vars.
+- Netlify project `gridlocked-spike` (`17f8de5e-a206-4bcd-90e2-0fdcb9323d65`). The stray `enchanting-naiad-1e2e94` was deleted earlier.
+- Cloudflare Worker `gridlocked-spike`. The account's workers.dev subdomain `gridlocked` is an account setting and stays.
+- Neon function `web` and branch `fw-spike` (`br-proud-cherry-b8417its`) in `gridlocked-staging`. Staging `main`, its `tick` function and both triggers were checked afterwards: unchanged and enabled.
+- Local link and secret files (`.env.local`, `.env.spike`, `.vercel/`, `.netlify/`, `.wrangler/`).
+
+The spike code stays on the unmerged branch `spike/framework-start` for reference.
