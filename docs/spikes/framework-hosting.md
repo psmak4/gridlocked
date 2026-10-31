@@ -1,6 +1,6 @@
 # Spike: framework and hosting
 
-**Plan:** [docs/plans/framework-hosting-spike.md](../plans/framework-hosting-spike.md). **Started:** 2026-10-30. **Status:** measured and cleaned up; recommendation awaiting your decision (2026-10-31).
+**Plan:** [docs/plans/framework-hosting-spike.md](../plans/framework-hosting-spike.md). **Started:** 2026-10-30. **Status:** decided 2026-10-31: TanStack Start on Vercel Hobby, as recommended. The HLD and roadmap changes below are made.
 
 ## Questions
 
@@ -141,7 +141,7 @@ The same commit ran on four hosts with only a build-preset change. Next.js runs 
 
 ## Decision
 
-**Recommendation** (yours to decide):
+**Decision** (adopted 2026-10-31, as recommended):
 
 1. **Switch the framework to TanStack Start, before M3.**
    - Why: the conversion is small now and grows with every screen; it removes the Next-on-Vercel coupling, and everything the design needs worked.
@@ -154,7 +154,7 @@ The same commit ran on four hosts with only a build-preset change. Next.js runs 
    - **Neon Functions as the web host:** no CDN, so every chat refresh is an invocation and a database read. It stays the scheduler's host.
    - **Cloudflare Workers:** Free can't take sign-in CPU. Paid ($5) is the cheapest commercial path, but it missed the latency target as configured. Worth one retest with Hyperdrive or Smart Placement only if the $15 a month difference from Vercel Pro matters once ads are near.
 
-**Design changes this would trigger (not made yet):**
+**Design changes (made 2026-10-31, with this write-up):**
 - **HLD decision 3 and §11.5:**
   - Framework → TanStack Start (Vite, Nitro), pinned versions, with the Nitro pre-release noted as a risk.
   - UI → shadcn/ui on Base UI (its new default), not Radix.

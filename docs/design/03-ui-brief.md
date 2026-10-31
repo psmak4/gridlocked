@@ -20,7 +20,7 @@ The screens are designed in **Claude Design** (the Design artifact type), mobile
 - **Accessibility:** WCAG 2.1 AA as the baseline, which means:
   - contrast;
   - touch targets of at least 44 px;
-  - keyboard and screen-reader support through Radix;
+  - keyboard and screen-reader support through Base UI, shadcn/ui's primitives (Radix until 2026-10-31, HLD §11.5);
   - no meaning carried by color alone. Team colors always appear with a name or short code.
 - **Ad-ready but ad-free:** layouts reserve ad slots that stay empty at launch (HLD §16.4, DM 6.9).
 

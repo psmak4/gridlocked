@@ -1,7 +1,7 @@
 # Gridlocked — High-Level Design
 
 **Status:** Approved 2026-10-27 (phase 1 of 5 complete)
-**Date:** 2026-10-26 (updated 2026-10-27: working name changed from "Paddock Club" to "Gridlocked"; hosting moved to Vercel Hobby, free-tier plan added in §11.4, monetization plan added in §16)
+**Date:** 2026-10-26 (updated 2026-10-27: working name changed from "Paddock Club" to "Gridlocked"; hosting moved to Vercel Hobby, free-tier plan added in §11.4, monetization plan added in §16; updated 2026-10-31: framework changed to TanStack Start after the framework and hosting spike, §11.5)
 **Next phases:** 2. Data model → 3. UI/UX in Claude Design → 4. Implementation plan → 5. Build
 
 This document describes what we're building, how the major pieces fit together, and the decisions still open. It is not a schema or an implementation plan; those are phases 2 and 4. Each choice in it is labelled as one of:
@@ -481,9 +481,9 @@ This table was written before the free-tier review. Its Netlify column is now Ve
 | Fit with decided tech | best: keeps Netlify and Neon | good | good | OK (Better Auth works there) |
 
 ### 11.2 Chosen: Vercel Hobby + Neon platform, with realtime behind an interface
-*Decided 2026-10-27. Option A was my call when you had no hosting preference. After the free-tier comparison (§11.3) I recommended swapping Netlify for Vercel Hobby, and you asked for it to be recorded. Revisit if the spike below disappoints.*
+*Decided 2026-10-27. Option A was my call when you had no hosting preference. After the free-tier comparison (§11.3) I recommended swapping Netlify for Vercel Hobby, and you asked for it to be recorded. Revisit if the spike below disappoints. Rechecked on 2026-10-31 by the [framework and hosting spike](../spikes/framework-hosting.md), which deployed the same app to Vercel, Netlify, Cloudflare Workers and Neon Functions: Vercel stays.*
 
-- **Vercel (Hobby plan, free)** hosts the Next.js app: SSR pages, API routes and the CDN.
+- **Vercel (Hobby plan, free)** hosts the TanStack Start app (Nitro's `vercel` preset, deployed prebuilt from CI): SSR pages, API routes and the CDN.
 - **Neon** hosts:
   - Postgres;
   - **Neon cron triggers** for the scheduler tick and long jobs. Neon Functions can run long and sit next to the data, which keeps scoring off Vercel's function time limits. This also means Vercel's cron limits don't matter to us.
@@ -514,6 +514,19 @@ From memory, not rechecked: Fly.io and Railway no longer offer ongoing free tier
 - **Cloudflare** has the most generous free tier and the best chat story. But rendering Next.js pages and hashing Better Auth passwords can exceed 10 ms of CPU, and at least one developer had to move hashing into a separate service. It's only worth adopting after a throwaway test shows our pages fit.
 - **Oracle** has by far the most capacity and could host Postgres too, which removes Neon's limits. That only makes sense if you're happy to run a server yourself.
 
+**Measured on 2026-10-31** (the [framework and hosting spike](../spikes/framework-hosting.md); the "Next.js" column above predates the move to TanStack Start). The same TanStack Start app, with Better Auth and the chat refresh endpoint, deployed to four hosts against a Neon branch in US East 1:
+
+| | Vercel Hobby | Netlify Free | Cloudflare Workers Free | Neon Functions |
+|---|---|---|---|---|
+| Warm page p50 / p95 (target p50 < 300 ms) | ~145 / ~250 ms | ~200 / ~290 ms | ~380 / ~750 ms | ~137 / ~225 ms |
+| First request after 16 idle minutes (one sample) | 2.08 s, probably including the database waking | 1.79 s | 0.65 s | 1.26 s |
+| Chat refreshes reaching the app, 30 spread over 3 s | **3** | 20 | 30 (no cache in front of workers.dev) | 30 (no CDN) |
+| Chat refreshes reaching the app, 30 at once | 29 | 20–24 | 30 | 30 |
+| Sign-in CPU | not metered | not metered | 106–160 ms against a 10 ms limit (not enforced, not to be relied on) | not metered |
+| Over the free limit | the feature pauses for 30 days | **every site on the Netlify team pauses**, including unrelated sites on the same account | error 1027 until the next UTC day | not stated |
+
+Netlify is ruled out by the team-wide pause and its leaky cache, Neon Functions by having no CDN (it stays the scheduler's host), and Cloudflare Workers by latency and sign-in CPU. Workers Paid ($5/month) with Hyperdrive or Smart Placement is worth one retest only if cost matters once ads are near.
+
 Sources: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Netlify pricing](https://www.netlify.com/pricing/), [Netlify free plan limits (third-party)](https://netli.fyi/blog/netlify-free-plan-limits-2026), [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) and [limits](https://developers.cloudflare.com/workers/platform/limits/), [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/), [OpenNext for Cloudflare](https://opennext.js.org/cloudflare), [Cloud Run pricing](https://cloud.google.com/run/pricing), [Render free](https://render.com/docs/free), [Oracle Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm), [Ably free](https://ably.com/docs/pricing/free).
 
 ### 11.4 Running on free tiers (decided goal; proposed mechanics, 2026-10-27)
@@ -543,16 +556,26 @@ Going over a free limit never sends a bill; the service stops instead. The failu
 
 **Live chat was the feature most at risk, and it's now the fallback (decided 2026-10-28).** Session threads in chat mode refresh every few seconds instead of holding a WebSocket open (§11.2). The refresh still costs Vercel invocations, so it must be cached per thread on the CDN: about 500 people refreshing every 3 seconds for a 2-hour race is about 1.2M uncached requests, more than Hobby's 1M a month, but only about 2,400 if every refresh in a 3-second window shares one cached response. M7 measures this on staging.
 
+**Correction (framework and hosting spike, 2026-10-31):**
+- **Every refresh is still a Vercel CDN request, even when it's served from cache.** One person in chat for a 2-hour race makes 2,400 requests, so a month with chat on 5 sessions costs 12,000 per person against Hobby's 1M CDN requests. **Chat mode on Hobby fits about 50 people, not 500.** Past that, the options are Vercel Pro, or Cloudflare's free CDN in front of Vercel with our own domain.
+- The ~2,400 invocations hold only for refreshes spread across the window: 3 of 30 staggered refreshes reached the app. Requests that arrive at the same moment are not collapsed (29 of 30 reached it).
+
+**Response rules the spike showed we need:**
+- error responses and every `/api/auth/*` response send `Cache-Control: private, no-store` (route cache headers also apply to errors, and a 500 went out as `public, s-maxage=60`);
+- Better Auth runs with `advanced.useSecureCookies: true` (with a base URL taken from the request, it otherwise drops `Secure` from the session cookie);
+- server-rendered controls stay disabled until the page has hydrated (on slower hosts an early click did nothing).
+
 Sources: [Neon pricing](https://neon.com/pricing), [Neon plans](https://neon.com/docs/introduction/plans), [Neon Realtime FAQ](https://neon.com/docs/realtime/overview), [Resend pricing](https://resend.com/pricing).
 
 ### 11.5 Application stack (proposed)
 | Concern | Recommendation | Alternative | Why |
 |---|---|---|---|
-| Framework | **Next.js (App Router)**, decided 2026-10-27 | TanStack Start | Most mature; SSR for SEO on forum pages; first-class on Vercel; official Better Auth and Neon examples. TanStack Start is leaner and fully type-safe but younger |
+| Framework | **TanStack Start** (Vite + Nitro), decided 2026-10-31, replacing Next.js (App Router, decided 2026-10-27) | Next.js | The [framework and hosting spike](../spikes/framework-hosting.md) converted the app in 16 files, and every feature the design needs worked: SSR with per-route metadata, server functions, API routes, per-route cache headers, TanStack Query, Better Auth with the admin plugin. The same build ran on four hosts with only a preset change, which removes the Next-on-Vercel coupling. Versions are pinned. **Risk:** Nitro v3 is still pre-release; going back to Next is about a day's work while the app is small |
 | Language | TypeScript (strict) end to end | — | Decided (React/TS) |
 | DB access | **Drizzle ORM** + SQL migrations | Kysely, Prisma | SQL-first, supported by Better Auth and Neon; clear migrations |
 | Validation | Zod | Valibot | Shared schemas for client and server |
-| UI | Tailwind CSS + shadcn/ui (Radix primitives) | — | Accessible primitives; design tokens come from Claude Design (phase 3) |
+| UI | Tailwind CSS + shadcn/ui on **Base UI** primitives (shadcn's default; changed from Radix on 2026-10-31) | Radix | Accessible primitives; design tokens come from Claude Design (phase 3) |
+| Lint and format | ESLint with typescript-eslint, react-hooks, eslint-plugin-react and jsx-a11y; Prettier | — | Replaces `eslint-config-next`'s rules after the move to TanStack Start |
 | Client data | TanStack Query | SWR | Caching and optimistic updates for votes and lineups |
 | Jobs | Postgres-backed job table + cron tick | Inngest, Upstash QStash | No extra vendor; idempotency via unique keys |
 | Email | Resend | Postmark | Free tier (100/day, 3,000/month), used for account emails only at launch (§10); React email templates; sends magic links |
@@ -644,13 +667,13 @@ Sources: [Neon pricing](https://neon.com/pricing), [Neon plans](https://neon.com
 
 ## 14. Decision log
 
-All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change to 2 came from the cost and monetization discussion later that day. Decisions 19–20 and the second change to 2 came from M1 and M2 planning on 2026-10-28. "Yours" means you chose it; "My call" means you had no preference, or it was a detail you left to me, so check those while reading.
+All phase-1 decisions were made on 2026-10-27. Decisions 17–18 and the change to 2 came from the cost and monetization discussion later that day. Decisions 19–20 and the second change to 2 came from M1 and M2 planning on 2026-10-28. Decision 3 changed on 2026-10-31 after the framework and hosting spike, which also rechecked 2. "Yours" means you chose it; "My call" means you had no preference, or it was a detail you left to me, so check those while reading.
 
 | # | Decision | Outcome | By |
 |---|---|---|---|
 | 1 | Product name | Working name **"Gridlocked"**, pending the checks in §13.1 | Yours |
-| 2 | Hosting | **Vercel Hobby** (web) + Neon (Postgres, Functions for jobs, cron triggers). Live chat over Neon Functions was dropped from launch on 2026-10-28 (decision 19). This is Option A's architecture with Netlify swapped out after the free-tier comparison (§11.3). Realtime sits behind an interface, with Ably as the fallback; spike first (§11.2). Moves to Vercel Pro before any ads | My call (Option A); Vercel swap recommended by me and recorded at your request |
-| 3 | Framework | **Next.js** (App Router) | Yours |
+| 2 | Hosting | **Vercel Hobby** (web) + Neon (Postgres, Functions for jobs, cron triggers). Live chat over Neon Functions was dropped from launch on 2026-10-28 (decision 19). This is Option A's architecture with Netlify swapped out after the free-tier comparison (§11.3). Realtime sits behind an interface, with Ably as the fallback; spike first (§11.2). Moves to Vercel Pro before any ads. Rechecked by the framework and hosting spike on 2026-10-31: Vercel stays | My call (Option A); Vercel swap recommended by me and recorded at your request; kept after the spike (yours, 2026-10-31) |
+| 3 | Framework | **TanStack Start** (Vite + Nitro), replacing Next.js on 2026-10-31 after the framework and hosting spike (§11.5) | Yours (Next.js on 2026-10-27; TanStack Start on 2026-10-31, on my recommendation from the spike) |
 | 4 | Better Auth hosting | **Self-hosted** in our app | Yours |
 | 5 | Sign-in methods | **Email + password, magic link, Discord**. No Google or Apple at launch | Yours |
 | 6 | Lock on sprint weekends | **Start of Sprint Qualifying**; check against the official game on the first 2027 sprint weekend | Yours |
