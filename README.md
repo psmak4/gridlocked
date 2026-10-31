@@ -22,7 +22,7 @@ Open http://localhost:3000.
 pnpm lint          # ESLint, zero warnings allowed
 pnpm typecheck     # tsc --noEmit
 pnpm format:check  # Prettier (use `pnpm format` to fix)
-pnpm build         # production build
+pnpm build         # production build (Vite; `pnpm start` runs it from .output/)
 pnpm test          # Vitest unit and database tests (in-memory PGlite)
 pnpm e2e           # Playwright end-to-end tests
 pnpm db:generate   # generate a migration after editing src/db/schema

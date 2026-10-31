@@ -1,20 +1,18 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import reactHooks from "eslint-plugin-react-hooks";
+import tseslint from "typescript-eslint";
 
 const providerBoundaryMessage =
   "Only adapters know providers exist (HLD §3.3 rule 2).";
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
+  ...tseslint.configs.recommended,
+  reactHooks.configs.flat["recommended-latest"],
   globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
-    "out/**",
-    "build/**",
-    "next-env.d.ts",
+    // Build output, and the route tree the Start plugin generates.
+    ".output/**",
+    "dist/**",
+    "src/routeTree.gen.ts",
     // Deliberately violates rules; linted only by tests/lint.
     "tests/lint/fixtures/**",
     // Generated reports and coverage output.
