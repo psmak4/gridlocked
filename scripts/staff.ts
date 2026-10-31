@@ -21,6 +21,7 @@ import {
   clockModeFromEnv,
   resolveClock,
 } from "@/lib/resolve-clock";
+import { rematchParticipants } from "@/providers/openf1/participants";
 import { parseStaffEnv, runStaffCommand } from "@/staff/cli";
 
 async function main() {
@@ -42,7 +43,9 @@ async function main() {
   try {
     await assertClockMode(db, "system");
     const clock = await resolveClock({ mode: "system", db });
-    const report = await runStaffCommand(db, clock.now(), cmd);
+    const report = await runStaffCommand(db, clock.now(), cmd, {
+      rematchParticipants,
+    });
     console.log(
       `${report.dryRun ? "dry run, nothing written" : "done"}:\n${JSON.stringify(report, null, 2)}`,
     );

@@ -11,7 +11,11 @@ import {
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import { localDate, syncEventEntries } from "@/reference/sync-event-entries";
-import { revalidateEvent, type SessionMove } from "./revalidate";
+import {
+  revalidateEvent,
+  type SessionMove,
+  type StaffDeps,
+} from "./revalidate";
 
 // Staff actions for roster changes (HLD §8). Each writes its change and its
 // audit rows in one transaction (DM 0.4), then checks the event again so a
@@ -81,6 +85,7 @@ export async function recordSubstitution(
     reason: string;
     actor: StaffActor;
   },
+  deps: StaffDeps = {},
 ): Promise<{ changed: boolean; sessions: SessionMove[] }> {
   const reason = requireReason(input.reason);
   const { eventId, inDriverId, constructorId, carNumber, outDriverId } = input;
@@ -219,7 +224,31 @@ export async function recordSubstitution(
     return wrote;
   });
 
-  return { changed, sessions: await revalidateEvent(db, now, eventId) };
+  return {
+    changed,
+    sessions: await revalidateEvent(db, now, eventId, deps),
+  };
+}
+
+/** True when `seat` is exactly the open-ended race seat `change` opens on `day`. */
+function alreadyOpen(
+  seat: {
+    constructorId: string;
+    carNumber: number;
+    role: string;
+    validFrom: string;
+    validTo: string | null;
+  },
+  change: { constructorId: string | null; carNumber?: number },
+  day: string,
+): boolean {
+  return (
+    seat.role === "race" &&
+    seat.validTo === null &&
+    seat.validFrom === day &&
+    seat.constructorId === change.constructorId &&
+    seat.carNumber === change.carNumber
+  );
 }
 
 /** `YYYY-MM-DD` one day before `day`. */
@@ -248,9 +277,10 @@ async function firstDay(tx: Db, eventId: string): Promise<string | null> {
  * day before, and a race seat opens wherever `constructorId` is set
  * (`carNumber` is then required). `constructorId: null` only ends the seat.
  * History is never edited: a seat that starts on or after the date is
- * refused. Then the entries of every scheduled event of the season from that
- * date are synced again, and the from event is checked again. All writes and
- * their audit rows are one transaction.
+ * refused, except the very seat this change opens: running it again (a retry)
+ * changes nothing and writes no audit row. Then the entries of every
+ * scheduled event of the season from that date are synced again, and the from
+ * event is checked again. All writes and their audit rows are one transaction.
  */
 export async function changeSeats(
   db: Db,
@@ -265,6 +295,7 @@ export async function changeSeats(
     reason: string;
     actor: StaffActor;
   },
+  deps: StaffDeps = {},
 ): Promise<{ eventsSynced: number; sessions: SessionMove[] }> {
   const reason = requireReason(input.reason);
   const meta = audit(input.actor, reason);
@@ -295,6 +326,7 @@ export async function changeSeats(
           ),
         );
       for (const seat of active) {
+        if (alreadyOpen(seat, change, day)) continue;
         if (seat.validFrom >= day) {
           throw new Error(
             `driver ${change.driverId}'s race seat starts on or after ${day}; changing a future seat is not supported`,
@@ -322,6 +354,18 @@ export async function changeSeats(
           `a new seat for driver ${change.driverId} needs a car number`,
         );
       }
+      const [open] = await tx
+        .select()
+        .from(seatAssignments)
+        .where(
+          and(
+            eq(seatAssignments.seasonId, from.seasonId),
+            eq(seatAssignments.driverId, change.driverId),
+            eq(seatAssignments.role, "race"),
+            eq(seatAssignments.validFrom, day),
+          ),
+        );
+      if (open && alreadyOpen(open, change, day)) continue;
       const seat = {
         id: newId(),
         seasonId: from.seasonId,
@@ -369,6 +413,6 @@ export async function changeSeats(
 
   return {
     eventsSynced,
-    sessions: await revalidateEvent(db, now, input.fromEventId),
+    sessions: await revalidateEvent(db, now, input.fromEventId, deps),
   };
 }

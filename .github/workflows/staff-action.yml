@@ -79,5 +79,6 @@ jobs:
           STAFF_CHANGE: ${{ inputs.change }}
           STAFF_REASON: ${{ inputs.reason }}
           STAFF_DRY_RUN: ${{ inputs.dry_run }}
-          STAFF_ACTOR: ${{ github.actor }}
-          STAFF_REQUEST_ID: gh-run:${{ github.run_id }}
+          # Whoever started this attempt (a re-run can be someone else).
+          STAFF_ACTOR: ${{ github.triggering_actor }}
+          STAFF_REQUEST_ID: gh-run:${{ github.run_id }}/${{ github.run_attempt }}
