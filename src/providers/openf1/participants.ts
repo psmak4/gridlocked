@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   circuits,
   drivers,
+  eventEntries,
   events,
   providerIds,
   seatAssignments,
@@ -161,9 +162,11 @@ interface Seat {
  * Replaces the session's participants with OpenF1's rows, in one transaction
  * (provider `openf1`, from the stored snapshot).
  *
- * The seats only identify the driver: a row is matched by car number through
- * the seats active on the session's date (race or reserve), unless the seat's
- * driver code disagrees with the acronym; then by `name_acronym` =
+ * The entries and seats only identify the driver: a row is matched by car
+ * number through the event's entries first (so a substitute staff entered for
+ * the event is known even with no seat or code), then through the seats
+ * active on the session's date (race or reserve), unless the driver's code
+ * disagrees with the acronym; then by `name_acronym` =
  * `drivers.code`, which maps only a driver with a seat this season. The
  * constructor comes from OpenF1's `team_name` through the static `OPENF1_TEAMS`
  * map, so a car shown in another team's colors reaches the roster check as a
@@ -225,6 +228,23 @@ export async function storeParticipants(
       seatsByNumber.set(seat.carNumber, [
         ...(seatsByNumber.get(seat.carNumber) ?? []),
         seat,
+      ]);
+    }
+
+    // The event's entries, by car number: a staff-entered substitute first.
+    const entriesByNumber = new Map<number, Seat[]>();
+    for (const entry of await tx
+      .select({
+        driverId: eventEntries.driverId,
+        carNumber: eventEntries.carNumber,
+        code: drivers.code,
+      })
+      .from(eventEntries)
+      .innerJoin(drivers, eq(drivers.id, eventEntries.driverId))
+      .where(eq(eventEntries.eventId, ctx.eventId))) {
+      entriesByNumber.set(entry.carNumber, [
+        ...(entriesByNumber.get(entry.carNumber) ?? []),
+        entry,
       ]);
     }
 
@@ -292,12 +312,19 @@ export async function storeParticipants(
       });
 
     for (const row of rows) {
-      const bySeat = (seatsByNumber.get(row.driverNumber) ?? []).find(
-        (s) => !s.code || !row.acronym || s.code === row.acronym,
-      );
+      // By car number, entries before seats. A driver whose code is the
+      // acronym wins over one with no code to compare, so an entered driver
+      // with no code cannot take over a known driver's number.
+      const byNumber = [
+        ...(entriesByNumber.get(row.driverNumber) ?? []),
+        ...(seatsByNumber.get(row.driverNumber) ?? []),
+      ];
+      const numbered =
+        byNumber.find((s) => row.acronym && s.code === row.acronym) ??
+        byNumber.find((s) => !s.code || !row.acronym);
       const candidates = byCode.get(row.acronym) ?? [];
       const driverId =
-        bySeat?.driverId ??
+        numbered?.driverId ??
         (candidates.length === 1 ? candidates[0] : undefined);
       if (!driverId) {
         await unknown(

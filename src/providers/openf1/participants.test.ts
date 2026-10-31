@@ -340,6 +340,54 @@ describe("storeParticipants", () => {
     });
   });
 
+  it("a substitute entered for the event is matched by the entry's car number", async () => {
+    // Mexico City 2026: Hirakawa had no seat and no driver code.
+    const fp2 = await sessionIdFor(t.db, 13, "fp2");
+    const eventId = await seedEntriesFor(t.db, fp2);
+    const hirakawa = newId();
+    await t.db.insert(drivers).values({
+      id: hirakawa,
+      slug: "hirakawa",
+      givenName: "Ryo",
+      familyName: "Hirakawa",
+      code: null,
+      nationality: "Japanese",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const [haas] = await t.db
+      .select({ id: providerIds.entityId })
+      .from(providerIds)
+      .where(
+        and(
+          eq(providerIds.provider, "jolpica"),
+          eq(providerIds.entityType, "constructor"),
+          eq(providerIds.providerKey, "haas"),
+        ),
+      );
+    await t.db.insert(eventEntries).values({
+      eventId,
+      driverId: hirakawa,
+      constructorId: haas!.id,
+      carNumber: 99,
+      source: "admin",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const body = load("drivers-r13-fp2.json");
+    const haasRow = body.find((r) => OPENF1_TEAMS[r.team_name] === "haas")!;
+    body.push({
+      ...haasRow,
+      driver_number: 99,
+      name_acronym: "HIR",
+    });
+    await store(fp2, body);
+    const map = await participants(fp2);
+    expect(map.size).toBe(23);
+    expect(map.get("hirakawa")).toBe(map.get("bearman"));
+    expect(await items()).toEqual([]);
+  });
+
   it("does not map a lone acronym match that has no seat this season", async () => {
     const fp2 = await sessionIdFor(t.db, 13, "fp2");
     await t.db.insert(drivers).values({

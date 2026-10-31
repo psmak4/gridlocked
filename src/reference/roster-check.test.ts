@@ -166,10 +166,43 @@ describe("rosterCheck", () => {
     });
   });
 
-  it("does not flag a driver who ran in one of FP2 and FP3", async () => {
+  it("a driver absent from FP2 but present in FP3 is not missing", async () => {
     const stroll = await idFor(t.db, "driver", "stroll");
     await participate(fp2, { skip: [stroll] });
     await participate(fp3);
+    expect(await rosterCheck(t.db, NOW, eventId)).toEqual([]);
+  });
+
+  it("a driver who ran FP2 but not FP3 is missing", async () => {
+    // Mexico City 2026: Ocon ran FP2, then Hirakawa took his car from FP3.
+    const stroll = await idFor(t.db, "driver", "stroll");
+    await participate(fp2);
+    await participate(fp3, { skip: [stroll] });
+    const problems = await rosterCheck(t.db, NOW, eventId);
+    expect(problems).toEqual([
+      expect.objectContaining({
+        kind: "missing_driver",
+        details: expect.objectContaining({ driverId: stroll }),
+      }),
+    ]);
+  });
+
+  it("after a recorded substitution, the replaced driver is not missing", async () => {
+    // Hadjar has no race seat at round 13; he stands in for Stroll from FP3.
+    const stroll = await idFor(t.db, "driver", "stroll");
+    const hadjar = await idFor(t.db, "driver", "hadjar");
+    const aston = await idFor(t.db, "constructor", "aston_martin");
+    await t.db.insert(eventEntries).values({
+      eventId,
+      driverId: hadjar,
+      constructorId: aston,
+      carNumber: 6,
+      source: "admin",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await participate(fp2, { skip: [hadjar] });
+    await participate(fp3, { skip: [stroll] });
     expect(await rosterCheck(t.db, NOW, eventId)).toEqual([]);
   });
 

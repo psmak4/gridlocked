@@ -6,6 +6,8 @@ import {
   sessions,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { getSetting } from "@/settings";
+import { absentEntrants } from "./expected-cars";
 import { reconcileWarnings, type Finding } from "./review";
 
 /** A roster finding. The same shape the results validator reports. */
@@ -24,8 +26,10 @@ const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  * on the same finding stands, and a finding that is gone is resolved):
  * - `team_change`: a participant whose constructor differs from their entry,
  *   or who has no entry at all (a possible substitute);
- * - `missing_driver`: an entered driver absent from every one of FP2 and FP3
- *   that has participants.
+ * - `missing_driver`: an entered driver absent from the latest of FP2 and FP3
+ *   that has participants, when his team is short of a car there. A driver
+ *   who ran FP2 and then gave his car to a substitute is missing; the
+ *   replaced driver is not, once the substitute has an entry (DM 1.9).
  * FP1 opens nothing: young-driver runs would be false positives. A session
  * with no participants yet is not judged. Reads only our tables. Returns every
  * finding, new or already open.
@@ -103,14 +107,15 @@ export async function rosterCheck(
     }
   }
 
-  if (judged.length > 0) {
-    const ran = new Set(
-      judged.flatMap((j) => j.participants.map((p) => p.driverId)),
-    );
+  const latest = judged.at(-1);
+  if (latest) {
+    const { carsPerConstructor } = await getSetting(db, "validator_thresholds");
+    const ran = new Set(latest.participants.map((p) => p.driverId));
+    const missing = new Set(absentEntrants(entries, ran, carsPerConstructor));
     for (const entry of [...entries].sort((a, b) =>
       byText(a.driverId, b.driverId),
     )) {
-      if (ran.has(entry.driverId)) continue;
+      if (!missing.has(entry.driverId)) continue;
       problems.push({
         problem: {
           kind: "missing_driver",
