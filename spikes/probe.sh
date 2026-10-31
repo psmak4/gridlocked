@@ -40,6 +40,18 @@ echo "-- chat window w=$W: 30 parallel requests in $((end - start)) s; one respo
 echo "   cache hits among the 30: $(cat "$TMP"/hc[0-9]* | grep -ciE '^(cf-cache-status|x-vercel-cache): *(hit|stale)|^cache-status:.*; *hit' || true)"
 echo "   then: select count(*) from spike_hits where path like '%w=$W'   (expected 1)"
 
+# The same 30, spread over the 3 s window (one every 100 ms), as refreshes
+# actually arrive.
+W2="probe-$RANDOM$RANDOM"
+for _ in $(seq 30); do
+  curl -s -o /dev/null -D "$TMP/hs$RANDOM$RANDOM" "$BASE/api/threads/1/latest?w=$W2" &
+  sleep 0.1
+done
+wait
+echo "-- chat window w=$W2: 30 requests staggered over 3 s"
+echo "   cache hits among the 30: $(cat "$TMP"/hs* | grep -ciE '^(cf-cache-status|x-vercel-cache): *(hit|stale)|^cache-status:.*; *hit' || true)"
+echo "   then: select count(*) from spike_hits where path like '%w=$W2'"
+
 EMAIL="probe-$RANDOM$RANDOM@example.test"
 BODY="{\"email\":\"$EMAIL\",\"password\":\"spike-password-1\",\"name\":\"probe\"}"
 code=$(curl -s -o /dev/null -D "$TMP/su" -w '%{http_code} %{time_total}' -c "$JAR" \
