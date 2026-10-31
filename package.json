@@ -21,6 +21,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:staging": "pnpm db:migrate",
     "import:2026": "tsx scripts/import-2026.ts",
+    "staff": "tsx scripts/staff.ts",
     "e2e": "playwright test"
   },
   "dependencies": {

@@ -67,6 +67,26 @@ The same scripts work from a shell with a database URL in the environment:
 (`--dry-run` imports into an in-memory database and needs no URL). Never put
 a connection string or API key in a file or a commit.
 
+### Staff actions (roster changes)
+
+Until the staff screens (M8), a driver swap is recorded with `pnpm staff`
+(`scripts/staff.ts`), on staging through the manual **Staff action**
+workflow (`.github/workflows/staff-action.yml`):
+
+- `substitute`: one event only. The substitute gets an admin entry, and the
+  replaced driver is marked unavailable.
+- `seats`: from an event onward. Race seats close and open.
+
+Each write goes to `audit_log` with the reason and the GitHub login of
+whoever ran it. The event is then checked again, so a held session moves
+straight away. The workflow does a dry run unless `dry_run` is unticked:
+
+```sh
+gh workflow run staff-action.yml -f command=substitute -f event=2026/19 \
+  -f change='{"in":"ryo_hirakawa","team":"haas","car":99,"out":"ocon"}' \
+  -f reason='Hirakawa replaces Ocon from FP3'
+```
+
 ## Docs
 
 Design, planning and decisions live in [`docs/`](docs/).
