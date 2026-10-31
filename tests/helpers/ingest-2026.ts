@@ -83,6 +83,7 @@ export async function idFor(
  * A mid-weekend substitution (DM 1.9): `sub` gets an `admin` entry at
  * `constructorKey` beside the seat entries, and the recorded body is ingested
  * with `replaced`'s row driven by `sub`. Both drivers then have entries.
+ * With `enter: false` there is no entry for `sub`: the swap nobody recorded.
  */
 export async function ingestWithSubstitute(
   db: Db,
@@ -90,19 +91,26 @@ export async function ingestWithSubstitute(
   round: number,
   kind: SessionKind,
   file: string,
-  swap: { replaced: string; sub: string; constructorKey: string; car: number },
+  swap: {
+    replaced: string;
+    sub: string;
+    constructorKey: string;
+    car: number;
+    enter?: boolean;
+  },
 ) {
   const sessionId = await sessionIdFor(db, round, kind);
   const eventId = await seedEntriesFor(db, sessionId);
-  await db.insert(eventEntries).values({
-    eventId,
-    driverId: await idFor(db, "driver", swap.sub),
-    constructorId: await idFor(db, "constructor", swap.constructorKey),
-    carNumber: swap.car,
-    source: "admin",
-    createdAt: now,
-    updatedAt: now,
-  });
+  if (swap.enter !== false)
+    await db.insert(eventEntries).values({
+      eventId,
+      driverId: await idFor(db, "driver", swap.sub),
+      constructorId: await idFor(db, "constructor", swap.constructorKey),
+      carNumber: swap.car,
+      source: "admin",
+      createdAt: now,
+      updatedAt: now,
+    });
   const body = loadBody(`jolpica/2026/${file}`);
   const rows =
     kind === "qualifying"
