@@ -3,7 +3,7 @@ import { z } from "zod";
 import { providerIds } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { changeSeats, recordSubstitution, type StaffActor } from "./roster";
-import type { SessionMove } from "./revalidate";
+import type { SessionMove, StaffDeps } from "./revalidate";
 
 // `pnpm staff` (scripts/staff.ts): the staff roster actions from the command
 // line, until M8's screens. Everything but the command comes from the
@@ -178,6 +178,7 @@ export async function runStaffCommand(
   db: Db,
   now: Date,
   cmd: StaffCommand,
+  deps: StaffDeps = {},
 ): Promise<StaffRunReport> {
   const eventId = await resolve(db, "event", cmd.event);
   if (cmd.command === "substitute") {
@@ -191,11 +192,16 @@ export async function runStaffCommand(
         : null,
     };
     if (cmd.dryRun) return { dryRun: true, command: cmd.command, resolved };
-    const result = await recordSubstitution(db, now, {
-      ...resolved,
-      reason: cmd.reason,
-      actor: cmd.actor,
-    });
+    const result = await recordSubstitution(
+      db,
+      now,
+      {
+        ...resolved,
+        reason: cmd.reason,
+        actor: cmd.actor,
+      },
+      deps,
+    );
     return { dryRun: false, command: cmd.command, resolved, ...result };
   }
 
@@ -209,10 +215,15 @@ export async function runStaffCommand(
   }
   const resolved = { fromEventId: eventId, changes };
   if (cmd.dryRun) return { dryRun: true, command: cmd.command, resolved };
-  const result = await changeSeats(db, now, {
-    ...resolved,
-    reason: cmd.reason,
-    actor: cmd.actor,
-  });
+  const result = await changeSeats(
+    db,
+    now,
+    {
+      ...resolved,
+      reason: cmd.reason,
+      actor: cmd.actor,
+    },
+    deps,
+  );
   return { dryRun: false, command: cmd.command, resolved, ...result };
 }

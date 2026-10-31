@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   circuits,
@@ -6,6 +6,8 @@ import {
   eventEntries,
   events,
   providerIds,
+  rawSnapshots,
+  reviewItems,
   seatAssignments,
   sessionParticipants,
   sessions,
@@ -347,6 +349,23 @@ export async function storeParticipants(
       if (!stored.has(driverId)) {
         stored.set(driverId, { driverId, constructorId });
       }
+      // A car we could not place before (no entry yet) is known now.
+      await tx
+        .update(reviewItems)
+        .set({
+          status: "resolved",
+          resolution: "auto: no longer detected",
+          resolvedAt: now,
+        })
+        .where(
+          and(
+            eq(
+              reviewItems.dedupeKey,
+              `openf1_unknown:${sessionId}:${row.driverNumber}`,
+            ),
+            eq(reviewItems.status, "open"),
+          ),
+        );
     }
 
     await tx
@@ -364,4 +383,37 @@ export async function storeParticipants(
       );
     }
   });
+}
+
+/**
+ * Stores the session's participants again from its latest stored OpenF1
+ * `drivers` answer, with no fetch. Staff call it after entering a substitute,
+ * so a car left out because nobody was entered for it is matched now and the
+ * roster check sees the real line-up. Does nothing if nothing is stored.
+ */
+export async function rematchParticipants(
+  db: Db,
+  now: Date,
+  sessionId: string,
+): Promise<void> {
+  const [latest] = await db
+    .select({ id: rawSnapshots.id, body: rawSnapshots.body })
+    .from(rawSnapshots)
+    .where(
+      and(
+        eq(rawSnapshots.provider, PROVIDER),
+        eq(rawSnapshots.endpoint, "/drivers"),
+        eq(rawSnapshots.sessionId, sessionId),
+      ),
+    )
+    .orderBy(desc(rawSnapshots.lastSeenAt))
+    .limit(1);
+  if (!latest) return;
+  await storeParticipants(
+    db,
+    now,
+    sessionId,
+    latest.id,
+    parseOpenF1Drivers(latest.body),
+  );
 }

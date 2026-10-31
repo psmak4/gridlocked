@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
+  loadOpenF1Drivers,
+  rematchParticipants,
+  storeOpenF1Participants,
+} from "../../tests/helpers/openf1-2026";
+import { sessionIdFor } from "../../tests/helpers/results-2026";
+import {
   idFor,
   ingestWithSubstitute,
   seedWorldWithSeats,
@@ -9,6 +15,7 @@ import {
 import {
   auditLog,
   driverAvailability,
+  drivers,
   eventEntries,
   events,
   reviewItems,
@@ -17,6 +24,7 @@ import {
 } from "@/db/schema";
 import { advanceStatus } from "@/results/status";
 import { syncEventEntries } from "@/reference/sync-event-entries";
+import { newId } from "@/lib/ids";
 import { changeSeats, recordSubstitution, type StaffActor } from "./roster";
 
 const T0 = new Date("2026-10-04T08:00:00.000Z");
@@ -225,6 +233,69 @@ describe("staff roster actions", () => {
       });
     });
 
+    it("recorded after FP3's participants are stored, the swap leaves no roster warning", async () => {
+      // The Mexico timeline: FP3 ran with the reserve, who has no seat and no
+      // code, so his row was left out; staff record the swap afterwards.
+      const fp2 = await sessionIdFor(t.db, 13, "fp2");
+      const fp3 = await sessionIdFor(t.db, 13, "fp3");
+      const [r13] = await t.db
+        .select()
+        .from(events)
+        .where(eq(events.round, 13));
+      const eventId = r13!.id;
+      await syncEventEntries(t.db, eventId, T0);
+      const reserve = newId();
+      await t.db.insert(drivers).values({
+        id: reserve,
+        slug: "reserve",
+        givenName: "Re",
+        familyName: "Serve",
+        code: null,
+        nationality: "n/a",
+        createdAt: T0,
+        updatedAt: T0,
+      });
+      await storeOpenF1Participants(
+        t.db,
+        T0,
+        fp2,
+        loadOpenF1Drivers("drivers-r13-fp2.json"),
+      );
+      const fp3Body = loadOpenF1Drivers("drivers-r13-fp3.json");
+      const strollRow = fp3Body.find((r) => r.name_acronym === "STR")!;
+      strollRow.driver_number = 99;
+      strollRow.name_acronym = "RES";
+      await storeOpenF1Participants(t.db, T0, fp3, fp3Body);
+
+      const open = () =>
+        t.db
+          .select({ kind: reviewItems.kind })
+          .from(reviewItems)
+          .where(
+            and(
+              eq(reviewItems.eventId, eventId),
+              eq(reviewItems.status, "open"),
+            ),
+          );
+      expect((await open()).map((i) => i.kind)).toEqual(["unknown_driver"]);
+
+      await recordSubstitution(
+        t.db,
+        T1,
+        {
+          eventId,
+          inDriverId: reserve,
+          constructorId: await idFor(t.db, "constructor", "aston_martin"),
+          carNumber: 99,
+          outDriverId: await idFor(t.db, "driver", "stroll"),
+          reason: REASON,
+          actor: ACTOR,
+        },
+        { rematchParticipants },
+      );
+      expect(await open()).toEqual([]);
+    });
+
     it.each([
       ["a blank reason", { reason: "  " }, /reason/],
       [
@@ -303,6 +374,26 @@ describe("staff roster actions", () => {
         "seat_assignment.close",
         "seat_assignment.open",
       ]);
+    });
+
+    it("running it twice changes nothing and writes no second audit row", async () => {
+      const tsunoda = await idFor(t.db, "driver", "tsunoda");
+      const ocon = await idFor(t.db, "driver", "ocon");
+      const haas = await idFor(t.db, "constructor", "haas");
+      const input = {
+        fromEventId: (await round(20)).id,
+        changes: [
+          { driverId: ocon, constructorId: null },
+          { driverId: tsunoda, constructorId: haas, carNumber: 22 },
+        ],
+        reason: "Tsunoda replaces Ocon from Brazil",
+        actor: ACTOR,
+      };
+      await changeSeats(t.db, T1, input);
+      const seats = await t.db.select().from(seatAssignments);
+      await changeSeats(t.db, T2, input);
+      expect(await t.db.select().from(seatAssignments)).toEqual(seats);
+      expect(await audits()).toHaveLength(2);
     });
 
     it("refuses a seat that starts on or after the from date", async () => {
