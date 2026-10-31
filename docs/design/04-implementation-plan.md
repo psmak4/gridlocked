@@ -128,13 +128,14 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Goal:** the app runs on TanStack Start with every M0–M2 guard rail intact, before M3 adds screens that would make the move bigger (HLD decision 3, §11.5).
 - **Scope:**
   - convert the app, with the unmerged `spike/framework-start` branch as the reference (16 files there);
-  - pinned versions of Start, Router, Vite and Nitro; shadcn/ui on Base UI;
+  - pinned versions of Start, Router, Vite and Nitro;
   - restore the lint rules `eslint-config-next` provided: typescript-eslint, react-hooks, eslint-plugin-react and jsx-a11y;
   - port the Playwright e2e (client bundles move from `/_next/static/` to `/assets/`);
-  - the response rules from HLD §11.4: `private, no-store` on errors, `useSecureCookies` once Better Auth arrives (M5), controls disabled until hydrated;
+  - `private, no-store` on every error response (HLD §11.4). The sign-in and hydration rules arrive with sign-in in M5;
   - the scheduler (`neon.ts`, `src/jobs`, `src/providers`, `src/db`) stays untouched.
 - **Exit:** CI green on the converted app, with the full test suite and e2e passing, and the staging scheduler deploy unchanged.
-- **Approval needed:** none. No cloud resources.
+- **Approval needed:** no cloud resources; one manual staging deploy after the Mexico City weekend, to check the scheduler still deploys.
+- **Plan:** [plans/M2.5-tanstack-start.md](../plans/M2.5-tanstack-start.md).
 
 ### M3 — Fantasy core (target 11 Dec)
 - **Goal:** teams can be built, locked and changed exactly by the rules.
@@ -179,6 +180,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Goal:** people can sign up safely, and staff accounts are secured.
 - **Scope (DM Part 6, UI wave 4 sign-up):**
   - Better Auth self-hosted, with the table renames, `advanced.useSecureCookies: true` and `private, no-store` on every `/api/auth/*` response (HLD §11.4);
+  - shadcn/ui set up on Base UI (HLD §11.5) for the first components, with server-rendered controls disabled until hydrated (HLD §11.4);
   - email + password, magic link and Discord sign-in;
   - Turnstile;
   - the age confirmation and legal acceptances;
