@@ -92,6 +92,7 @@ From this Mac to the us-east hosts. Cold means the first request after 16 idle m
 | Chat: origin hits per 30 requests over 3 s | **3** | 20 | 30 | 30 |
 | CPU for sign-up / sign-in | not metered (Node, ~50 ms locally) | same | **87–151 / 106–160 ms**, against 10 ms, but all 200 | not metered |
 | Signed-in `/me` | `private, no-store`, never cached | same | same | same |
+| Auth POSTs (`Set-Cookie`) | `public, max-age=0, must-revalidate`; MISS | `no-cache`; not cached | no `Cache-Control` | no `Cache-Control` |
 | Logged-out page fetched with a session cookie | cache HIT (correct: same page for everyone, no `Set-Cookie`) | cache HIT | no cache in front | no CDN |
 | Session cookie | `__Secure-…; HttpOnly; Secure; SameSite=Lax` on all four, after the fix below | | | |
 | Sign up, sign in, pick, sign out (Playwright) | pass | pass | pass | pass |
@@ -101,6 +102,7 @@ From this Mac to the us-east hosts. Cold means the first request after 16 idle m
 - **The session cookie had no `Secure` flag on any host.** When the base URL is derived from the request, Better Auth decides `Secure` from `NODE_ENV`. The fix is `advanced: { useSecureCookies: true }`, with a test that failed first. The real app must keep it.
 - **On slower hosts the first pick click did nothing.** It landed before hydration. The pick buttons now stay disabled until the user's picks have loaded. The real app needs the same rule for every server-rendered control.
 - **Route `headers()` also apply to error responses** (from Task 3). A 500 went out marked `public, s-maxage=60, stale-while-revalidate=300`. Vercel doesn't cache a 5xx, but other CDNs do. The real app must send `no-store` on errors.
+- **Not fixed: auth responses don't say `private, no-store`.** Better Auth's handler sets no `Cache-Control`. The hosts added `public, max-age=0, must-revalidate` (Vercel) or `no-cache` (Netlify). Nothing was cached (they were POSTs, and Vercel never caches `Set-Cookie`), but the plan expected `private, no-store` on every `Set-Cookie` response. The real `/api/auth/$` route should add it.
 - One thing not explained: for about 2 minutes after a Vercel redeploy, the bare `/results/18` URL returned 500 straight from the function (`x-vercel-cache: MISS`) while a cache-busted URL returned 200. Then it cleared.
 
 **Traps for the runbook:**
@@ -161,7 +163,7 @@ The same commit ran on four hosts with only a build-preset change. Next.js runs 
 - **HLD §11.4 correction:**
   - The chat refresh costs a Vercel **CDN request** every time, even when cached. 2,400 requests per person per race counts against Hobby's 1M CDN requests a month, so chat mode fits about 50 people, not 500.
   - The "about 2,400 invocations" figure holds only for refreshes spread across the window. Simultaneous requests are not collapsed (29 of 30 reached the app).
-  - Add: error responses `no-store`; Better Auth `useSecureCookies: true`; server-rendered controls disabled until hydrated.
+  - Add: error responses and every `/api/auth/*` response `private, no-store`; Better Auth `useSecureCookies: true`; server-rendered controls disabled until hydrated.
 - **HLD §11.3:** add the measured rows, and Netlify's team-wide pause.
 - **Decision 19:** unchanged. No host made live chat cheap at launch. Workers Paid with Durable Objects could, if Workers is ever chosen.
 - **Roadmap:**
