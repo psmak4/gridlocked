@@ -1,0 +1,83 @@
+name: Staff action (staging)
+
+# Manual only: a staff roster action on the Neon project `gridlocked-staging`,
+# branch `main`, until M8's screens (`pnpm staff`, src/staff/roster.ts).
+# - substitute: one event only. change = {"in": "<driver>", "team": "<team>",
+#   "car": <n>, "out": "<driver>" | null}
+# - seats: from an event onward. change = [{"driver": "<driver>",
+#   "team": "<team>" | null, "car": <n>}]
+# Keys are Jolpica's (`ocon`, `haas`); event is `season/round`. A dry run by
+# default. Every write is audited with the reason and the login of whoever
+# started the run. Run the deploy first: this does not migrate.
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: The action
+        type: choice
+        options: [substitute, seats]
+      event:
+        description: Event as season/round, e.g. 2026/19
+        type: string
+        required: true
+      change:
+        description: The change, as JSON (see the top of this workflow)
+        type: string
+        required: true
+      reason:
+        description: Why (stored in the audit log)
+        type: string
+        required: true
+      dry_run:
+        description: Only resolve the keys and show what would change
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Never alongside a deploy: a staff write must not race the migrations.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  staff:
+    # Only the reviewed code on main touches staging, whatever ref was picked.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Holds DATABASE_URL_STAGING.
+    environment: staging
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Must come before setup-node so `cache: pnpm` can find the pnpm binary.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Inputs reach the script only through the environment, never the
+      # command line, so no input can become shell code.
+      - name: Run the staff action
+        run: pnpm staff "$STAFF_COMMAND"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          STAFF_COMMAND: ${{ inputs.command }}
+          STAFF_EVENT: ${{ inputs.event }}
+          STAFF_CHANGE: ${{ inputs.change }}
+          STAFF_REASON: ${{ inputs.reason }}
+          STAFF_DRY_RUN: ${{ inputs.dry_run }}
+          STAFF_ACTOR: ${{ github.actor }}
+          STAFF_REQUEST_ID: gh-run:${{ github.run_id }}
