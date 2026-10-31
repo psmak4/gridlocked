@@ -5,6 +5,8 @@ import { defineConfig } from "vitest/config";
 // "unit" project.
 const dbTests = [
   "src/db/**/*.test.{ts,tsx}",
+  "src/audit/**/*.test.{ts,tsx}",
+  "src/staff/**/*.test.{ts,tsx}",
   "src/jobs/**/*.test.{ts,tsx}",
   "src/settings/**/*.test.{ts,tsx}",
   "src/reference/**/*.test.{ts,tsx}",

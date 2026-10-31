@@ -57,6 +57,20 @@
       "when": 1793198742781,
       "tag": "0007_greedy_sleepwalker",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793471392833,
+      "tag": "0008_flat_proudstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793471394798,
+      "tag": "0009_audit_log_append_only",
+      "breakpoints": true
     }
   ]
 }
