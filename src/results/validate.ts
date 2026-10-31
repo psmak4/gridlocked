@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { effectiveResults, eventEntries } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { absentEntrants, expectedCars } from "@/reference/expected-cars";
 import { getSetting } from "@/settings";
 import { getSessionContext } from "./session-context";
 import type { SessionKind } from "./types";
@@ -22,7 +23,7 @@ export const SCORED_KINDS: readonly SessionKind[] = [
 ];
 
 export type ProblemKind =
-  /** Fewer rows than entries: the results are not all out yet. Not a failure. */
+  /** Fewer rows than expected cars: the results are not all out yet. Not a failure. */
   | "incomplete"
   | "no_event_entries"
   | "unknown_driver"
@@ -56,9 +57,11 @@ const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * The HLD §4.4 checks for one session, on its effective rows:
- * - every expected entry is accounted for (fewer rows than entries is
- *   `incomplete`, not a failure; once the count is met an absent entry is a
- *   `missing_driver`);
+ * - every expected car is accounted for. A team is expected to run
+ *   `min(its entries, carsPerConstructor)` cars, because a mid-weekend
+ *   substitute and the driver he replaces both have entries (DM 1.9). Fewer
+ *   rows than expected cars is `incomplete`, not a failure; once the count is
+ *   met, the absent entrants of a team short of a car are `missing_driver`;
  * - no driver or constructor the event does not list, and every
  *   driver-constructor pair is in `event_entries` (`unknown_driver`,
  *   `unknown_constructor`, `team_change`: HLD §8.2);
@@ -89,7 +92,8 @@ export async function validateSession(
 
   // Rows still to come can fill a gap in the order, so it is judged only
   // once the count is met.
-  const incomplete = entries.length > 0 && rows.length < entries.length;
+  const carsExpected = expectedCars(entries, carsPerConstructor);
+  const incomplete = entries.length > 0 && rows.length < carsExpected;
   const problems: Problem[] = [];
   const add = (
     kind: ProblemKind,
@@ -104,16 +108,13 @@ export async function validateSession(
     const entryByDriver = new Map(entries.map((e) => [e.driverId, e]));
     const entryConstructors = new Set(entries.map((e) => e.constructorId));
     const present = new Set(rows.map((r) => r.driverId));
-    const absent = entries
-      .map((e) => e.driverId)
-      .filter((id) => !present.has(id))
-      .sort(byText);
+    const absent = absentEntrants(entries, present, carsPerConstructor);
 
     if (incomplete) {
       add(
         "incomplete",
         {
-          expected: entries.length,
+          expected: carsExpected,
           actual: rows.length,
           missingDriverIds: absent,
         },

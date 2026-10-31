@@ -5,6 +5,7 @@ import {
   idFor,
   ingest,
   ingestRecorded,
+  ingestWithSubstitute,
   seedEntriesFor,
   seedWorldWithSeats,
 } from "../../tests/helpers/ingest-2026";
@@ -301,6 +302,57 @@ describe("advanceStatus", () => {
       });
       expect((await advanceStatus(t.db, T1, id)).next).toBe("awaiting");
       expect(await items(id)).toEqual([]);
+    });
+  });
+
+  describe("a mid-weekend substitute (DM 1.9)", () => {
+    const swap = {
+      replaced: "ocon",
+      sub: "tsunoda",
+      constructorKey: "haas",
+      car: 22,
+    };
+
+    it("a substitute's session advances to provisional", async () => {
+      const { sessionId } = await ingestWithSubstitute(
+        t.db,
+        T0,
+        18,
+        "race",
+        "r18-results.json",
+        swap,
+      );
+      const advance = await advanceStatus(t.db, T1, sessionId);
+      expect(advance.next).toBe("provisional");
+      expect(await items(sessionId)).toEqual([]);
+    });
+
+    it("a provisional substitute session that loses the substitute's row opens missing_driver for that team only", async () => {
+      const { sessionId } = await ingestWithSubstitute(
+        t.db,
+        T0,
+        18,
+        "race",
+        "r18-results.json",
+        swap,
+      );
+      await advanceStatus(t.db, T1, sessionId);
+      const tsunoda = await idFor(t.db, "driver", "tsunoda");
+      await addOverride(t.db, T2, {
+        sessionId,
+        driverId: tsunoda,
+        kind: "suppress",
+        reason: "drop the substitute",
+        createdBy: ADMIN,
+      });
+      const advance = await advanceStatus(t.db, T3, sessionId);
+      expect(advance.next).toBe("under_review");
+      const ocon = await idFor(t.db, "driver", "ocon");
+      const missing = (await items(sessionId))
+        .filter((i) => i.kind === "missing_driver")
+        .map((i) => i.driverId)
+        .sort();
+      expect(missing).toEqual([ocon, tsunoda].sort());
     });
   });
 
