@@ -1,12 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
   idFor,
+  ingest,
   ingestWithSubstitute,
+  seedEntriesFor,
   seedWorldWithSeats,
 } from "../../tests/helpers/ingest-2026";
-import { auditLog, eventEntries } from "@/db/schema";
+import {
+  loadBody,
+  rowsOf,
+  sessionIdFor,
+} from "../../tests/helpers/results-2026";
+import {
+  auditLog,
+  effectiveResults,
+  eventEntries,
+  resultOverrides,
+  reviewItems,
+} from "@/db/schema";
 import { advanceStatus } from "@/results/status";
 import { parseStaffEnv, runStaffCommand } from "./cli";
 
@@ -160,5 +173,188 @@ describe("pnpm staff", () => {
         ],
       },
     });
+  });
+});
+
+describe("pnpm staff override", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let sessionId: string;
+  beforeEach(async () => {
+    t = await createTestDb();
+    await seedWorldWithSeats(t.db);
+    sessionId = await sessionIdFor(t.db, 18, "qualifying");
+    await seedEntriesFor(t.db, sessionId);
+    // Mexico 2026's shape: the disqualified driver keeps P8, and everyone
+    // below moves up one, so two drivers say 8 and nobody says 22.
+    const body = loadBody("jolpica/2026/r18-qualifying.json");
+    for (const r of rowsOf(body, "QualifyingResults")) {
+      const p = Number(r.position);
+      if (p > 8) r.position = String(p - 1);
+    }
+    await ingest(t.db, T0, sessionId, "qualifying", body);
+    await advanceStatus(t.db, T0, sessionId);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  const OVERRIDE = {
+    ...ENV,
+    STAFF_CHANGE: JSON.stringify({
+      session: "qualifying",
+      driver: "norris",
+      fields: { classification: "disqualified", position: null },
+    }),
+    STAFF_REASON: "Disqualified from qualifying (stewards' decision)",
+  };
+  const items = () =>
+    t.db
+      .select({ status: reviewItems.status, kind: reviewItems.kind })
+      .from(reviewItems)
+      .where(eq(reviewItems.sessionId, sessionId));
+
+  it("a dry run resolves the session and driver and writes nothing", async () => {
+    const report = await runStaffCommand(
+      t.db,
+      T1,
+      parseStaffEnv("override", { ...OVERRIDE, STAFF_DRY_RUN: "true" }),
+    );
+    expect(report).toMatchObject({
+      dryRun: true,
+      command: "override",
+      resolved: {
+        sessionId,
+        driverId: await idFor(t.db, "driver", "norris"),
+        fields: { classification: "disqualified", position: null },
+      },
+    });
+    expect(await t.db.select().from(resultOverrides)).toEqual([]);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+
+  it("a real run patches the row, audits it, and moves the session", async () => {
+    expect(await items()).toEqual([
+      { status: "open", kind: "validation_failed" },
+    ]);
+    const report = await runStaffCommand(
+      t.db,
+      T1,
+      parseStaffEnv("override", OVERRIDE),
+    );
+    expect(report).toMatchObject({
+      dryRun: false,
+      changed: true,
+      sessions: [
+        { kind: "qualifying", previous: "under_review", next: "provisional" },
+      ],
+    });
+    const norris = await idFor(t.db, "driver", "norris");
+    const [row] = await t.db
+      .select()
+      .from(effectiveResults)
+      .where(
+        and(
+          eq(effectiveResults.sessionId, sessionId),
+          eq(effectiveResults.driverId, norris),
+        ),
+      );
+    expect(row).toMatchObject({
+      classification: "disqualified",
+      position: null,
+      overridden: true,
+      overrideReason: OVERRIDE.STAFF_REASON,
+    });
+    expect(await items()).toEqual([
+      { status: "resolved", kind: "validation_failed" },
+    ]);
+    const audits = await t.db.select().from(auditLog);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      action: "result_override.create",
+      entityType: "result_override",
+      actorKind: "admin",
+      actorLabel: "psmak4",
+      requestId: "gh-run:1",
+      reason: OVERRIDE.STAFF_REASON,
+      before: null,
+      after: {
+        sessionId,
+        driverId: norris,
+        kind: "patch",
+        fields: { classification: "disqualified", position: null },
+      },
+    });
+  });
+
+  it("running it again changes nothing and writes no audit row", async () => {
+    await runStaffCommand(t.db, T1, parseStaffEnv("override", OVERRIDE));
+    const again = await runStaffCommand(
+      t.db,
+      T1,
+      parseStaffEnv("override", OVERRIDE),
+    );
+    expect(again).toMatchObject({ dryRun: false, changed: false });
+    expect(await t.db.select().from(resultOverrides)).toHaveLength(1);
+    expect(await t.db.select().from(auditLog)).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      "a field results does not have",
+      { fields: { team: "haas" } },
+      /STAFF_CHANGE/,
+    ],
+    ["no fields", { fields: {} }, /STAFF_CHANGE/],
+    ["a session kind that is not scored", { session: "fp1" }, /STAFF_CHANGE/],
+  ])("%s is refused before any write", (_, over, error) => {
+    const change = {
+      session: "qualifying",
+      driver: "norris",
+      fields: { classification: "disqualified" },
+      ...over,
+    };
+    expect(() =>
+      parseStaffEnv("override", {
+        ...OVERRIDE,
+        STAFF_CHANGE: JSON.stringify(change),
+      }),
+    ).toThrow(error);
+  });
+
+  it("a driver with no result in the session is refused before any write", async () => {
+    await expect(
+      runStaffCommand(
+        t.db,
+        T1,
+        parseStaffEnv("override", {
+          ...OVERRIDE,
+          STAFF_CHANGE: JSON.stringify({
+            session: "qualifying",
+            driver: "tsunoda",
+            fields: { classification: "disqualified" },
+          }),
+        }),
+      ),
+    ).rejects.toThrow(/no qualifying result for tsunoda|has no result/);
+    expect(await t.db.select().from(resultOverrides)).toEqual([]);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+
+  it("a session the event does not have is refused before any write", async () => {
+    await expect(
+      runStaffCommand(
+        t.db,
+        T1,
+        parseStaffEnv("override", {
+          ...OVERRIDE,
+          STAFF_CHANGE: JSON.stringify({
+            session: "sprint",
+            driver: "norris",
+            fields: { classification: "disqualified" },
+          }),
+        }),
+      ),
+    ).rejects.toThrow(/no sprint session at 2026\/18/);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
   });
 });

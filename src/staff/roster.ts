@@ -47,13 +47,13 @@ function changes(
   };
 }
 
-function requireReason(reason: string): string {
+export function requireReason(reason: string): string {
   const trimmed = reason.trim();
   if (!trimmed) throw new Error("a staff action needs a reason");
   return trimmed;
 }
 
-const audit = (actor: StaffActor, reason: string) => ({
+export const audit = (actor: StaffActor, reason: string) => ({
   actorKind: actor.kind,
   actorLabel: actor.label,
   reason,

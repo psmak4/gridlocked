@@ -1,11 +1,14 @@
 name: Staff action (staging)
 
-# Manual only: a staff roster action on the Neon project `gridlocked-staging`,
-# branch `main`, until M8's screens (`pnpm staff`, src/staff/roster.ts).
+# Manual only: a staff action on the Neon project `gridlocked-staging`, branch
+# `main`, until M8's screens (`pnpm staff`, src/staff/).
 # - substitute: one event only. change = {"in": "<driver>", "team": "<team>",
 #   "car": <n>, "out": "<driver>" | null}
 # - seats: from an event onward. change = [{"driver": "<driver>",
 #   "team": "<team>" | null, "car": <n>}]
+# - override: one driver's result in one session. change = {"session":
+#   "qualifying", "driver": "<driver>", "fields": {"classification":
+#   "disqualified", "position": null}} (fields use the results column names)
 # Keys are Jolpica's (`ocon`, `haas`); event is `season/round`. A dry run by
 # default. Every write is audited with the reason and the login of whoever
 # started the run. Run the deploy first: this does not migrate.
@@ -15,7 +18,7 @@ on:
       command:
         description: The action
         type: choice
-        options: [substitute, seats]
+        options: [substitute, seats, override]
       event:
         description: Event as season/round, e.g. 2026/19
         type: string
