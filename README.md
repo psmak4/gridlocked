@@ -67,15 +67,18 @@ The same scripts work from a shell with a database URL in the environment:
 (`--dry-run` imports into an in-memory database and needs no URL). Never put
 a connection string or API key in a file or a commit.
 
-### Staff actions (roster changes)
+### Staff actions
 
-Until the staff screens (M8), a driver swap is recorded with `pnpm staff`
-(`scripts/staff.ts`), on staging through the manual **Staff action**
-workflow (`.github/workflows/staff-action.yml`):
+Until the staff screens (M8), a driver swap or a result correction is
+recorded with `pnpm staff` (`scripts/staff.ts`), on staging through the
+manual **Staff action** workflow (`.github/workflows/staff-action.yml`):
 
 - `substitute`: one event only. The substitute gets an admin entry, and the
   replaced driver is marked unavailable.
 - `seats`: from an event onward. Race seats close and open.
+- `override`: one driver's result in one session, for provider data that is
+  wrong and stays wrong. A `patch` override sets the given `results` columns
+  over the provider row.
 
 Each write goes to `audit_log` with the reason and the GitHub login of
 whoever ran it. The event is then checked again, so a held session moves

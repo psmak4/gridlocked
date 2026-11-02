@@ -1,7 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { providerIds } from "@/db/schema";
+import { providerIds, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { resultFieldsSchema, type ResultFields } from "@/results/overrides";
+import { SCORED_KINDS } from "@/results/validate";
+import { overrideResult } from "./results";
 import { changeSeats, recordSubstitution, type StaffActor } from "./roster";
 import type { SessionMove, StaffDeps } from "./revalidate";
 
@@ -51,6 +54,13 @@ const seatsChange = z
   )
   .min(1)
   .max(10);
+const overrideChange = z.strictObject({
+  session: z.enum(SCORED_KINDS),
+  driver: key,
+  fields: resultFieldsSchema.refine((f) => Object.keys(f).length > 0, {
+    message: "fields must set at least one column",
+  }),
+});
 
 const common = {
   STAFF_EVENT: text("STAFF_EVENT").regex(
@@ -79,7 +89,25 @@ export type StaffCommand =
       reason: string;
       actor: StaffActor;
       dryRun: boolean;
+    }
+  | {
+      command: "override";
+      event: string;
+      change: {
+        session: (typeof SCORED_KINDS)[number];
+        driver: string;
+        fields: ResultFields;
+      };
+      reason: string;
+      actor: StaffActor;
+      dryRun: boolean;
     };
+
+const COMMANDS = {
+  substitute: substituteChange,
+  seats: seatsChange,
+  override: overrideChange,
+} as const;
 
 /**
  * Reads a staff command from the environment. Throws, naming the variable, on
@@ -90,16 +118,15 @@ export function parseStaffEnv(
   command: string | undefined,
   env: Record<string, string | undefined>,
 ): StaffCommand {
-  if (command !== "substitute" && command !== "seats") {
+  if (command === undefined || !Object.hasOwn(COMMANDS, command)) {
     throw new Error(
-      `unknown command ${command ?? "(none)"}: use substitute or seats`,
+      `unknown command ${command ?? "(none)"}: use ${Object.keys(COMMANDS).join(", ")}`,
     );
   }
+  const name = command as keyof typeof COMMANDS;
   const schema = z.object({
     ...common,
-    STAFF_CHANGE: json(
-      command === "substitute" ? substituteChange : seatsChange,
-    ),
+    STAFF_CHANGE: json(COMMANDS[name] as z.ZodType),
   });
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
@@ -123,17 +150,7 @@ export function parseStaffEnv(
     actor,
     dryRun: e.STAFF_DRY_RUN !== "false",
   };
-  return command === "substitute"
-    ? {
-        command,
-        ...base,
-        change: e.STAFF_CHANGE as z.infer<typeof substituteChange>,
-      }
-    : {
-        command,
-        ...base,
-        change: e.STAFF_CHANGE as z.infer<typeof seatsChange>,
-      };
+  return { command: name, ...base, change: e.STAFF_CHANGE } as StaffCommand;
 }
 
 async function resolve(
@@ -153,6 +170,27 @@ async function resolve(
     );
   if (!row) throw new Error(`no ${entityType} ${providerKey} (Jolpica key)`);
   return row.id;
+}
+
+/** The event's one session of `kind`; a sprint weekend has one of each. */
+async function sessionOf(
+  db: Db,
+  eventId: string,
+  event: string,
+  kind: (typeof SCORED_KINDS)[number],
+): Promise<string> {
+  const found = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(and(eq(sessions.eventId, eventId), eq(sessions.kind, kind)));
+  if (found.length !== 1) {
+    throw new Error(
+      found.length === 0
+        ? `no ${kind} session at ${event}`
+        : `${found.length} ${kind} sessions at ${event}`,
+    );
+  }
+  return found[0]!.id;
 }
 
 export type StaffRunReport =
@@ -200,6 +238,22 @@ export async function runStaffCommand(
         reason: cmd.reason,
         actor: cmd.actor,
       },
+      deps,
+    );
+    return { dryRun: false, command: cmd.command, resolved, ...result };
+  }
+
+  if (cmd.command === "override") {
+    const resolved = {
+      sessionId: await sessionOf(db, eventId, cmd.event, cmd.change.session),
+      driverId: await resolve(db, "driver", cmd.change.driver),
+      fields: cmd.change.fields,
+    };
+    if (cmd.dryRun) return { dryRun: true, command: cmd.command, resolved };
+    const result = await overrideResult(
+      db,
+      now,
+      { ...resolved, reason: cmd.reason, actor: cmd.actor },
       deps,
     );
     return { dryRun: false, command: cmd.command, resolved, ...result };

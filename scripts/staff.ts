@@ -1,7 +1,8 @@
 /**
- * The staff roster actions (src/staff/roster.ts) from the command line, until
- * M8's screens: a substitution for one event, or a seat change from an event
- * onward. On staging, run it through the `staff-action` workflow.
+ * The staff actions (src/staff/) from the command line, until M8's screens: a
+ * substitution for one event, a seat change from an event onward, or an
+ * override of one driver's result in one session. On staging, run it through
+ * the `staff-action` workflow.
  *
  *   STAFF_EVENT=2026/19 \
  *   STAFF_CHANGE='{"in":"ryo_hirakawa","team":"haas","car":<n>,"out":"ocon"}' \
@@ -10,6 +11,9 @@
  *
  *   STAFF_CHANGE='[{"driver":"ocon","team":null},{"driver":"x","team":"haas","car":<n>}]' \
  *   ... pnpm staff seats
+ *
+ *   STAFF_CHANGE='{"session":"qualifying","driver":"lawson","fields":{"classification":"disqualified","position":null}}' \
+ *   ... pnpm staff override
  *
  * Keys are Jolpica's. Without STAFF_DRY_RUN=false it only resolves the keys
  * and prints what it would do. It runs in system mode only: it refuses a
@@ -28,7 +32,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length !== 1) {
     throw new Error(
-      "usage: pnpm staff <substitute|seats> (inputs in STAFF_* variables)",
+      "usage: pnpm staff <substitute|seats|override> (inputs in STAFF_* variables)",
     );
   }
   const cmd = parseStaffEnv(args[0], process.env);
