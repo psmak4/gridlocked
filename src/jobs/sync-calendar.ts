@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { events, jobs, seasons, sessions } from "@/db/schema";
+import { events, games, jobs, seasons, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { planGameJobs } from "@/game/jobs";
 import { getSetting } from "@/settings";
 import { syncEventEntries } from "@/reference/sync-event-entries";
 import { republishIfEarlier, type DueStore } from "./due-times";
@@ -129,6 +130,15 @@ export function createSyncCalendarHandler(
       if (ends.length > 0 && last + settle <= now.getTime()) continue;
       await syncEventEntries(db, id, now);
       await planEventJobs(db, id);
+    }
+    // The season's games lock and open their events on the same calendar.
+    for (const { id } of await db
+      .select({ id: games.id })
+      .from(games)
+      .innerJoin(seasons, eq(seasons.id, games.seasonId))
+      .where(eq(seasons.year, season))
+      .orderBy(asc(games.id))) {
+      await planGameJobs(db, id);
     }
 
     const next = tomorrowsSyncAt(now);
