@@ -353,7 +353,7 @@ async function applyOther(
         .where(eq(events.id, run.eventOf(action.round)));
       // What the calendar sync does next, for the game.
       await planGameEvents(db, now, run.gameId);
-      await planGameJobs(db, run.gameId);
+      await planGameJobs(db, now, run.gameId);
       return;
     }
     case "completeEvent": {

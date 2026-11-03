@@ -1,4 +1,4 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
   events,
   gameEvents,
@@ -12,6 +12,7 @@ import {
   gameLockAfterKey,
   gameLockKey,
   gameLockPayload,
+  gameLockSweepKey,
   gameLockWaitKey,
   gameOpenKey,
   gameOpenPayload,
@@ -56,12 +57,21 @@ const isLockedOrLater = (status: GameEventStatus) =>
  *   event;
  * - `game_open:<game>:<event>` for every `upcoming` event after the first, at
  *   the end of the previous event's race plus the largest `finalizer_checks`
- *   delay, when that event has been finalized or is about to be.
+ *   delay, when that event has been finalized or is about to be;
+ * - `game_lock:<game>:<event>:sweep:<yyyy-mm-dd>` (the UTC day of `now`), due
+ *   at `now`, for an `open` event whose `lock_at` has passed and that has no
+ *   `game_lock` job pending, running or waiting to retry: its lock chain died
+ *   (a job dead after its last attempt is never re-queued under its own key).
+ *   The sweep is an ordinary lock job, so it picks the lock up where it was.
  *
  * An event that has locked, or been cancelled, gets nothing. Call it whenever
  * the calendar is synced.
  */
-export async function planGameJobs(db: Db, gameId: string): Promise<void> {
+export async function planGameJobs(
+  db: Db,
+  now: Date,
+  gameId: string,
+): Promise<void> {
   const calendar = await db
     .select({
       eventId: gameEvents.eventId,
@@ -106,17 +116,44 @@ export async function planGameJobs(db: Db, gameId: string): Promise<void> {
       });
       // A lock job that put itself off (or went on to a next batch) has a key
       // of its own: the pending one, whichever it is, moves with `lock_at`.
+      const ofThisLock = [
+        eq(jobs.kind, "game_lock"),
+        sql`${jobs.payload}->>'gameId' = ${gameId}`,
+        sql`${jobs.payload}->>'eventId' = ${event.eventId}`,
+      ];
       await tx
         .update(jobs)
         .set({ runAt: event.lockAt })
-        .where(
-          and(
-            eq(jobs.kind, "game_lock"),
-            eq(jobs.status, "pending"),
-            sql`${jobs.payload}->>'gameId' = ${gameId}`,
-            sql`${jobs.payload}->>'eventId' = ${event.eventId}`,
-          ),
-        );
+        .where(and(...ofThisLock, eq(jobs.status, "pending")));
+
+      // An open event past its lock with no lock job left alive (the last
+      // one died): a sweep runs the lock handler again, once a day at most.
+      if (event.status === "open" && event.lockAt.getTime() <= now.getTime()) {
+        const [alive] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(
+            and(
+              ...ofThisLock,
+              inArray(jobs.status, ["pending", "running", "failed"]),
+            ),
+          )
+          .limit(1);
+        if (!alive) {
+          const day = now.toISOString().slice(0, 10);
+          const payload: GameLockPayload = {
+            gameId,
+            eventId: event.eventId,
+            sweep: day,
+          };
+          await enqueue(tx, {
+            kind: "game_lock",
+            dedupeKey: gameLockSweepKey(gameId, event.eventId, day),
+            runAt: now,
+            payload,
+          });
+        }
+      }
 
       const previous = calendar[i - 1];
       if (event.status !== "upcoming" || !previous) continue;
@@ -185,7 +222,10 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
  *   under `…:<n>`.
  *
  * Every job that puts itself off carries its counter on (`wait`, `attempt`),
- * so a key it enqueues is never one an earlier job of the chain used.
+ * so a key it enqueues is never one an earlier job of the chain used. A lock
+ * sweep's chain carries its day on (`sweep`), so its keys are never the dead
+ * chain's either; it starts again from the first team, and a batch already
+ * written writes nothing.
  *
  * Both check the order before they write, so the database's guard on opening
  * out of order never reaches the job runtime.
@@ -195,7 +235,7 @@ export function createGameHandlers(
 ): Record<"game_lock" | "game_open", JobHandler> {
   const lock: JobHandler = async (job, ctx) => {
     const db = ctx.db as Db;
-    const { gameId, eventId, afterTeamId, wait } = gameLockPayload.parse(
+    const { gameId, eventId, afterTeamId, wait, sweep } = gameLockPayload.parse(
       job.payload,
     );
     const now = ctx.clock.now();
@@ -209,10 +249,11 @@ export function createGameHandlers(
         eventId,
         afterTeamId,
         wait: n,
+        sweep,
       };
       await enqueue(db, {
         kind: "game_lock",
-        dedupeKey: gameLockWaitKey(gameId, eventId, n),
+        dedupeKey: gameLockWaitKey(gameId, eventId, n, sweep),
         runAt,
         payload,
       });
@@ -249,10 +290,11 @@ export function createGameHandlers(
         eventId,
         afterTeamId: batch.lastTeamId,
         wait,
+        sweep,
       };
       await enqueue(db, {
         kind: "game_lock",
-        dedupeKey: gameLockAfterKey(gameId, eventId, batch.lastTeamId),
+        dedupeKey: gameLockAfterKey(gameId, eventId, batch.lastTeamId, sweep),
         runAt: now,
         payload,
       });

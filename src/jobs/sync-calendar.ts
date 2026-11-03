@@ -143,7 +143,7 @@ export function createSyncCalendarHandler(
       .where(eq(seasons.year, season))
       .orderBy(asc(games.id))) {
       await planGameEvents(db, now, id);
-      await planGameJobs(db, id);
+      await planGameJobs(db, now, id);
     }
 
     const next = tomorrowsSyncAt(now);

@@ -95,13 +95,19 @@ export const syncCalendarKey = (season: number, day: string) =>
 /**
  * `afterTeamId` continues a lock after a batch of teams. `wait` is set (1, 2,
  * ...) on a lock job that put itself off: it ran before `lock_at`, or before
- * the event could lock.
+ * the event could lock. `sweep` is the UTC day (YYYY-MM-DD) of the planning
+ * sweep that started the chain, for a lock whose own chain died; the chain's
+ * later keys carry it, so none is a key the dead chain took.
  */
 export const gameLockPayload = z.object({
   gameId: z.string().min(1),
   eventId: z.string().min(1),
   afterTeamId: z.string().min(1).optional(),
   wait: z.number().int().positive().optional(),
+  sweep: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 export type GameLockPayload = z.infer<typeof gameLockPayload>;
 
@@ -115,15 +121,34 @@ export type GameOpenPayload = z.infer<typeof gameOpenPayload>;
 
 export const gameLockKey = (gameId: string, eventId: string) =>
   `game_lock:${gameId}:${eventId}`;
+/**
+ * A lock sweep for the UTC day `day` (YYYY-MM-DD): queued by planning for an
+ * open event past its `lock_at` with no lock job left alive.
+ */
+export const gameLockSweepKey = (
+  gameId: string,
+  eventId: string,
+  day: string,
+) => `game_lock:${gameId}:${eventId}:sweep:${day}`;
+/** The chain's own key prefix: the lock's, or its sweep's for `sweep`. */
+const lockChainKey = (gameId: string, eventId: string, sweep?: string) =>
+  sweep === undefined
+    ? gameLockKey(gameId, eventId)
+    : gameLockSweepKey(gameId, eventId, sweep);
 /** The batch of a lock that starts after the given team. */
 export const gameLockAfterKey = (
   gameId: string,
   eventId: string,
   afterTeamId: string,
-) => `game_lock:${gameId}:${eventId}:after:${afterTeamId}`;
+  sweep?: string,
+) => `${lockChainKey(gameId, eventId, sweep)}:after:${afterTeamId}`;
 /** The `n`th time a lock job put itself off. */
-export const gameLockWaitKey = (gameId: string, eventId: string, n: number) =>
-  `game_lock:${gameId}:${eventId}:wait:${n}`;
+export const gameLockWaitKey = (
+  gameId: string,
+  eventId: string,
+  n: number,
+  sweep?: string,
+) => `${lockChainKey(gameId, eventId, sweep)}:wait:${n}`;
 export const gameOpenKey = (gameId: string, eventId: string) =>
   `game_open:${gameId}:${eventId}`;
 /** The `n`th re-check of an open job that was not yet time. */

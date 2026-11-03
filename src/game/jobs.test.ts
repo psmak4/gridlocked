@@ -152,7 +152,7 @@ describe("the game jobs (HLD §3.3)", () => {
   const lockStates = () => t.db.select().from(teamEventStates);
 
   it("planning puts a lock job at each event's lock_at", async () => {
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
 
     const rows = await t.db
       .select({
@@ -194,7 +194,7 @@ describe("the game jobs (HLD §3.3)", () => {
 
   it("planning skips events that have locked", async () => {
     await lockRound(t.db, gameId, round1.id);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const keys = (await gameJobs()).map((j) => j.dedupeKey);
     expect(keys).not.toContain(`game_lock:${gameId}:${round1.id}`);
     expect(keys).toContain(`game_lock:${gameId}:${round2.id}`);
@@ -202,7 +202,7 @@ describe("the game jobs (HLD §3.3)", () => {
   });
 
   it("planning again moves a job when lock_at moved", async () => {
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const before = (await gameJobs()).length;
     const moved = new Date(round2.lockAt.getTime() + 3 * HOUR);
     await t.db
@@ -210,7 +210,7 @@ describe("the game jobs (HLD §3.3)", () => {
       .set({ lockAt: moved })
       .where(eq(events.id, round2.id));
 
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const jobsNow = await gameJobs();
     expect(jobsNow).toHaveLength(before);
     expect(await jobByKey(`game_lock:${gameId}:${round2.id}`)).toMatchObject({
@@ -222,7 +222,7 @@ describe("the game jobs (HLD §3.3)", () => {
   it("a lock job that runs early because qualifying moved later reschedules and locks nothing", async () => {
     await teamWithLineup();
     await at(NOW);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const later = new Date(round1.lockAt.getTime() + 2 * HOUR);
     await t.db
       .update(events)
@@ -256,7 +256,7 @@ describe("the game jobs (HLD §3.3)", () => {
   });
 
   it("planning again moves a lock job that already put itself off, when lock_at moves earlier", async () => {
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const later = new Date(round1.lockAt.getTime() + 2 * HOUR);
     await t.db
       .update(events)
@@ -273,7 +273,7 @@ describe("the game jobs (HLD §3.3)", () => {
       .update(events)
       .set({ lockAt: earlier })
       .where(eq(events.id, round1.id));
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
 
     const pending = (await gameJobs()).filter(
       (j) =>
@@ -302,7 +302,7 @@ describe("the game jobs (HLD §3.3)", () => {
       basedOnVersionId: null,
     });
     await at(NOW);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const batch = createGameHandlers({ batch: 1 });
     const move = (lockAt: Date) =>
       t.db.update(events).set({ lockAt }).where(eq(events.id, round1.id));
@@ -389,7 +389,7 @@ describe("the game jobs (HLD §3.3)", () => {
       basedOnVersionId: null,
     });
     await at(NOW);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
 
     await at(round1.lockAt);
     // One team per batch: the first job leaves the event open and queues the
@@ -446,7 +446,7 @@ describe("the game jobs (HLD §3.3)", () => {
   it("round 2 opens with carried prices once round 1 is completed", async () => {
     await lockRound(t.db, gameId, round1.id);
     await complete(round1.id);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
     await at(planned);
     expect(await statusOf(round2.id)).toBe("upcoming");
@@ -589,7 +589,7 @@ describe("the game jobs (HLD §3.3)", () => {
   /** Round 1 is completed, and round 2's planned open job runs. */
   async function openRound2() {
     await complete(round1.id);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
     await at(planned);
     expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
@@ -701,5 +701,91 @@ describe("the game jobs (HLD §3.3)", () => {
     // ...and the team owns Bearman.
     await priceOne(bearman, 80);
     expect(await readyAt()).toEqual(locked);
+  });
+  it("a lock job that died is swept up by the next planning, and the sweep locks the event", async () => {
+    const teamId = await teamWithLineup();
+    await at(NOW);
+    await planGameJobs(t.db, clock.now(), gameId);
+    const key = gameLockKey(gameId, round1.id);
+    // Five failures in a row, a few minutes apart: the job is dead.
+    const broken = {
+      ...createGameHandlers(),
+      game_lock: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(key))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(key)).toMatchObject({ status: "dead", attempts: 5 });
+    expect(await statusOf(round1.id)).toBe("open");
+
+    // The next planning, a day after the lock, queues a sweep for the day.
+    const later = new Date(round1.lockAt.getTime() + 24 * HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    const sweepKey = `game_lock:${gameId}:${round1.id}:sweep:${later.toISOString().slice(0, 10)}`;
+    expect(await jobByKey(sweepKey)).toMatchObject({
+      kind: "game_lock",
+      status: "pending",
+      runAt: later,
+      payload: {
+        gameId,
+        eventId: round1.id,
+        sweep: later.toISOString().slice(0, 10),
+      },
+    });
+    // Planning again the same day queues nothing more.
+    const count = (await gameJobs()).length;
+    await planGameJobs(t.db, later, gameId);
+    expect(await gameJobs()).toHaveLength(count);
+
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round1.id)).toBe("locked");
+    expect(await lockStates()).toMatchObject([{ teamId, eventId: round1.id }]);
+    // Locked, the event gets no more sweeps.
+    await planGameJobs(t.db, new Date(later.getTime() + 24 * HOUR), gameId);
+    expect(
+      (await gameJobs()).filter((j) => j.dedupeKey.includes(":sweep:")),
+    ).toHaveLength(1);
+  });
+  it("a sweep after a lock chain died mid-batch finishes the lock under keys of its own", async () => {
+    await teamWithLineup();
+    const second = await createTeam(t.db, clock.now(), {
+      gameId,
+      userId: newId(),
+      name: "U",
+    });
+    await saveLineup(t.db, clock.now(), {
+      teamId: second,
+      picks: await picks(),
+      basedOnVersionId: null,
+    });
+    await at(NOW);
+    await planGameJobs(t.db, clock.now(), gameId);
+    await at(round1.lockAt);
+    const oneByOne = createGameHandlers({ batch: 1 });
+    expect(await run(1, oneByOne)).toMatchObject({ failed: 0 });
+    // The second batch's job dies.
+    const after = (await gameJobs()).find((j) =>
+      j.dedupeKey.includes(":after:"),
+    )!;
+    const broken = {
+      ...oneByOne,
+      game_lock: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(after.dedupeKey))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(after.dedupeKey)).toMatchObject({ status: "dead" });
+
+    const later = new Date(round1.lockAt.getTime() + 24 * HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    // The sweep starts again from the first team: its next batch can't reuse
+    // the dead chain's key, which is taken.
+    expect(await run(5, oneByOne)).toMatchObject({ failed: 0 });
+    expect(await statusOf(round1.id)).toBe("locked");
+    expect(await lockStates()).toHaveLength(2);
   });
 });

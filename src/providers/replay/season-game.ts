@@ -142,7 +142,7 @@ export async function replaySeasonGame(
 
   await setSimulatedClock(db, from);
   await openGame(db, from, gameId);
-  await planGameJobs(db, gameId);
+  await planGameJobs(db, from, gameId);
   const store = memoryStore();
   await publishDueTimes(db, store, from);
 
@@ -170,7 +170,7 @@ export async function replaySeasonGame(
   const sync: JobHandler = async (_job, ctx) => {
     const now = ctx.clock.now();
     await planGameEvents(ctx.db as TickDb, now, gameId);
-    await planGameJobs(ctx.db as TickDb, gameId);
+    await planGameJobs(ctx.db as TickDb, now, gameId);
   };
   const deps: TickDeps = {
     db: () => db,
