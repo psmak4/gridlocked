@@ -91,7 +91,10 @@ export async function createGame(
  *   a cancelled event has `sequence` null and status `cancelled`;
  * - `ruleset_version_id` is the version whose effective-from event has the
  *   latest `lock_at` at or before this event's. An event before every version
- *   takes the earliest one, so the column is never empty;
+ *   takes the earliest one, so the column is never empty. A new version is
+ *   refused (an error, writing nothing) when it would change the open event's
+ *   version or starts from an event that is open or has locked: a rule change
+ *   takes effect from an upcoming event;
  * - a row whose lock has started is never changed: one that is `locked` or
  *   later, whose `lock_at` is at or before `now`, or that has a lock record
  *   row already (the lock job writes in batches), whatever its status. Its
@@ -150,6 +153,7 @@ export async function planGameEvents(
         .select({
           id: rulesetVersions.id,
           version: rulesetVersions.version,
+          fromEventId: rulesetVersions.effectiveFromEventId,
           from: events.lockAt,
         })
         .from(rulesetVersions)
@@ -250,6 +254,17 @@ export async function planGameEvents(
           : "upcoming";
       const sequence = cancelled ? null : nextSequence();
       const rulesetVersionId = versionFor(event.lockAt);
+      // A version takes effect only from an upcoming event: one that would
+      // change the open event's, or that starts from an event the window has
+      // reached, would change rules lineups were already saved under.
+      if (row && row.rulesetVersionId !== rulesetVersionId) {
+        const v = versions.find((version) => version.id === rulesetVersionId)!;
+        if (row.status === "open" || reached(v.fromEventId)) {
+          throw new Error(
+            `planGameEvents: ruleset version ${v.version} of game ${gameId} takes effect from event ${v.fromEventId}, which is ${existing.get(v.fromEventId)?.status ?? "not in the game"}, and would apply to event ${event.id} (${row.status}): a version can only take effect from an upcoming event`,
+          );
+        }
+      }
 
       if (!row) {
         await tx.insert(gameEvents).values({

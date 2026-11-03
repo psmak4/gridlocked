@@ -191,4 +191,49 @@ describe("the game calendar (DM 3.3)", () => {
       expect(r.rulesetVersionId).toBe(r.round < 4 ? rulesetVersionId : v2);
     }
   });
+  it("a ruleset version is refused from the open event or a locked one, and taken from the next upcoming one", async () => {
+    const { gameId, rulesetVersionId } = await createGame(t.db, NOW, input());
+    const first = await roundEvent(1);
+    const second = await roundEvent(2);
+    const third = await roundEvent(3);
+    const setStatus = (eventId: string, status: "open" | "locked") =>
+      t.db
+        .update(gameEvents)
+        .set({ status })
+        .where(eq(gameEvents.eventId, eventId));
+    const addVersion = async (version: number, fromEventId: string) => {
+      const id = newId();
+      await t.db.insert(rulesetVersions).values({
+        id,
+        gameId,
+        version,
+        effectiveFromEventId: fromEventId,
+        params: RULESET_2026,
+        notes: "A change.",
+        publishedAt: NOW,
+      });
+      return id;
+    };
+    const dropVersion = (id: string) =>
+      t.db.delete(rulesetVersions).where(eq(rulesetVersions.id, id));
+
+    // Round 1 locked, round 2 open.
+    await setStatus(first.id, "locked");
+    await setStatus(second.id, "open");
+    const before = await calendar(gameId);
+    for (const from of [second, first]) {
+      const id = await addVersion(2, from.id);
+      await expect(planGameEvents(t.db, NOW, gameId)).rejects.toThrow(
+        /upcoming/,
+      );
+      expect(await calendar(gameId)).toEqual(before);
+      await dropVersion(id);
+    }
+
+    const v2 = await addVersion(2, third.id);
+    await planGameEvents(t.db, NOW, gameId);
+    for (const r of await calendar(gameId)) {
+      expect(r.rulesetVersionId).toBe(r.round < 3 ? rulesetVersionId : v2);
+    }
+  });
 });
