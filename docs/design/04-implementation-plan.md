@@ -155,6 +155,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - an x3 Boost on the 2x driver being rejected;
   - a cancelled event refunding chips.
 - **Exit:** the 2026 replay runs locks, transfers and chips for scripted teams across the season with no rule violations.
+- **Result (2026-11-03): met.** The season replay (`src/providers/replay/season-game.test.ts`, with the script in `tests/fixtures/game-2026-script.json`) runs the whole 2026 calendar on the simulated clock with only the game's jobs (and a game-only `sync_calendar` stand-in) on the real scheduler tick: eight scripted teams, one round cancelled before its lock with two chips refunded, and 11 scripted refusals, each with its error code. Its report: `eventsLocked 22, eventsCancelled 1, states 172, chipPlays 9, refused 11, violations []`, in about 8 seconds. `checkGameInvariants` recomputes every lock record and checks the chip, carry-over, penalty, bank and Late Call rules. `pnpm test`: 1,078 tests in 72 files. PRs: Task 1 #105, Task 2 #106, Task 3 #107, Task 4 #108, Task 5 #109, Task 6 #110, Task 7 #111, Task 8 #112, Task 9 #113.
 
 ### M4 — Scoring and standings (target 23 Dec)
 - **Goal:** every point is right and explainable, and corrections ripple through.
