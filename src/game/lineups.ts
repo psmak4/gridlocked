@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   events,
   gameEvents,
@@ -55,21 +55,16 @@ export async function openGame(
     }
 
     const prices = await priceList(tx, { gameId, eventId: first.eventId });
+    // Added from this event or an earlier one, as the lineup check places it
+    // (a cancelled one counts from the event after it).
     const needed = await tx
       .select({ id: poolAssets.id })
       .from(poolAssets)
-      .innerJoin(
-        gameEvents,
-        and(
-          eq(gameEvents.gameId, poolAssets.gameId),
-          eq(gameEvents.eventId, poolAssets.addedFromEventId),
-        ),
-      )
       .where(
         and(
           eq(poolAssets.gameId, gameId),
           eq(poolAssets.status, "active"),
-          lte(gameEvents.sequence, 1),
+          sql`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId}) <= 1`,
         ),
       );
     const missing = needed.filter((asset) => !prices.has(asset.id));
@@ -233,9 +228,12 @@ export interface LockedLineup {
 /**
  * The lineup that counts for an event (DM 3.7): the team's latest `regular` or
  * `limitless` version for it saved before its `lock_at`, latest by
- * `(saved_at, id)`. With none, it is the base carried forward from the team's
- * earlier events (`team_base_state`, DM 3.8). Null when it has neither: the
- * team never saved a lineup that counted.
+ * `(saved_at, id)`. With none, it is the latest `regular` version saved for an
+ * event cancelled while its window was open, since the event before this one
+ * locked (DM 3.9: a cancellation doesn't undo a team's changes); with none of
+ * those either, the base carried forward from the team's earlier events
+ * (`team_base_state`, DM 3.8). Null when it has none of these: the team never
+ * saved a lineup that counted.
  */
 export async function lockedLineup(
   db: Db,
@@ -260,55 +258,33 @@ export async function lockedLineups(
   const found = new Map<string, LockedLineup>();
   if (teamIds.length === 0) return found;
   const [event] = await db
-    .select({ lockAt: events.lockAt })
+    .select({ id: events.id })
     .from(events)
     .where(eq(events.id, eventId));
   if (!event) throw new Error(`lockedLineup: no event ${eventId}`);
 
-  const saved = await db
-    .selectDistinctOn([lineupVersions.teamId], {
-      teamId: lineupVersions.teamId,
-      id: lineupVersions.id,
-      kind: lineupVersions.kind,
+  // The database's own choice (team_locked_lineup), as the chip check makes it.
+  const counting = await db
+    .select({
+      teamId: teams.id,
+      versionId: sql<
+        string | null
+      >`team_locked_lineup(${teams.id}, ${eventId}::uuid)`,
     })
-    .from(lineupVersions)
-    .where(
-      and(
-        inArray(lineupVersions.teamId, teamIds),
-        eq(lineupVersions.forEventId, eventId),
-        inArray(lineupVersions.kind, ["regular", "limitless"]),
-        lt(lineupVersions.savedAt, event.lockAt),
-      ),
-    )
-    .orderBy(
-      asc(lineupVersions.teamId),
-      desc(lineupVersions.savedAt),
-      desc(lineupVersions.id),
-    );
-  const chosen = new Map(saved.map((v) => [v.teamId, v]));
-
-  // Teams with nothing saved for the event keep their base.
-  const rest = teamIds.filter((id) => !chosen.has(id));
-  if (rest.length > 0) {
-    const bases = await db
-      .select({
-        teamId: teams.id,
-        id: lineupVersions.id,
-        kind: lineupVersions.kind,
-      })
-      .from(teams)
-      .innerJoin(
-        lineupVersions,
-        eq(
-          lineupVersions.id,
-          sql`(select b.base_version_id from team_base_state(${teams.id}, ${eventId}::uuid) b)`,
-        ),
-      )
-      .where(inArray(teams.id, rest));
-    for (const base of bases) chosen.set(base.teamId, base);
-  }
-  if (chosen.size === 0) return found;
-
+    .from(teams)
+    .where(inArray(teams.id, teamIds));
+  const ids = counting
+    .map((row) => row.versionId)
+    .filter((id): id is string => id !== null);
+  if (ids.length === 0) return found;
+  const kinds = new Map(
+    (
+      await db
+        .select({ id: lineupVersions.id, kind: lineupVersions.kind })
+        .from(lineupVersions)
+        .where(inArray(lineupVersions.id, ids))
+    ).map((v) => [v.id, v.kind]),
+  );
   const picks = await db
     .select({
       versionId: lineupPicks.lineupVersionId,
@@ -316,12 +292,7 @@ export async function lockedLineups(
       isBoost: lineupPicks.isBoost,
     })
     .from(lineupPicks)
-    .where(
-      inArray(
-        lineupPicks.lineupVersionId,
-        [...chosen.values()].map((v) => v.id),
-      ),
-    )
+    .where(inArray(lineupPicks.lineupVersionId, ids))
     .orderBy(asc(lineupPicks.assetId));
   const byVersion = new Map<string, LineupPick[]>();
   for (const { versionId, assetId, isBoost } of picks) {
@@ -329,11 +300,12 @@ export async function lockedLineups(
     list.push({ assetId, isBoost });
     byVersion.set(versionId, list);
   }
-  for (const [teamId, version] of chosen) {
+  for (const { teamId, versionId } of counting) {
+    if (versionId === null) continue;
     found.set(teamId, {
-      versionId: version.id,
-      kind: version.kind,
-      picks: byVersion.get(version.id) ?? [],
+      versionId,
+      kind: kinds.get(versionId)!,
+      picks: byVersion.get(versionId) ?? [],
     });
   }
   return found;

@@ -1,7 +1,8 @@
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
 import {
   assetPrices,
+  events,
   gameEvents,
   poolAssets,
   PRICE_MAX,
@@ -26,9 +27,10 @@ const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
 /**
  * From `open` on, an event's prices are fixed (game_rules_5): saves are checked
  * against them. Only a price for an asset that has none may still be added
- * (`carryPrices`, a substitute), until the event locks.
+ * (`carryPrices`, a substitute), until the event locks. A cancelled event's
+ * stay fixed too (game_rules_8): the next event carries them.
  */
-const FIXED: readonly GameEventStatus[] = ["open", ...FROZEN];
+const FIXED: readonly GameEventStatus[] = ["open", ...FROZEN, "cancelled"];
 
 export interface PriceInput {
   assetId: string;
@@ -146,16 +148,16 @@ async function isComplete(
   gameId: string,
   event: { eventId: string; sequence: number | null },
 ): Promise<boolean> {
+  // Placed as the lineup check places them: an asset added from a cancelled
+  // event counts from the event after it.
   const available = await tx
-    .select({ id: poolAssets.id, sequence: gameEvents.sequence })
+    .select({
+      id: poolAssets.id,
+      sequence: sql<
+        number | null
+      >`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId})`,
+    })
     .from(poolAssets)
-    .innerJoin(
-      gameEvents,
-      and(
-        eq(gameEvents.gameId, poolAssets.gameId),
-        eq(gameEvents.eventId, poolAssets.addedFromEventId),
-      ),
-    )
     .where(and(eq(poolAssets.gameId, gameId), eq(poolAssets.status, "active")));
   const priced = new Set(
     (
@@ -203,7 +205,7 @@ export async function publishPrices(
     const event = await loadGameEvent(tx, input.gameId, input.eventId);
     if (FIXED.includes(event.status)) {
       throw new Error(
-        `event ${input.eventId} is ${event.status}: its prices are fixed once it opens`,
+        `event ${input.eventId} is ${event.status}: its prices are fixed once it opens, and when it is cancelled`,
       );
     }
     await upsertPrices(tx, now, { ...input, meta });
@@ -228,10 +230,13 @@ export async function publishPrices(
  * Gives every asset with no price for the event its latest earlier price, as
  * `carried` (DM 3.5: no update ran before the lock, so the previous price
  * stands). Withdrawn assets are carried too, since owners keep them. "Earlier"
- * is by the game's event order, so an asset added for a later event has
- * nothing to carry. That completes the list, so it sets `prices_ready_at` if
- * it isn't set, and returns the rows written; running it again writes nothing. It must run before the event
- * locks, which freezes the list.
+ * is the game's earlier events (by sequence) and its cancelled events, latest
+ * by lock time, so an asset added for a later event has nothing to carry, and
+ * prices don't change across a cancellation (DM 3.9): the event after one
+ * cancelled takes the cancelled event's list, which lineups were saved
+ * against. That completes the list, so it sets `prices_ready_at` if it isn't
+ * set, and returns the rows written; running it again writes nothing. It must
+ * run before the event locks, which freezes the list.
  */
 export async function carryPrices(
   db: Db,
@@ -256,11 +261,15 @@ export async function carryPrices(
           .where(eq(assetPrices.eventId, eventId))
       ).map((row) => row.assetId),
     );
+    const [own] = await tx
+      .select({ lockAt: events.lockAt })
+      .from(events)
+      .where(eq(events.id, eventId));
     const earlier = await tx
       .select({
         assetId: assetPrices.assetId,
         price: assetPrices.price,
-        sequence: gameEvents.sequence,
+        lockAt: events.lockAt,
       })
       .from(assetPrices)
       .innerJoin(poolAssets, eq(poolAssets.id, assetPrices.assetId))
@@ -271,17 +280,27 @@ export async function carryPrices(
           eq(gameEvents.eventId, assetPrices.eventId),
         ),
       )
+      .innerJoin(events, eq(events.id, gameEvents.eventId))
       .where(
         and(
           eq(poolAssets.gameId, gameId),
-          lt(gameEvents.sequence, event.sequence),
+          or(
+            lt(gameEvents.sequence, event.sequence),
+            and(
+              eq(gameEvents.status, "cancelled"),
+              lt(events.lockAt, own!.lockAt),
+            ),
+          ),
         ),
       );
-    const latest = new Map<string, { price: number; sequence: number }>();
+    const latest = new Map<string, { price: number; lockAt: number }>();
     for (const row of earlier) {
       const seen = latest.get(row.assetId);
-      if (!seen || row.sequence! > seen.sequence) {
-        latest.set(row.assetId, { price: row.price, sequence: row.sequence! });
+      if (!seen || row.lockAt.getTime() > seen.lockAt) {
+        latest.set(row.assetId, {
+          price: row.price,
+          lockAt: row.lockAt.getTime(),
+        });
       }
     }
 

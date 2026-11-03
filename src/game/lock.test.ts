@@ -9,6 +9,7 @@ import {
 } from "../../tests/helpers/game-2026";
 import {
   assetPrices,
+  events,
   gameEvents,
   games,
   lineupPicks,
@@ -21,6 +22,7 @@ import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
 import { playChip } from "./chips";
 import type { GameError } from "./errors";
+import { planGameEvents } from "./games";
 import { saveLineup, openGame, type LineupPick } from "./lineups";
 import { lockEvent } from "./lock";
 import { withdrawPoolAsset } from "./pool";
@@ -349,6 +351,34 @@ describe("lockEvent (DM 3.8)", () => {
       transferPenalty: 0,
     });
     expect(await firstEventOf(late)).toBe(round2.id);
+  });
+
+  it("a lineup saved for a first event cancelled while open locks at the next one as the team's first", async () => {
+    // Called off with its window open, before anything locked (DM 3.11).
+    const { versionId } = await saveFor(round1, await picksOf());
+    const cancelledAt = new Date(round1.lockAt.getTime() - HOUR_MS / 2);
+    await setSimulatedClock(t.db, cancelledAt);
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, round1.id));
+    await planGameEvents(t.db, cancelledAt, gameId);
+
+    await lockRound(t.db, gameId, round2.id);
+    expect(await states(round1.id)).toEqual([]);
+    expect(await stateOf(round2.id)).toMatchObject({
+      baseVersionId: null,
+      lockedVersionId: versionId,
+      isFirstEvent: true,
+      purchasingPower: 1000,
+      spent: COST,
+      bank: 1000 - COST,
+      transfersMade: 7,
+      freeTransfers: null,
+      carryOverOut: 0,
+      transferPenalty: 0,
+    });
+    expect(await firstEventOf()).toBe(round2.id);
   });
 
   it("a team that never saved gets no row", async () => {

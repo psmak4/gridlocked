@@ -11,6 +11,7 @@ import {
   PRICE_MIN,
 } from "@/db/schema";
 import type { StaffActor } from "@/staff/roster";
+import { planGameEvents } from "./games";
 import { openGame } from "./lineups";
 import { addPoolAsset, withdrawPoolAsset } from "./pool";
 import { carryPrices, priceList, publishPrices } from "./prices";
@@ -360,6 +361,77 @@ describe("per-event prices (DM 3.5)", () => {
       }),
     ).toBe(33);
     expect((await list(3)).get(await game.assetId("norris"))).toBe(300);
+  });
+
+  /** The round is cancelled in the calendar, and the game planned again. */
+  const cancelRound = async (round: number) => {
+    const event = await eventOf(round);
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, event.id));
+    await planGameEvents(t.db, NOW, game.gameId);
+    return event;
+  };
+
+  it("a cancelled event's prices can't change", async () => {
+    const round2 = await eventOf(2);
+    const input = { gameId: game.gameId, eventId: round2.id };
+    await carryPrices(t.db, NOW, input);
+    const norris = await game.assetId("norris");
+    await cancelRound(2);
+
+    // Carried forward from it, so it stays as it was (DM 3.9).
+    await expect(
+      publishPrices(t.db, NOW, {
+        ...input,
+        source: "admin",
+        reason: "Price correction",
+        actor: ACTOR,
+        prices: [{ assetId: norris, price: 300 }],
+      }),
+    ).rejects.toThrow(/fixed/);
+    const thePrice = and(
+      eq(assetPrices.eventId, round2.id),
+      eq(assetPrices.assetId, norris),
+    );
+    await expectPgError(
+      t.db.update(assetPrices).set({ price: 300 }).where(thePrice),
+      RESTRICT_VIOLATION,
+    );
+    await expectPgError(
+      t.db.delete(assetPrices).where(thePrice),
+      RESTRICT_VIOLATION,
+    );
+    expect((await list(2)).get(norris)).toBe(280);
+  });
+
+  it("an asset added from a cancelled round is needed from the next one", async () => {
+    await cancelRound(1);
+    const round2 = await eventOf(2);
+    const input = { gameId: game.gameId, eventId: round2.id };
+    // One admin price isn't the whole list: the pool from round 1 needs one.
+    await publishPrices(t.db, NOW, {
+      ...input,
+      source: "admin",
+      reason: "Price correction",
+      actor: ACTOR,
+      prices: [{ assetId: await game.assetId("norris"), price: 290 }],
+    });
+    const ready = async () =>
+      (
+        await t.db
+          .select()
+          .from(gameEvents)
+          .where(eq(gameEvents.eventId, round2.id))
+      )[0]!.pricesReadyAt;
+    expect(await ready()).toBeNull();
+    await expect(openGame(t.db, NOW, game.gameId)).rejects.toThrow(/no price/);
+
+    // Carried from the cancelled round 1, the list is complete.
+    expect(await carryPrices(t.db, NOW, input)).toBe(32);
+    expect(await ready()).toEqual(NOW);
+    await openGame(t.db, NOW, game.gameId);
   });
 
   it("carrying again writes nothing", async () => {

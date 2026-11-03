@@ -36,8 +36,10 @@ import {
 // commit, and the guard on `events.lock_at`), and the budget with the two
 // functions behind it, `team_base_state` and `team_purchasing_power` (DM 3.8),
 // and the chip rules (DM 3.9: the code, window and unlock of a play, the
-// Final Fix window, the x3 Boost target, and no undo). They live in the
-// `game_rules` to `game_rules_7` migrations.
+// Final Fix window, the x3 Boost target, and no undo), and the lineup that
+// counts at a lock, `team_locked_lineup` (DM 3.9: a lineup saved for a
+// cancelled event carries forward). They live in the `game_rules` to
+// `game_rules_8` migrations.
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
@@ -67,6 +69,8 @@ export const TEAM_STATUSES = ["active", "retired"] as const;
 export const LINEUP_KINDS = ["regular", "limitless", "final_fix"] as const;
 /** `refunded`: only by the system, for a cancelled event (DM 3.9). */
 export const CHIP_PLAY_STATUSES = ["played", "refunded"] as const;
+/** `skip`: the session isn't scored, e.g. an abandoned race voided (DM 3.9). */
+export const SESSION_EXCEPTION_POLICIES = ["skip"] as const;
 /** A team's name, in characters (DM 3.6). */
 export const TEAM_NAME_MAX = 30;
 export const SCORING_TARGETS = ["driver", "constructor"] as const;
@@ -200,6 +204,37 @@ export const gameEvents = pgTable(
   (t) => [
     primaryKey({ columns: [t.gameId, t.eventId] }),
     check("game_events_status_check", oneOf(t.status, GAME_EVENT_STATUSES)),
+  ],
+);
+
+/**
+ * DM 3.3: a session the game doesn't score as normal, such as an abandoned
+ * race the admins void (DM 3.9). One per session per game; setting and
+ * clearing it are audited, and trigger a re-score (M4).
+ */
+export const gameSessionExceptions = pgTable(
+  "game_session_exceptions",
+  {
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "restrict" }),
+    policy: text("policy", { enum: SESSION_EXCEPTION_POLICIES }).notNull(),
+    reason: text("reason").notNull(),
+    // FK to users added in M5; who acted is in the audit row until then.
+    decidedBy: uuid("decided_by").notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.gameId, t.sessionId] }),
+    check(
+      "game_session_exceptions_policy_check",
+      oneOf(t.policy, SESSION_EXCEPTION_POLICIES),
+    ),
   ],
 );
 

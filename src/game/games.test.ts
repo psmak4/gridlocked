@@ -154,6 +154,24 @@ describe("the game calendar (DM 3.3)", () => {
     expect(rows[22]!.sequence).toBe(22);
   });
 
+  it("a locked event stays locked, with its sequence, when its event is cancelled", async () => {
+    const { gameId } = await createGame(t.db, NOW, input());
+    const first = await roundEvent(1);
+    await t.db
+      .update(gameEvents)
+      .set({ status: "locked" })
+      .where(eq(gameEvents.eventId, first.id));
+    // Called off after qualifying (DM 3.9): the game keeps what locked.
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, first.id));
+    await planGameEvents(t.db, NOW, gameId);
+    const rows = await calendar(gameId);
+    expect(rows[0]).toMatchObject({ status: "locked", sequence: 1 });
+    expect(rows[1]).toMatchObject({ status: "upcoming", sequence: 2 });
+  });
+
   it("a second ruleset version applies from its event onward", async () => {
     const { gameId, rulesetVersionId } = await createGame(t.db, NOW, input());
     const fourth = await roundEvent(4);

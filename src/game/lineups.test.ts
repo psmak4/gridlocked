@@ -22,6 +22,7 @@ import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
 import { GameError } from "./errors";
+import { planGameEvents } from "./games";
 import { lockedLineup, openGame, saveLineup, type LineupPick } from "./lineups";
 import { addPoolAsset, withdrawPoolAsset } from "./pool";
 import { createTeam, removeTeam } from "./teams";
@@ -522,6 +523,47 @@ describe("lineups (DM 3.7)", () => {
 
   it("a team with no saved lineup has none locked", async () => {
     expect(await lockedLineup(t.db, { teamId, eventId: round1.id })).toBeNull();
+  });
+
+  it("a lineup saved for a cancelled event counts until the team's next lock, and not after", async () => {
+    const round2 = await round2026(t.db, 2);
+    const round3 = await round2026(t.db, 3);
+    const round4 = await round2026(t.db, 4);
+    const hourBefore = (event: { lockAt: Date }) =>
+      at(new Date(event.lockAt.getTime() - 3600 * SECOND_MS));
+    const first = await save(await at(beforeLock(3600)), await picksOf());
+    const locked1 = await lockRound(t.db, gameId, round1.id);
+    await openRound(t.db, locked1, gameId, round2.id);
+    const cancelled = await save(
+      await hourBefore(round2),
+      await picksOf(DRIVERS, CONSTRUCTORS, "piastri"),
+    );
+    // Round 2 is cancelled while it's open, and round 3 opens at once.
+    const now = await at(new Date(round2.lockAt.getTime() - 1800 * SECOND_MS));
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, round2.id));
+    await planGameEvents(t.db, now, gameId);
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round3.id }))?.versionId,
+    ).toBe(cancelled.versionId);
+
+    const third = await save(
+      await hourBefore(round3),
+      await picksOf(DRIVERS, CONSTRUCTORS, "hadjar"),
+    );
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round3.id }))?.versionId,
+    ).toBe(third.versionId);
+    const locked3 = await lockRound(t.db, gameId, round3.id);
+    await openRound(t.db, locked3, gameId, round4.id);
+    // Round 3's lock is the base now: the cancelled event's save no longer
+    // counts, nor does round 1's.
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round4.id }))?.versionId,
+    ).toBe(third.versionId);
+    expect(first.versionId).not.toBe(third.versionId);
   });
 
   it("a team that saved but never locked can still be deleted", async () => {
