@@ -11,7 +11,8 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
-import { GameError, type GameErrorCode } from "./errors";
+import { playedChips } from "./chips";
+import { GameError, refusal } from "./errors";
 import { priceList } from "./prices";
 
 // Lineups (DM 3.7): every save is a new version, and the database decides
@@ -20,38 +21,6 @@ import { priceList } from "./prices";
 export interface LineupPick {
   assetId: string;
   isBoost: boolean;
-}
-
-/**
- * The SQLSTATE each lineup trigger refusal raises (game_rules_4, GL004 from
- * game_rules_5), and what it means.
- */
-const REFUSALS: Record<string, GameErrorCode> = {
-  GL001: "window_closed",
-  GL002: "composition",
-  GL003: "asset_unavailable",
-  GL004: "over_budget",
-};
-
-/**
- * Turns a database refusal into a `GameError`. Drivers wrap the Postgres error
- * as the `cause` of their own, so the SQLSTATE is looked for down the chain.
- * Anything else is returned as it came.
- */
-function refusal(error: unknown): unknown {
-  for (
-    let e: unknown = error;
-    e instanceof Error || (typeof e === "object" && e !== null);
-    e = (e as { cause?: unknown }).cause
-  ) {
-    const code = (e as { code?: unknown }).code;
-    const mapped = typeof code === "string" ? REFUSALS[code] : undefined;
-    if (mapped) {
-      const message = e instanceof Error ? e.message : mapped;
-      return new GameError(mapped, message.replace(/^lineup: /, ""));
-    }
-  }
-  return error;
 }
 
 /**
@@ -127,8 +96,9 @@ export async function openGame(
 }
 
 /**
- * Saves a complete lineup for the game's open event as a new `regular`
- * version, never changing an earlier one. `basedOnVersionId` is the version
+ * Saves a complete lineup for the game's open event as a new version, never
+ * changing an earlier one: `limitless` when the team has played Blank Cheque
+ * (Limitless) for the event, otherwise `regular`. `basedOnVersionId` is the version
  * the user was editing, or null for a blank start; `staleBase` is true when it
  * isn't the team's latest version, because another device saved since. The
  * save still goes through.
@@ -139,9 +109,10 @@ export async function openGame(
  * (a withdrawn one only if the team owns it), and the cost against the team's
  * purchasing power at this event's prices (DM 3.8). Each refusal is a
  * `GameError` (`window_closed`, `composition`, `asset_unavailable`,
- * `over_budget`) and writes nothing. The check here
- * against `now` only gives the friendlier early answer, and a repeated asset
- * is `composition` before it reaches the key.
+ * `over_budget`) and writes nothing. With the x3 Boost played, a lineup that
+ * drops its target or puts the 2x Boost on it is `composition` too. The check
+ * here against `now` only gives the friendlier early answer, and a repeated
+ * asset is `composition` before it reaches the key.
  */
 export async function saveLineup(
   db: Db,
@@ -209,13 +180,17 @@ export async function saveLineup(
         }
       }
 
+      const chip = (
+        await playedChips(tx, { eventId: event.eventId, teamIds: [teamId] })
+      ).get(teamId);
+
       const versionId = newId();
       // saved_at is left to the database.
       await tx.insert(lineupVersions).values({
         id: versionId,
         teamId,
         forEventId: event.eventId,
-        kind: "regular",
+        kind: chip?.effect === "limitless" ? "limitless" : "regular",
         basedOnVersionId,
       });
       if (picks.length > 0) {

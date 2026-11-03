@@ -803,7 +803,8 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | is_boost | boolean | The 2x Boost. Exactly one per version, and only on a driver |
 
 **What the database checks on every save** (a constraint trigger at commit):
-- **Window:** for `regular` and `limitless` versions, `app_now() < lock_at` of `for_event_id`, and `for_event_id` is the game's single `open` event. A `final_fix` version is only allowed after the qualifying session is `completed` and before the race's scheduled start.
+- **Window:** for `regular` and `limitless` versions, `app_now() < lock_at` of `for_event_id`, and `for_event_id` is the game's single `open` event. A `final_fix` version is only allowed once the event has locked, after qualifying's results arrive and before the race's scheduled start (`final_fix_window_open`, in `game_rules_7`). **The opening signal is qualifying's `session_result_state` leaving `awaiting`** (M3 decision): nothing sets `sessions.status` to `completed`, and qualifying's scheduled end would let someone swap during a rain-delayed session after seeing Q1. It is the `qualifying` session, not sprint qualifying, so on a sprint weekend the window opens after the sprint. A `final_fix` version applies from the race session, needs Late Call played for the event, and is the locked lineup with one asset swapped: a kept asset keeps its Boost or lack of one, and the incoming asset has the Boost exactly when the outgoing one did.
+- **Chips:** a `limitless` version needs Blank Cheque played for its event, and with the x3 Boost played its target must stay in the lineup as a driver without the 2x Boost (3.9).
 - **Composition:** squad counts per type, and one Boost on a driver, all read from ruleset params.
 - **Assets:** active, or already owned in the base lineup if withdrawn.
 - **Budget:** the cost at this event's prices fits within the team's purchasing power (3.8). A `limitless` version skips this check.
@@ -824,7 +825,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | base_version_id | uuid FK, nullable | The lineup compared against: the previous event's locked `regular` lineup, or the pre-Limitless one. Null at the team's first event |
 | locked_version_id | uuid FK | What counts for this event |
 | final_fix_version_id | uuid FK, nullable | |
-| chip_play_id | uuid FK, nullable | Added with `chip_plays` (M3 Task 7) |
+| chip_play_id | uuid FK, nullable | The chip played for the event: set by the lock job, or by a Late Call after the lock (with `final_fix_version_id`) |
 | is_first_event | boolean | |
 | purchasing_power | integer | Money available at this event's prices |
 | spent | integer | Cost of the locked lineup at this event's prices |
@@ -842,7 +843,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 So price rises of owned assets raise a team's value, and falls lower it. **Keeping an unchanged lineup is always affordable**, because that sum is exactly the base lineup's cost plus a bank that's never negative.
 
 **Two SQL functions hold this (in `game_rules_5`), so the sum is made in one place:**
-- `team_base_state(team_id, event_id)` returns `base_version_id`, `bank`, `carry_in` and `is_first`, from the team's latest row before the event by `game_events.sequence`. With no such row it's the team's first event (no base, no bank). When that row was a Limitless week (its locked version is `limitless`), it returns that row's own base, the bank of the row before it, and a `carry_in` of 0.
+- `team_base_state(team_id, event_id)` returns `base_version_id`, `bank`, `carry_in` and `is_first`, from the team's latest row before the event by `game_events.sequence`. With no such row it's the team's first event (no base, no bank). When that row was a Limitless week (its `chip_play_id` is a played chip whose effect is `limitless`, since `game_rules_7`; whatever kind of version locked), it returns that row's own base, the bank of the row before it, and a `carry_in` of 0.
 - `team_purchasing_power(team_id, event_id)` is the ruleset's `budget` at a first event, otherwise `bank` plus the base lineup's assets at the event's prices. An owned asset with no price at the event is an error, never 0.
 
 The save check calls `team_purchasing_power` for every version except `limitless` (refused as `over_budget`), and the lock job calls both to write the row. A withdrawn asset passes the save check only while it's in `base_version_id`, so owners keep it at its carried price and get that price back when they sell, but can't buy it back once the sale has locked. **The bank is never below 0 outside Limitless:** a CHECK can't see the chip, so the lock job asserts it and fails loudly if it's broken.
@@ -865,12 +866,15 @@ The save check calls `team_purchasing_power` for every version except `limitless
 | game_id | uuid FK | |
 | chip_code | text | Must exist in the event's ruleset params |
 | event_id | uuid FK | |
-| target_asset_id | uuid FK, nullable | The x3 Boost driver. It must be a driver in the locked lineup and not the 2x Boost one (checked at lock) |
+| target_asset_id | uuid FK, nullable | The x3 Boost driver: a driver in the team's lineup and not the 2x Boost one. Only that chip has one |
 | played_at | timestamptz | From `app_now()` |
 | status | text: `played`, `refunded` | No delete and no undo (verified rule). Only the system refunds, for a cancelled event |
 
 - **Constraints:** unique `(team_id, chip_code) WHERE status = 'played'` gives once per season. Unique `(team_id, event_id) WHERE status = 'played'` gives one chip per race.
-- **Timing:** a trigger checks the play window (before lock, or the Final Fix window) and the unlock rule against `teams.first_event_id`.
+- **Timing:** a constraint trigger at commit (`game_rules_7`) checks that the code is in the event's ruleset params, the play window (before lock on the game's open event, or the Final Fix window of 3.7, by the same clock as a save) and the unlock rule: an `after_first_event` chip only at an event later, by sequence, than `teams.first_event_id`.
+- **No undo:** a trigger refuses a delete (except the cascade from a team deleted outright before its first lock) and every update except `played` to `refunded`, which it allows only for a `cancelled` event. A refund is final.
+- **Where the x3 Boost target is checked (M3 decision):** when the chip is played (the target is a driver in the team's latest lineup for the event, or its base, without the 2x Boost) and **on every save** after it (a lineup that drops the target or puts the 2x Boost on it is refused as `composition`), not at lock, where it is too late to refuse anything. The lock job only asserts the rule held, and fails loudly if it's broken.
+- **Effects M3 enforces:** Wildcard and Limitless make the week's transfers unlimited (`free_transfers` null, no carry-over out); Limitless saves `limitless` versions, which skip the budget, and the next base reverts (3.8). Late Call is one call (`saveFinalFix`) that plays the chip, saves the `final_fix` version and sets the event's `final_fix_version_id` and `chip_play_id`. The points effects (Strategist, the x3 Boost, Safety Car) are M4's.
 
 **Cancelled events (my calls, check these):**
 - **Cancelled before lock:** nothing locks. Chips played for it are **refunded**. There's no `team_event_states` row, so the next event's transfers are counted against the last real locked lineup, and no extra free transfers are granted. Prices don't change.
@@ -899,8 +903,8 @@ The save check calls `team_purchasing_power` for every version except `limitless
 | Unused transfer carries over, must be used | Official FAQ | `carry_over_out` formula caps at 1 (3.8) |
 | Limitless, then the team restored | Official FAQ | A temporary version; the next base is the pre-Limitless lineup and its bank (3.8) |
 | Final Fix after qualifying, Boost moves | Official FAQ | A `final_fix` version from the race session, with Boost on the incoming driver. Earlier sessions are scored from the locked lineup (3.7, Part 4) |
-| Final Fix on a sprint weekend | Official rule (after Qualifying) | Window opens when Qualifying completes, after the sprint, and closes at race start |
-| x3 Boost on the 2x Boost driver | Official FAQ | Rejected at lock (3.9) |
+| Final Fix on a sprint weekend | Official rule (after Qualifying) | Window opens when Qualifying's results arrive, after the sprint (not sprint qualifying's), and closes at race start (3.7) |
+| x3 Boost on the 2x Boost driver | Official FAQ | Rejected when played, and on every save after it; the lock job asserts it (3.9) |
 | Chips unlock for the team's 2nd race | Official FAQ | Unlock rule versus `first_event_id` (3.9) |
 | Driver injured or replaced | Hadjar 2026 (verified) | Owners keep him and get the penalties; swapping him out is a normal transfer (verified rule) |
 | Substitute becomes pickable | Tsunoda 2026 (HLD §8.1) | A new pool asset with a price from the next event (3.4) |

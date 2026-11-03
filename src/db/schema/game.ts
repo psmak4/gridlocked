@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -33,8 +34,10 @@ import {
 // the slot limit on teams (DM 3.6), the lineup checks (DM 3.7:
 // `saved_at` from app_now(), the window, composition and asset availability at
 // commit, and the guard on `events.lock_at`), and the budget with the two
-// functions behind it, `team_base_state` and `team_purchasing_power` (DM 3.8).
-// They live in the `game_rules` to `game_rules_5` migrations.
+// functions behind it, `team_base_state` and `team_purchasing_power` (DM 3.8),
+// and the chip rules (DM 3.9: the code, window and unlock of a play, the
+// Final Fix window, the x3 Boost target, and no undo). They live in the
+// `game_rules` to `game_rules_7` migrations.
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
@@ -62,6 +65,8 @@ export const PRICE_MAX = 340;
 export const TEAM_STATUSES = ["active", "retired"] as const;
 /** `limitless` and `final_fix` are temporary: they apply to one event (DM 3.7). */
 export const LINEUP_KINDS = ["regular", "limitless", "final_fix"] as const;
+/** `refunded`: only by the system, for a cancelled event (DM 3.9). */
+export const CHIP_PLAY_STATUSES = ["played", "refunded"] as const;
 /** A team's name, in characters (DM 3.6). */
 export const TEAM_NAME_MAX = 30;
 export const SCORING_TARGETS = ["driver", "constructor"] as const;
@@ -380,10 +385,60 @@ export const lineupPicks = pgTable(
 );
 
 /**
+ * DM 3.9: a chip played by a team for an event. The code is one of the event's
+ * ruleset chips. The database stamps `played_at` from app_now(), and checks the
+ * window, the unlock rule and the x3 Boost target when the transaction commits
+ * (triggers). A play is never deleted or undone; only the system refunds one,
+ * for a cancelled event. Deleting a team before its first lock deletes its
+ * plays.
+ */
+export const chipPlays = pgTable(
+  "chip_plays",
+  {
+    id: uuid("id").primaryKey(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    chipCode: text("chip_code").notNull(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    /** The x3 Boost driver; only for that chip. */
+    targetAssetId: uuid("target_asset_id").references(() => poolAssets.id, {
+      onDelete: "restrict",
+    }),
+    /** Set by the database (trigger); the default only lets an insert omit it. */
+    playedAt: timestamp("played_at", { withTimezone: true })
+      .notNull()
+      .default(sql`app_now()`),
+    status: text("status", { enum: CHIP_PLAY_STATUSES }).notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("chip_plays_status_check", oneOf(t.status, CHIP_PLAY_STATUSES)),
+    // Once per season, and one chip per race.
+    uniqueIndex("chip_plays_team_id_chip_code_played_unique")
+      .on(t.teamId, t.chipCode)
+      .where(sql`${t.status} = 'played'`),
+    uniqueIndex("chip_plays_team_id_event_id_played_unique")
+      .on(t.teamId, t.eventId)
+      .where(sql`${t.status} = 'played'`),
+    // Scoring loads one event's chips at once.
+    index("chip_plays_event_id_played_idx")
+      .on(t.eventId)
+      .where(sql`${t.status} = 'played'`),
+  ],
+);
+
+/**
  * DM 3.8: one row per team per event it took part in, written by the lock job
- * (`lockEvent`) and never rewritten by it. Money is in units of $0.1M. The bank
- * is never below 0 outside a Limitless week; a CHECK can't see the chip, so the
- * lock job asserts it. `chip_play_id` comes with `chip_plays` (Task 7).
+ * (`lockEvent`) and never rewritten by it, except that a Late Call sets
+ * `final_fix_version_id` and `chip_play_id` after the lock. Money is in units
+ * of $0.1M. The bank is never below 0 outside a Limitless week; a CHECK can't
+ * see the chip, so the lock job asserts it.
  */
 export const teamEventStates = pgTable(
   "team_event_states",
@@ -412,6 +467,10 @@ export const teamEventStates = pgTable(
       () => lineupVersions.id,
       { onDelete: "restrict" },
     ),
+    /** The chip played for the event, if any. */
+    chipPlayId: uuid("chip_play_id").references(() => chipPlays.id, {
+      onDelete: "restrict",
+    }),
     isFirstEvent: boolean("is_first_event").notNull(),
     /** Money available at this event's prices. */
     purchasingPower: integer("purchasing_power").notNull(),
