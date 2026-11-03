@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   events,
   gameEvents,
@@ -55,21 +55,16 @@ export async function openGame(
     }
 
     const prices = await priceList(tx, { gameId, eventId: first.eventId });
+    // Added from this event or an earlier one, as the lineup check places it
+    // (a cancelled one counts from the event after it).
     const needed = await tx
       .select({ id: poolAssets.id })
       .from(poolAssets)
-      .innerJoin(
-        gameEvents,
-        and(
-          eq(gameEvents.gameId, poolAssets.gameId),
-          eq(gameEvents.eventId, poolAssets.addedFromEventId),
-        ),
-      )
       .where(
         and(
           eq(poolAssets.gameId, gameId),
           eq(poolAssets.status, "active"),
-          lte(gameEvents.sequence, 1),
+          sql`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId}) <= 1`,
         ),
       );
     const missing = needed.filter((asset) => !prices.has(asset.id));

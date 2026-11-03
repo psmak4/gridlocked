@@ -4,6 +4,7 @@ import {
   gameEvents,
   games,
   rulesetVersions,
+  teamEventStates,
   type GAME_EVENT_STATUSES,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
@@ -90,10 +91,13 @@ export async function createGame(
  * - `ruleset_version_id` is the version whose effective-from event has the
  *   latest `lock_at` at or before this event's. An event before every version
  *   takes the earliest one, so the column is never empty;
- * - a row that is `locked` or later is never changed. Its sequence stays, and
- *   the events still open for planning take the other numbers, in lock order.
- *   So a race called off after qualifying keeps its lock record and its chips
- *   (DM 3.9): only an event cancelled before its lock is cancelled here.
+ * - a row whose lock has started is never changed: one that is `locked` or
+ *   later, whose `lock_at` is at or before `now`, or that has a lock record
+ *   row already (the lock job writes in batches), whatever its status. Its
+ *   sequence stays, and the events still open for planning take the other
+ *   numbers, in lock order. So a race called off after qualifying keeps its
+ *   lock record and its chips (DM 3.9), and an event called off mid-lock
+ *   still locks: only an event cancelled before its lock is cancelled here.
  *
  * An event cancelled before its lock, in the same transaction (DM 3.9): its
  * row becomes `cancelled`, its chips are refunded (`refundChips`), and if it
@@ -155,10 +159,36 @@ export async function planGameEvents(
       return chosen.id;
     };
 
+    // A row is frozen once its lock has started, whatever its status: from
+    // `lock_at` the lineups are fixed, and the lock job writes in batches,
+    // marking the event `locked` only with the last. So an event cancelled
+    // after its lock_at, or with a batch written, still locks (DM 3.9).
+    const started = new Set(
+      (
+        await tx
+          .selectDistinct({ eventId: teamEventStates.eventId })
+          .from(teamEventStates)
+          .where(eq(teamEventStates.gameId, gameId))
+      ).map((row) => row.eventId),
+    );
+    const frozen = new Set(
+      calendar
+        .filter((event) => {
+          const row = existing.get(event.id);
+          return (
+            row !== undefined &&
+            (FROZEN.includes(row.status) ||
+              event.lockAt.getTime() <= now.getTime() ||
+              started.has(event.id))
+          );
+        })
+        .map((event) => event.id),
+    );
+
     // Frozen rows keep their numbers; the rest fill the gaps in lock order.
     const taken = new Set<number>();
     for (const row of existing.values()) {
-      if (FROZEN.includes(row.status) && row.sequence !== null) {
+      if (frozen.has(row.eventId) && row.sequence !== null) {
         taken.add(row.sequence);
       }
     }
@@ -172,7 +202,7 @@ export async function planGameEvents(
     const cancelledNow: { eventId: string; wasOpen: boolean }[] = [];
     for (const event of calendar) {
       const row = existing.get(event.id);
-      if (row && FROZEN.includes(row.status)) continue;
+      if (frozen.has(event.id)) continue;
 
       const cancelled = event.status === "cancelled";
       const status: GameEventStatus = cancelled

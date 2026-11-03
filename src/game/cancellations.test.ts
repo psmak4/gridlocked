@@ -27,6 +27,7 @@ import { GameError } from "./errors";
 import { planGameEvents } from "./games";
 import { lockedLineup, openGame, saveLineup, type LineupPick } from "./lineups";
 import { lockEvent } from "./lock";
+import { withdrawPoolAsset } from "./pool";
 import { priceList, publishPrices } from "./prices";
 import { createTeam } from "./teams";
 
@@ -427,6 +428,101 @@ describe("cancellations (DM 3.9)", () => {
     expect(await statesAt(round2.id)).toEqual(rows);
     expect(rows[0]!.chipPlayId).toBe(chip);
     expect((await gameEventOf(round3.id)).sequence).toBe(3);
+  });
+
+  it("an event cancelled between two lock batches still locks, and its chips stay played", async () => {
+    const other = await team("Two");
+    await saveFor(round1, await picksOf());
+    await toRound2();
+    await saveFor(round2, await picksOf(), other);
+    const chips = [
+      await play(round2, "chip_autopilot"),
+      await play(round2, "chip_no_negative", other),
+    ];
+    // The lock has started: one team of two is written.
+    await at(round2.lockAt);
+    const first = await lockEvent(t.db, round2.lockAt, {
+      gameId,
+      eventId: round2.id,
+      limit: 1,
+    });
+    expect(first).toMatchObject({ written: 1, done: false });
+
+    // The calendar says cancelled now, and the sync plans the game again;
+    // also with a clock that is behind, so the rows decide it on their own.
+    await cancel(round2, new Date(round2.lockAt.getTime() - 60_000));
+    await cancel(round2, await at(new Date(round2.lockAt.getTime() + 60_000)));
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "open",
+      sequence: 2,
+    });
+    expect(await gameEventOf(round3.id)).toMatchObject({
+      status: "upcoming",
+      sequence: 3,
+    });
+    expect((await plays()).map((p) => p.status)).toEqual(["played", "played"]);
+
+    // The lock job finishes, and the event stays locked from then on.
+    const rest = await lockEvent(t.db, round2.lockAt, {
+      gameId,
+      eventId: round2.id,
+      afterTeamId: first.lastTeamId!,
+      limit: 1,
+    });
+    expect(rest.done).toBe(true);
+    await planGameEvents(t.db, round2.lockAt, gameId);
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "locked",
+      sequence: 2,
+    });
+    const rows = await statesAt(round2.id);
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.chipPlayId))).toEqual(new Set(chips));
+    expect((await plays()).map((p) => p.status)).toEqual(["played", "played"]);
+  });
+
+  it("a pool seeded from a round that's then cancelled is still pickable at the next round", async () => {
+    // Round 1, where the pool starts, is called off with its window open.
+    await cancel(round1);
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "open",
+      sequence: 1,
+    });
+    const saved = await saveFor(round2, await picksOf());
+    await lockRound(t.db, gameId, round2.id);
+    expect(await stateOf(round2.id)).toMatchObject({
+      lockedVersionId: saved.versionId,
+      isFirstEvent: true,
+      spent: COST,
+    });
+  });
+
+  it("an asset withdrawn from a cancelled round is withdrawn from the next one", async () => {
+    await saveFor(round1, await picksOf());
+    const opened = await toRound2();
+    await withdrawPoolAsset(t.db, opened, {
+      assetId: await game.assetId("hadjar"),
+      fromEventId: round3.id,
+      reason: "Leaves the team",
+      actor: ACTOR,
+    });
+    await cancel(round3, opened);
+    const locked = await lockRound(t.db, gameId, round2.id);
+    const round4 = await round2026(t.db, 4);
+    await openRound(
+      t.db,
+      await at(new Date(locked.getTime() + HOUR_MS)),
+      gameId,
+      round4.id,
+    );
+
+    // Withdrawn from round 4 on: a new team can't buy him, his owner keeps him.
+    const buyer = await team("Buyer");
+    await expectGameError(
+      saveFor(round4, await picksOf(), buyer),
+      "asset_unavailable",
+    );
+    await saveFor(round4, await picksOf(DRIVERS, CONSTRUCTORS, "piastri"));
   });
 
   it("a refunded chip can be played again later", async () => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, or } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
 import {
   assetPrices,
@@ -27,9 +27,10 @@ const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
 /**
  * From `open` on, an event's prices are fixed (game_rules_5): saves are checked
  * against them. Only a price for an asset that has none may still be added
- * (`carryPrices`, a substitute), until the event locks.
+ * (`carryPrices`, a substitute), until the event locks. A cancelled event's
+ * stay fixed too (game_rules_8): the next event carries them.
  */
-const FIXED: readonly GameEventStatus[] = ["open", ...FROZEN];
+const FIXED: readonly GameEventStatus[] = ["open", ...FROZEN, "cancelled"];
 
 export interface PriceInput {
   assetId: string;
@@ -147,16 +148,16 @@ async function isComplete(
   gameId: string,
   event: { eventId: string; sequence: number | null },
 ): Promise<boolean> {
+  // Placed as the lineup check places them: an asset added from a cancelled
+  // event counts from the event after it.
   const available = await tx
-    .select({ id: poolAssets.id, sequence: gameEvents.sequence })
+    .select({
+      id: poolAssets.id,
+      sequence: sql<
+        number | null
+      >`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId})`,
+    })
     .from(poolAssets)
-    .innerJoin(
-      gameEvents,
-      and(
-        eq(gameEvents.gameId, poolAssets.gameId),
-        eq(gameEvents.eventId, poolAssets.addedFromEventId),
-      ),
-    )
     .where(and(eq(poolAssets.gameId, gameId), eq(poolAssets.status, "active")));
   const priced = new Set(
     (
@@ -204,7 +205,7 @@ export async function publishPrices(
     const event = await loadGameEvent(tx, input.gameId, input.eventId);
     if (FIXED.includes(event.status)) {
       throw new Error(
-        `event ${input.eventId} is ${event.status}: its prices are fixed once it opens`,
+        `event ${input.eventId} is ${event.status}: its prices are fixed once it opens, and when it is cancelled`,
       );
     }
     await upsertPrices(tx, now, { ...input, meta });
