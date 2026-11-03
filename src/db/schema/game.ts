@@ -6,6 +6,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -24,9 +25,9 @@ import {
 // and never the other way (DM 0.5). IDs are UUIDv7 values supplied by the app.
 //
 // Not declared here, because Drizzle cannot express it: the freeze trigger on
-// ruleset_versions and scoring_rules (DM 3.2), and the price freeze on
-// asset_prices (DM 3.5). They live in the `game_rules` and `game_rules_2`
-// migrations.
+// ruleset_versions and scoring_rules (DM 3.2), the price freeze on asset_prices
+// (DM 3.5) and the slot limit on teams (DM 3.6). They live in the `game_rules`,
+// `game_rules_2` and `game_rules_3` migrations.
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
@@ -51,6 +52,9 @@ export const PRICE_SOURCES = [
 /** Prices are in units of $0.1M: $3.0M to $34.0M (DM 3.5). */
 export const PRICE_MIN = 30;
 export const PRICE_MAX = 340;
+export const TEAM_STATUSES = ["active", "retired"] as const;
+/** A team's name, in characters (DM 3.6). */
+export const TEAM_NAME_MAX = 30;
 export const SCORING_TARGETS = ["driver", "constructor"] as const;
 /** The calculations the scoring engine knows (HLD 5.6, DM 3.2). */
 export const SCORING_RULE_KINDS = [
@@ -260,5 +264,42 @@ export const assetPrices = pgTable(
     ),
     check("asset_prices_source_check", oneOf(t.source, PRICE_SOURCES)),
     index("asset_prices_event_id_idx").on(t.eventId),
+  ],
+);
+
+/**
+ * DM 3.6: a user's team in a game. `user_id` is a plain uuid until `users`
+ * arrives in M5, which adds the foreign key. `slot` runs from 1 to the
+ * ruleset's `teamsPerUser` (trigger), and a retired team keeps its slot.
+ */
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey(),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    userId: uuid("user_id").notNull(),
+    slot: smallint("slot").notNull(),
+    name: text("name").notNull(),
+    /**
+     * The team's first locked event, set by the first lock it takes part in.
+     * Null until then, and while null the team can be deleted outright.
+     */
+    firstEventId: uuid("first_event_id").references(() => events.id, {
+      onDelete: "restrict",
+    }),
+    status: text("status", { enum: TEAM_STATUSES }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique("teams_game_id_user_id_slot_unique").on(t.gameId, t.userId, t.slot),
+    check("teams_status_check", oneOf(t.status, TEAM_STATUSES)),
+    check(
+      "teams_name_check",
+      sql`char_length(${t.name}) between 1 and ${sql.raw(String(TEAM_NAME_MAX))}`,
+    ),
+    index("teams_user_id_idx").on(t.userId),
   ],
 );

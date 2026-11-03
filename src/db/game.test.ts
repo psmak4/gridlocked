@@ -14,6 +14,7 @@ import {
   rulesetVersions,
   scoringRules,
   seasons,
+  teams,
 } from "./schema";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
@@ -383,6 +384,134 @@ describe("pool assets and prices (DM 3.4, 3.5)", () => {
         .update(assetPrices)
         .set({ source: "guess" as never })
         .where(where()),
+      CHECK_VIOLATION,
+    );
+  });
+});
+
+describe("teams (DM 3.6)", () => {
+  let t: TestDb;
+  let seasonId: string;
+  let eventId: string;
+  let gameId: string;
+  const userId = newId();
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    seasonId = newId();
+    await t.db
+      .insert(seasons)
+      .values({ id: seasonId, year: 2026, status: "active" });
+    const circuitId = newId();
+    await t.db.insert(circuits).values({
+      id: circuitId,
+      slug: "melbourne",
+      name: "Albert Park",
+      locality: "Melbourne",
+      country: "Australia",
+      latitude: "-37.849700",
+      longitude: "144.968000",
+      timezone: "Australia/Melbourne",
+    });
+    eventId = newId();
+    await t.db.insert(events).values({
+      id: eventId,
+      seasonId,
+      round: 1,
+      slug: "2026-australia",
+      name: "Australian Grand Prix",
+      circuitId,
+      format: "standard",
+      status: "scheduled",
+      lockAt: NOW,
+      lockAtSource: "default",
+    });
+    gameId = newId();
+    await t.db.insert(games).values({
+      id: gameId,
+      seasonId,
+      gameType: "season_fantasy",
+      slug: "2026-fantasy",
+      name: "2026 Fantasy",
+      status: "open",
+    });
+    await addVersion(1, 3);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  const addVersion = (version: number, teamsPerUser: number) =>
+    t.db.insert(rulesetVersions).values({
+      id: newId(),
+      gameId,
+      version,
+      effectiveFromEventId: eventId,
+      params: { teamsPerUser },
+      notes: `v${version}`,
+      publishedAt: NOW,
+    });
+  const teamRow = (slot: number, name = `Team ${slot}`) => ({
+    id: newId(),
+    gameId,
+    userId,
+    slot,
+    name,
+    status: "active" as const,
+  });
+
+  it("slots 1 to 3 are accepted", async () => {
+    await t.db.insert(teams).values([1, 2, 3].map((slot) => teamRow(slot)));
+    expect(await t.db.select().from(teams)).toHaveLength(3);
+  });
+
+  it("slot 4 is refused by the database", async () => {
+    await expectPgError(t.db.insert(teams).values(teamRow(4)), CHECK_VIOLATION);
+    await expectPgError(t.db.insert(teams).values(teamRow(0)), CHECK_VIOLATION);
+  });
+
+  it("the limit is the latest version's teamsPerUser", async () => {
+    await addVersion(2, 2);
+    await t.db.insert(teams).values(teamRow(2));
+    await expectPgError(t.db.insert(teams).values(teamRow(3)), CHECK_VIOLATION);
+  });
+
+  it("a slot is a user's once per game", async () => {
+    await t.db.insert(teams).values(teamRow(1));
+    await expectPgError(
+      t.db.insert(teams).values(teamRow(1, "Other")),
+      UNIQUE_VIOLATION,
+    );
+  });
+
+  it("two creates for the same slot can't both succeed", async () => {
+    const attempt = () =>
+      t.db.transaction(async (tx) => {
+        await tx.insert(teams).values(teamRow(3));
+      });
+    const results = await Promise.allSettled([attempt(), attempt()]);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    expect(await t.db.select().from(teams)).toHaveLength(1);
+  });
+
+  it("a name must be 1 to 30 characters, and a status active or retired", async () => {
+    await expectPgError(
+      t.db.insert(teams).values(teamRow(1, "")),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(
+      t.db.insert(teams).values(teamRow(1, "x".repeat(31))),
+      CHECK_VIOLATION,
+    );
+    await t.db.insert(teams).values(teamRow(1));
+    await expectPgError(
+      t.db
+        .update(teams)
+        .set({ status: "gone" as never })
+        .where(eq(teams.userId, userId)),
       CHECK_VIOLATION,
     );
   });
