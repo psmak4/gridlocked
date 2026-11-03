@@ -362,6 +362,10 @@ export const lineupVersions = pgTable(
       t.forEventId,
       t.savedAt.desc(),
     ),
+    // One Late Call version per team per event: the chip allows one swap.
+    uniqueIndex("lineup_versions_team_id_for_event_id_final_fix_unique")
+      .on(t.teamId, t.forEventId)
+      .where(sql`${t.kind} = 'final_fix'`),
   ],
 );
 

@@ -37,13 +37,22 @@ const REFUSALS: Record<string, GameErrorCode> = {
   GL007: "chip_window_closed",
 };
 const UNIQUE_VIOLATION = "23505";
+/**
+ * The unique indexes a chip limit rests on: once per season and one per race
+ * (`chip_plays`), and one Late Call version per team and event.
+ */
+const CHIP_LIMITS = [
+  "chip_plays_team_id_chip_code_played_unique",
+  "chip_plays_team_id_event_id_played_unique",
+  "lineup_versions_team_id_for_event_id_final_fix_unique",
+];
 
 /**
  * Turns a database refusal into a `GameError`. Drivers wrap the Postgres error
  * as the `cause` of their own, so the SQLSTATE is looked for down the chain.
- * A unique violation on `chip_plays` is a chip already played this season, or
- * another chip played for the race (its two partial unique indexes). Anything
- * else is returned as it came.
+ * A unique violation on a chip limit (`CHIP_LIMITS`) is a chip already played
+ * this season, another one played for the race, or a second Late Call version
+ * for the event. Anything else is returned as it came.
  */
 export function refusal(error: unknown): unknown {
   for (
@@ -60,11 +69,10 @@ export function refusal(error: unknown): unknown {
         (message || mapped).replace(/^(lineup|chip): /, ""),
       );
     }
+    const names = `${typeof constraint === "string" ? constraint : ""} ${message}`;
     if (
       code === UNIQUE_VIOLATION &&
-      `${typeof constraint === "string" ? constraint : ""} ${message}`.includes(
-        "chip_plays_",
-      )
+      CHIP_LIMITS.some((name) => names.includes(name))
     ) {
       return new GameError(
         "chip_unavailable",

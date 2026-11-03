@@ -1,5 +1,5 @@
 {
-  "id": "8878060e-47ae-4d60-88f7-d6f7439bb101",
+  "id": "c400a9e2-ae7a-4995-b784-bb565fcd6f03",
   "prevId": "c1931e66-bd81-414b-8e83-d5ac9acdccc2",
   "version": "7",
   "dialect": "postgresql",
@@ -3388,6 +3388,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lineup_versions_team_id_for_event_id_final_fix_unique": {
+          "name": "lineup_versions_team_id_for_event_id_final_fix_unique",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "for_event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"lineup_versions\".\"kind\" = 'final_fix'",
           "concurrently": false,
           "method": "btree",
           "with": {}

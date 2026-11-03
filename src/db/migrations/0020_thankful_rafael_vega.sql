@@ -19,4 +19,5 @@ ALTER TABLE "chip_plays" ADD CONSTRAINT "chip_plays_target_asset_id_pool_assets_
 CREATE UNIQUE INDEX "chip_plays_team_id_chip_code_played_unique" ON "chip_plays" USING btree ("team_id","chip_code") WHERE "chip_plays"."status" = 'played';--> statement-breakpoint
 CREATE UNIQUE INDEX "chip_plays_team_id_event_id_played_unique" ON "chip_plays" USING btree ("team_id","event_id") WHERE "chip_plays"."status" = 'played';--> statement-breakpoint
 CREATE INDEX "chip_plays_event_id_played_idx" ON "chip_plays" USING btree ("event_id") WHERE "chip_plays"."status" = 'played';--> statement-breakpoint
-ALTER TABLE "team_event_states" ADD CONSTRAINT "team_event_states_chip_play_id_chip_plays_id_fk" FOREIGN KEY ("chip_play_id") REFERENCES "public"."chip_plays"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "team_event_states" ADD CONSTRAINT "team_event_states_chip_play_id_chip_plays_id_fk" FOREIGN KEY ("chip_play_id") REFERENCES "public"."chip_plays"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "lineup_versions_team_id_for_event_id_final_fix_unique" ON "lineup_versions" USING btree ("team_id","for_event_id") WHERE "lineup_versions"."kind" = 'final_fix';

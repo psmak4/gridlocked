@@ -22,7 +22,7 @@ import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
 import { playChip, refundChips, saveFinalFix } from "./chips";
-import { GameError } from "./errors";
+import { GameError, refusal } from "./errors";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { publishPrices } from "./prices";
 import { createTeam, removeTeam } from "./teams";
@@ -41,6 +41,8 @@ const DRIVERS = ["norris", "piastri", "hulkenberg", "hadjar", "bearman"];
 const CONSTRUCTORS = ["haas", "audi"];
 const COST = 950;
 const RESTRICT_VIOLATION = "23001";
+const CHECK_VIOLATION = "23514";
+const UNIQUE_VIOLATION = "23505";
 const COMPOSITION = "GL002";
 
 type ResultState = (typeof RESULT_STATES)[number];
@@ -635,10 +637,8 @@ describe("chips (DM 3.9)", () => {
     const now = await lateCallWindow(round2.id);
     await expectGameError(lateCall(now, "norris", "mclaren"), "composition");
     expect(await plays()).toHaveLength(0);
-    // One swap, then a second Late Call for another.
-    await lateCall(now, "hadjar", "lawson");
-    await expectGameError(lateCall(now, "bearman", "ocon"), "chip_unavailable");
-    // The database refuses a Late Call version with two swaps.
+    // The database refuses a Late Call version with two swaps, even with the
+    // chip played alongside it.
     const { race } = await weekend(round2.id);
     const two = await picksOf(
       ["norris", "piastri", "hulkenberg", "lawson", "ocon"],
@@ -646,6 +646,14 @@ describe("chips (DM 3.9)", () => {
     );
     await expectPgError(
       t.db.transaction(async (tx) => {
+        await tx.insert(chipPlays).values({
+          id: newId(),
+          teamId,
+          gameId,
+          chipCode: "chip_final_fix",
+          eventId: round2.id,
+          status: "played",
+        });
         const id = newId();
         await tx.insert(lineupVersions).values({
           id,
@@ -661,6 +669,10 @@ describe("chips (DM 3.9)", () => {
       }),
       COMPOSITION,
     );
+    expect(await plays()).toHaveLength(0);
+    // One swap, then a second Late Call for another.
+    await lateCall(now, "hadjar", "lawson");
+    await expectGameError(lateCall(now, "bearman", "ocon"), "chip_unavailable");
     expect(
       await t.db
         .select()
@@ -679,6 +691,99 @@ describe("chips (DM 3.9)", () => {
     );
     expect(await plays()).toHaveLength(0);
     expect((await stateOf(round2.id))!.finalFixVersionId).toBeNull();
+  });
+
+  it("a second one-swap Late Call version for the same event is refused", async () => {
+    const first = await lockedRound2();
+    const now = await lateCallWindow(round2.id);
+    await lateCall(now, "hadjar", "lawson");
+    // Another single swap against the locked lineup, inside the window, with
+    // Late Call played: still only one Late Call version per event.
+    const { race } = await weekend(round2.id);
+    const other = await picksOf(
+      ["norris", "piastri", "hulkenberg", "hadjar", "ocon"],
+      CONSTRUCTORS,
+    );
+    const insert = t.db.transaction(async (tx) => {
+      const id = newId();
+      await tx.insert(lineupVersions).values({
+        id,
+        teamId,
+        forEventId: round2.id,
+        kind: "final_fix",
+        effectiveFromSessionId: race.id,
+        basedOnVersionId: first.versionId,
+      });
+      await tx
+        .insert(lineupPicks)
+        .values(other.map((p) => ({ lineupVersionId: id, ...p })));
+    });
+    const error = await insert.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await expectPgError(Promise.reject(error), UNIQUE_VIOLATION);
+    const mapped = refusal(error);
+    expect(mapped).toBeInstanceOf(GameError);
+    expect((mapped as GameError).code).toBe("chip_unavailable");
+    expect(
+      await t.db
+        .select()
+        .from(lineupVersions)
+        .where(eq(lineupVersions.kind, "final_fix")),
+    ).toHaveLength(1);
+  });
+
+  it("a lock record can't point at another team's or event's Late Call or chip", async () => {
+    const other = await team("Two");
+    const first = await saveFor(round1, await picksOf());
+    await saveFor(round1, await picksOf(), other);
+    await advance(round1, round2);
+    await lockRound(t.db, gameId, round2.id);
+    const { versionId, chipPlayId } = await lateCall(
+      await lateCallWindow(round2.id),
+      "hadjar",
+      "lawson",
+    );
+    const rowOf = (eventId: string, id: string) =>
+      and(eq(teamEventStates.teamId, id), eq(teamEventStates.eventId, eventId));
+    const point = (
+      eventId: string,
+      id: string,
+      set: { finalFixVersionId?: string; chipPlayId?: string },
+    ) => t.db.update(teamEventStates).set(set).where(rowOf(eventId, id));
+
+    // Another team's.
+    await expectPgError(
+      point(round2.id, other, { finalFixVersionId: versionId }),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(
+      point(round2.id, other, { chipPlayId }),
+      CHECK_VIOLATION,
+    );
+    // Another event's.
+    await expectPgError(
+      point(round1.id, teamId, { finalFixVersionId: versionId }),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(
+      point(round1.id, teamId, { chipPlayId }),
+      CHECK_VIOLATION,
+    );
+    // A version of the team and event that isn't a Late Call one.
+    await expectPgError(
+      point(round1.id, teamId, { finalFixVersionId: first.versionId }),
+      CHECK_VIOLATION,
+    );
+    expect(await stateOf(round2.id, other)).toMatchObject({
+      finalFixVersionId: null,
+      chipPlayId: null,
+    });
+    expect(await stateOf(round2.id)).toMatchObject({
+      finalFixVersionId: versionId,
+      chipPlayId,
+    });
   });
 
   it("after Late Call, the next event's base is the locked lineup, not the Late Call one", async () => {

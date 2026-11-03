@@ -252,6 +252,45 @@ CREATE TRIGGER "chip_plays_guard"
   FOR EACH ROW EXECUTE FUNCTION "chip_plays_guard"();
 --> statement-breakpoint
 
+-- A lock record points at its own team's and event's Late Call (DM 3.8): a
+-- final_fix_version_id, when set, is a `final_fix` version of the row's team
+-- for the row's event, and a chip_play_id, when set, is a chip play of the
+-- row's team for the row's event. Otherwise a record could borrow another
+-- team's or event's swap, outside the chip limit. With one final_fix version
+-- per team and event (the partial unique index), the swap is the chip's one.
+CREATE FUNCTION "team_event_states_own_chip"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW."final_fix_version_id" IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM "lineup_versions" v
+    WHERE v."id" = NEW."final_fix_version_id" AND v."kind" = 'final_fix'
+      AND v."team_id" = NEW."team_id" AND v."for_event_id" = NEW."event_id"
+  ) THEN
+    RAISE EXCEPTION 'team_event_states: final_fix_version_id is not this team''s Late Call for this event'
+      USING ERRCODE = 'check_violation',
+            DETAIL = format('team %s, event %s: lineup_versions %s',
+                            NEW."team_id", NEW."event_id", NEW."final_fix_version_id");
+  END IF;
+  IF NEW."chip_play_id" IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM "chip_plays" cp
+    WHERE cp."id" = NEW."chip_play_id"
+      AND cp."team_id" = NEW."team_id" AND cp."event_id" = NEW."event_id"
+  ) THEN
+    RAISE EXCEPTION 'team_event_states: chip_play_id is not this team''s chip for this event'
+      USING ERRCODE = 'check_violation',
+            DETAIL = format('team %s, event %s: chip_plays %s',
+                            NEW."team_id", NEW."event_id", NEW."chip_play_id");
+  END IF;
+  RETURN NEW;
+END;
+$$;
+--> statement-breakpoint
+CREATE TRIGGER "team_event_states_own_chip"
+  BEFORE INSERT OR UPDATE OF "team_id", "event_id", "final_fix_version_id", "chip_play_id"
+  ON "team_event_states"
+  FOR EACH ROW EXECUTE FUNCTION "team_event_states_own_chip"();
+--> statement-breakpoint
+
 -- team_base_state of game_rules_5, with the Limitless week read from the
 -- chip: a week is a Limitless one when the row's chip_play_id is a played
 -- chip whose effect is `limitless`, whatever kind of version locked (a team
