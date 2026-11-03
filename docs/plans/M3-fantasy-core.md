@@ -528,7 +528,7 @@ The spec left three things open that change what gets built. All three were appr
     7. two devices (a stale base);
     8. a team that keeps a driver who is withdrawn mid-season.
 
-    The script also cancels one round before its lock (a synthetic stand-in for Bahrain or Saudi Arabia 2026, which Jolpica's 2026 calendar no longer lists), with a chip played for it. It includes a save one minute before a lock and one at the lock, wrapped in `expectRefused`.
+    The script also cancels one round before its lock (synthetic: no 2026 round was cancelled outright. Saudi Arabia is off the calendar, and Bahrain moved to round 16 as the Bahrain Grand Prix in Malaysia, at Sepang), with a chip played for it. It includes a save one minute before a lock and one at the lock, wrapped in `expectRefused`.
   - `invariants.test.ts`: `each invariant reports a hand-broken state row`, one case per check, by writing a bad row directly.
   - `season-game.test.ts`:
     - `the 2026 season replays with no rule violations`: `violations` is `[]`;
