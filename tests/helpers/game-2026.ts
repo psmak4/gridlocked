@@ -125,8 +125,10 @@ export async function lockRound(
 }
 
 /**
- * Opens an event as the open job does (Task 6): prices carried where it has
- * none, then the event is `open`. The clock is left where it is.
+ * Opens an event as the open job does (`createGameHandlers`' `game_open`), in
+ * one transaction: prices carried for every asset with none, even after a full
+ * list was published, then the event goes from `upcoming` to `open`. The
+ * clock is left where it is.
  */
 export async function openRound(
   db: Db,
@@ -134,9 +136,17 @@ export async function openRound(
   gameId: string,
   eventId: string,
 ) {
-  await carryPrices(db, now, { gameId, eventId });
-  await db
-    .update(gameEvents)
-    .set({ status: "open", updatedAt: now })
-    .where(and(eq(gameEvents.gameId, gameId), eq(gameEvents.eventId, eventId)));
+  await db.transaction(async (tx) => {
+    await carryPrices(tx, now, { gameId, eventId });
+    await tx
+      .update(gameEvents)
+      .set({ status: "open", updatedAt: now })
+      .where(
+        and(
+          eq(gameEvents.gameId, gameId),
+          eq(gameEvents.eventId, eventId),
+          eq(gameEvents.status, "upcoming"),
+        ),
+      );
+  });
 }

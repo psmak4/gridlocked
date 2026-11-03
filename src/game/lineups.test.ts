@@ -132,6 +132,24 @@ describe("lineups (DM 3.7)", () => {
       const [g] = await t.db.select().from(games).where(eq(games.id, gameId));
       expect(g!.status).toBe("setup");
     });
+
+    it("is refused while an asset withdrawn from a later event has no price", async () => {
+      await t.db.update(games).set({ status: "setup" });
+      await t.db.update(gameEvents).set({ status: "upcoming" });
+      const round2 = await round2026(t.db, 2);
+      const bottas = await game.assetId("bottas");
+      // Withdrawn in the pool at once, but pickable at round 1.
+      await withdrawPoolAsset(t.db, NOW, {
+        assetId: bottas,
+        fromEventId: round2.id,
+        reason: "Leaves after Australia",
+        actor: ACTOR,
+      });
+      await t.db.delete(assetPrices).where(eq(assetPrices.assetId, bottas));
+      await expect(openGame(t.db, NOW, gameId)).rejects.toThrow(/price/);
+      const [g] = await t.db.select().from(games).where(eq(games.id, gameId));
+      expect(g!.status).toBe("setup");
+    });
   });
 
   it("a save one second before lock counts", async () => {

@@ -102,7 +102,7 @@ export async function createGame(
  * An event cancelled before its lock, in the same transaction (DM 3.9): its
  * row becomes `cancelled`, its chips are refunded (`refundChips`), and if it
  * was the open event, the next upcoming one opens at once, with its prices
- * carried first when none were published (`carryPrices`: the cancelled
+ * carried first for every asset that has none (`carryPrices`: the cancelled
  * event's, so prices don't change). Nothing locks for it, and lineups saved
  * for it count at the next lock (`lockedLineup`).
  *
@@ -263,9 +263,7 @@ export async function planGameEvents(
         .orderBy(asc(gameEvents.sequence))
         .limit(1);
       if (next) {
-        if (next.pricesReadyAt === null) {
-          await carryPrices(tx, now, { gameId, eventId: next.eventId });
-        }
+        await carryPrices(tx, now, { gameId, eventId: next.eventId });
         await tx
           .update(gameEvents)
           .set({ status: "open", updatedAt: now })

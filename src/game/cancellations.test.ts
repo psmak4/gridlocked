@@ -381,6 +381,47 @@ describe("cancellations (DM 3.9)", () => {
     ).toEqual(rows);
   });
 
+  it("the event opened for a cancelled one carries an owned asset's price, though its list was complete when published", async () => {
+    const bearman = await game.assetId("bearman");
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bearman,
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    // Round 3's full list, published before anyone owned Bearman.
+    await publishPrices(t.db, NOW, {
+      gameId,
+      eventId: round3.id,
+      source: "admin",
+      reason: "Early prices for Japan",
+      actor: ACTOR,
+      prices: [...(await priceList(t.db, { gameId, eventId: round1.id }))]
+        .filter(([assetId]) => assetId !== bearman)
+        .map(([assetId, price]) => ({ assetId, price })),
+    });
+    expect((await gameEventOf(round3.id)).pricesReadyAt).toEqual(NOW);
+    await saveFor(round1, await picksOf());
+    await toRound2();
+    const when = await cancel(round2);
+
+    // Round 3 opens with Bearman's price carried, so his owner can save and
+    // lock with him.
+    const saved = await saveLineup(t.db, when, {
+      teamId,
+      picks: await picksOf(),
+      basedOnVersionId: null,
+    });
+    await lockRound(t.db, gameId, round3.id);
+    expect(await stateOf(round3.id)).toMatchObject({
+      lockedVersionId: saved.versionId,
+      spent: COST,
+    });
+    expect(
+      (await priceList(t.db, { gameId, eventId: round3.id })).get(bearman),
+    ).toBe(80);
+  });
+
   it("an upcoming event cancelled while another is open opens nothing", async () => {
     await saveFor(round1, await picksOf());
     const opened = await toRound2();

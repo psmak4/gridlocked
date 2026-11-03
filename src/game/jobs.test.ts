@@ -22,9 +22,12 @@ import { gameLockKey, gameOpenKey, type GameOpenPayload } from "@/jobs/kinds";
 import { enqueue } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
 import { setSimulatedClock } from "@/replay/clock-loop";
+import type { StaffActor } from "@/staff/roster";
 import { RULESET_2026 } from "./ruleset";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { createGameHandlers, planGameJobs } from "./jobs";
+import { withdrawPoolAsset } from "./pool";
+import { priceList, publishPrices } from "./prices";
 import { createTeam } from "./teams";
 
 // The lock and open jobs over the recorded 2026 game. The jobs are driven the
@@ -35,6 +38,7 @@ const NOW = new Date("2026-02-01T09:00:00.000Z");
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const LEASE = 5 * MIN;
+const ACTOR: StaffActor = { kind: "admin", label: "staff" };
 
 describe("the game jobs (HLD §3.3)", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
@@ -555,5 +559,147 @@ describe("the game jobs (HLD §3.3)", () => {
     await at(new Date(first.getTime() + 6 * HOUR));
     expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
     expect(await statusOf(round2.id)).toBe("open");
+  });
+  /**
+   * An admin publishes a full list for round 2 at `now`: round 1's price for
+   * every asset whose pool status is `active`.
+   */
+  async function publishActiveList(now: Date) {
+    const active = new Set(
+      (
+        await t.db
+          .select({ id: poolAssets.id })
+          .from(poolAssets)
+          .where(
+            and(eq(poolAssets.gameId, gameId), eq(poolAssets.status, "active")),
+          )
+      ).map((a) => a.id),
+    );
+    await publishPrices(t.db, now, {
+      gameId,
+      eventId: round2.id,
+      source: "admin",
+      reason: "Prices after Australia",
+      actor: ACTOR,
+      prices: [...(await priceList(t.db, { gameId, eventId: round1.id }))]
+        .filter(([assetId]) => active.has(assetId))
+        .map(([assetId, price]) => ({ assetId, price })),
+    });
+  }
+  /** Round 1 is completed, and round 2's planned open job runs. */
+  async function openRound2() {
+    await complete(round1.id);
+    await planGameJobs(t.db, gameId);
+    const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
+    await at(planned);
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round2.id)).toBe("open");
+    return planned;
+  }
+
+  it("an owned asset withdrawn from round 2 has its price carried when round 2 opens, after a full list was published", async () => {
+    const teamId = await teamWithLineup();
+    const locked = await lockRound(t.db, gameId, round1.id);
+    const bearman = await game.assetId("bearman");
+    await withdrawPoolAsset(t.db, locked, {
+      assetId: bearman,
+      fromEventId: round2.id,
+      reason: "Leaves the grid",
+      actor: ACTOR,
+    });
+    await publishActiveList(locked);
+    const opened = await openRound2();
+
+    // The team still owns Bearman: it can save and lock with him, at his
+    // carried price.
+    const saved = await saveLineup(t.db, opened, {
+      teamId,
+      picks: await picks(),
+      basedOnVersionId: null,
+    });
+    await lockRound(t.db, gameId, round2.id);
+    expect(
+      (await lockStates()).find((s) => s.eventId === round2.id),
+    ).toMatchObject({ teamId, lockedVersionId: saved.versionId, bank: 50 });
+    expect(
+      (await priceList(t.db, { gameId, eventId: round2.id })).get(bearman),
+    ).toBe(80);
+  });
+
+  it("an asset withdrawn from round 3 is still priced for round 2, where it can be bought", async () => {
+    const teamId = await teamWithLineup();
+    const bottas = await game.assetId("bottas");
+    const round3 = await round2026(t.db, 3);
+    // Its pool status is `withdrawn` at once, but it goes from round 3.
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bottas,
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    const locked = await lockRound(t.db, gameId, round1.id);
+    await publishActiveList(locked);
+    const opened = await openRound2();
+
+    // Bearman (80) out, Bottas (36) in.
+    const bearman = await game.assetId("bearman");
+    const saved = await saveLineup(t.db, opened, {
+      teamId,
+      picks: (await picks()).map((p) =>
+        p.assetId === bearman ? { assetId: bottas, isBoost: false } : p,
+      ),
+      basedOnVersionId: null,
+    });
+    await lockRound(t.db, gameId, round2.id);
+    expect(
+      (await lockStates()).find((s) => s.eventId === round2.id),
+    ).toMatchObject({ teamId, lockedVersionId: saved.versionId, bank: 94 });
+    expect(
+      (await priceList(t.db, { gameId, eventId: round2.id })).get(bottas),
+    ).toBe(36);
+  });
+  it("a list of the active assets isn't complete while a withdrawn asset is owned, or still pickable, at the event", async () => {
+    await teamWithLineup();
+    const round3 = await round2026(t.db, 3);
+    const bottas = await game.assetId("bottas");
+    const bearman = await game.assetId("bearman");
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bottas,
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    const locked = await lockRound(t.db, gameId, round1.id);
+    await withdrawPoolAsset(t.db, locked, {
+      assetId: bearman,
+      fromEventId: round2.id,
+      reason: "Leaves the grid",
+      actor: ACTOR,
+    });
+    const readyAt = async () =>
+      (
+        await t.db
+          .select()
+          .from(gameEvents)
+          .where(eq(gameEvents.eventId, round2.id))
+      )[0]!.pricesReadyAt;
+    const priceOne = (assetId: string, price: number) =>
+      publishPrices(t.db, locked, {
+        gameId,
+        eventId: round2.id,
+        source: "admin",
+        reason: "Prices after Australia",
+        actor: ACTOR,
+        prices: [{ assetId, price }],
+      });
+
+    await publishActiveList(locked);
+    expect(await readyAt()).toBeNull();
+    // Bottas can still be bought at round 2...
+    await priceOne(bottas, 36);
+    expect(await readyAt()).toBeNull();
+    // ...and the team owns Bearman.
+    await priceOne(bearman, 80);
+    expect(await readyAt()).toEqual(locked);
   });
 });

@@ -143,7 +143,6 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
       eventId: gameEvents.eventId,
       sequence: gameEvents.sequence,
       status: gameEvents.status,
-      pricesReadyAt: gameEvents.pricesReadyAt,
       lockAt: events.lockAt,
       eventStatus: events.status,
       params: rulesetVersions.params,
@@ -181,8 +180,8 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
  * - **`game_open`** opens an `upcoming` event once the event before it has
  *   locked, and either that event is `completed` or the event's own lock is
  *   less than the ruleset's `window.openCutoffHours` away (24 in 2026). Prices
- *   are carried when none were published, then the event is `open`, in one
- *   transaction. Until then it re-checks every `window.recheckHours` (6)
+ *   are carried for every asset that has none (`carryPrices`), then the event
+ *   is `open`, in one transaction. Until then it re-checks every `window.recheckHours` (6)
  *   under `…:<n>`.
  *
  * Every job that puts itself off carries its counter on (`wait`, `attempt`),
@@ -290,11 +289,10 @@ export function createGameHandlers(
 
     await db.transaction(async (tx) => {
       // The prices are the list the lineups are checked against: carried from
-      // the last event when none were published (M4 publishes the formula's
-      // before this runs).
-      if (own.pricesReadyAt === null) {
-        await carryPrices(tx, now, { gameId, eventId });
-      }
+      // the last event for every asset with none, even after a full list was
+      // published (M4 publishes the formula's before this runs), since an
+      // owned asset withdrawn since still needs one.
+      await carryPrices(tx, now, { gameId, eventId });
       await tx
         .update(gameEvents)
         .set({ status: "open", updatedAt: now })
