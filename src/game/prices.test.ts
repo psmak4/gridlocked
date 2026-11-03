@@ -11,7 +11,8 @@ import {
   PRICE_MIN,
 } from "@/db/schema";
 import type { StaffActor } from "@/staff/roster";
-import { withdrawPoolAsset } from "./pool";
+import { openGame } from "./lineups";
+import { addPoolAsset, withdrawPoolAsset } from "./pool";
 import { carryPrices, priceList, publishPrices } from "./prices";
 
 // Per-event prices over the recorded 2026 reference data.
@@ -139,6 +140,70 @@ describe("per-event prices (DM 3.5)", () => {
     await expect(
       carryPrices(t.db, NOW, { gameId: game.gameId, eventId: round1.id }),
     ).rejects.toThrow(/locked/);
+  });
+
+  it("an open event's prices can't change", async () => {
+    // Every save in the window is checked against them (DM 3.5).
+    const round1 = await eventOf(1);
+    const assetId = await game.assetId("norris");
+    await openGame(t.db, NOW, game.gameId);
+    const where = and(
+      eq(assetPrices.assetId, assetId),
+      eq(assetPrices.eventId, round1.id),
+    );
+    await expectPgError(
+      t.db.update(assetPrices).set({ price: 281 }).where(where),
+      RESTRICT_VIOLATION,
+    );
+    await expectPgError(
+      t.db.delete(assetPrices).where(where),
+      RESTRICT_VIOLATION,
+    );
+    await expect(
+      publishPrices(t.db, NOW, {
+        gameId: game.gameId,
+        eventId: round1.id,
+        source: "admin",
+        prices: [{ assetId, price: 281 }],
+        reason: "correction",
+        actor: ACTOR,
+      }),
+    ).rejects.toThrow(/is open: its prices are fixed/);
+    expect((await list(1)).get(assetId)).toBe(280);
+    expect(
+      await t.db.select().from(auditLog).where(eq(auditLog.entityId, assetId)),
+    ).toHaveLength(0);
+  });
+
+  it("a substitute can still be priced for an open event", async () => {
+    const round1 = await eventOf(1);
+    await openGame(t.db, NOW, game.gameId);
+    const tsunoda = await t.db.query.providerIds.findFirst({
+      where: (p, { and, eq }) =>
+        and(eq(p.providerKey, "tsunoda"), eq(p.entityType, "driver")),
+    });
+    const assetId = await addPoolAsset(t.db, NOW, {
+      gameId: game.gameId,
+      driverId: tsunoda!.entityId,
+      fromEventId: round1.id,
+      price: 56,
+      reason: "Replaces an injured driver",
+      actor: ACTOR,
+    });
+    expect((await list(1)).get(assetId)).toBe(56);
+    // Once priced, that price is fixed too.
+    await expectPgError(
+      t.db
+        .update(assetPrices)
+        .set({ price: 60 })
+        .where(
+          and(
+            eq(assetPrices.assetId, assetId),
+            eq(assetPrices.eventId, round1.id),
+          ),
+        ),
+      RESTRICT_VIOLATION,
+    );
   });
 
   it("an admin price is audited and replaces the old one", async () => {

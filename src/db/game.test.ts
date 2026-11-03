@@ -323,18 +323,30 @@ describe("pool assets and prices (DM 3.4, 3.5)", () => {
     await t.close();
   });
 
-  const setEventStatus = (status: "open" | "locked") =>
+  const setEventStatus = (status: "upcoming" | "open" | "locked") =>
     t.db
       .update(gameEvents)
       .set({ status })
       .where(eq(gameEvents.eventId, eventId));
   const where = () => eq(assetPrices.assetId, assetId);
 
-  it("a price can change until its event locks", async () => {
-    await setEventStatus("open");
+  it("a price can change until its event opens", async () => {
+    await setEventStatus("upcoming");
     await t.db.update(assetPrices).set({ price: 290 }).where(where());
     const [row] = await t.db.select().from(assetPrices);
     expect(row!.price).toBe(290);
+  });
+
+  it("a price of an open event can't be changed or removed", async () => {
+    await setEventStatus("open");
+    await expectPgError(
+      t.db.update(assetPrices).set({ price: 290 }).where(where()),
+      RESTRICT_VIOLATION,
+    );
+    await expectPgError(
+      t.db.delete(assetPrices).where(where()),
+      RESTRICT_VIOLATION,
+    );
   });
 
   it("a price of a locked event can't be changed or removed", async () => {
@@ -772,29 +784,37 @@ describe("lineup versions (DM 3.7)", () => {
     expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
   });
 
-  it("a lineup over the team's purchasing power is refused, unless it is limitless", async () => {
+  /** Prices are fixed once an event is open: reprice it while upcoming. */
+  const repriceDriver = async (price: number) => {
+    const event = eq(gameEvents.eventId, eventId);
+    await t.db.update(gameEvents).set({ status: "upcoming" }).where(event);
     await t.db
       .update(assetPrices)
-      .set({ price: 70 })
+      .set({ price })
       .where(eq(assetPrices.assetId, driverAsset));
+    await t.db.update(gameEvents).set({ status: "open" }).where(event);
+  };
+
+  it("a lineup over the team's purchasing power is refused, unless it is limitless", async () => {
+    await repriceDriver(70);
     // 70 + 40 against a first event's budget of 100.
     await expectPgError(saveVersion(), OVER_BUDGET);
     expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
     await saveVersion({ kind: "limitless" });
     expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
     // 60 + 40 is exactly the budget.
-    await t.db
-      .update(assetPrices)
-      .set({ price: 60 })
-      .where(eq(assetPrices.assetId, driverAsset));
+    await repriceDriver(60);
     await saveVersion();
     expect(await t.db.select().from(lineupVersions)).toHaveLength(2);
   });
 
   it("an asset with no price at the event can't be saved", async () => {
+    const event = eq(gameEvents.eventId, eventId);
+    await t.db.update(gameEvents).set({ status: "upcoming" }).where(event);
     await t.db
       .delete(assetPrices)
       .where(eq(assetPrices.assetId, constructorAsset));
+    await t.db.update(gameEvents).set({ status: "open" }).where(event);
     await expectPgError(saveVersion(), CHECK_VIOLATION);
     expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
   });

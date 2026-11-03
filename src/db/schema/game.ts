@@ -28,8 +28,9 @@ import {
 // and never the other way (DM 0.5). IDs are UUIDv7 values supplied by the app.
 //
 // Not declared here, because Drizzle cannot express it: the freeze trigger on
-// ruleset_versions and scoring_rules (DM 3.2), the price freeze on asset_prices
-// (DM 3.5), the slot limit on teams (DM 3.6), the lineup checks (DM 3.7:
+// ruleset_versions and scoring_rules (DM 3.2), events opening in order (DM
+// 3.3), the price freeze on asset_prices from the window's opening (DM 3.5),
+// the slot limit on teams (DM 3.6), the lineup checks (DM 3.7:
 // `saved_at` from app_now(), the window, composition and asset availability at
 // commit, and the guard on `events.lock_at`), and the budget with the two
 // functions behind it, `team_base_state` and `team_purchasing_power` (DM 3.8).

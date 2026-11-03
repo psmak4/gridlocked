@@ -23,6 +23,12 @@ type PriceSource = (typeof PRICE_SOURCES)[number];
 
 /** A game event in one of these statuses has frozen prices. */
 const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
+/**
+ * From `open` on, an event's prices are fixed (game_rules_5): saves are checked
+ * against them. Only a price for an asset that has none may still be added
+ * (`carryPrices`, a substitute), until the event locks.
+ */
+const FIXED: readonly GameEventStatus[] = ["open", ...FROZEN];
 
 export interface PriceInput {
   assetId: string;
@@ -173,7 +179,8 @@ async function isComplete(
  * `initial` is the season's starting list; `admin` is a staff correction,
  * which needs a reason and an actor and is audited in the same transaction.
  * Refuses, writing nothing: a blank reason, a price outside 30-340, an asset
- * from another game, and an event that has locked.
+ * from another game, and an event that has opened (its prices are fixed from
+ * then, DM 3.5) or locked.
  */
 export async function publishPrices(
   db: Db,
@@ -194,9 +201,9 @@ export async function publishPrices(
   }
   await db.transaction(async (tx) => {
     const event = await loadGameEvent(tx, input.gameId, input.eventId);
-    if (FROZEN.includes(event.status)) {
+    if (FIXED.includes(event.status)) {
       throw new Error(
-        `event ${input.eventId} has locked: its prices are fixed`,
+        `event ${input.eventId} is ${event.status}: its prices are fixed once it opens`,
       );
     }
     await upsertPrices(tx, now, { ...input, meta });

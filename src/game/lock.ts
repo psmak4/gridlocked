@@ -1,4 +1,14 @@
-import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import {
   events,
@@ -28,6 +38,8 @@ import {
 
 /** Teams per batch: about 1,000 per job (DM 2.10, 3.12). */
 const BATCH = 1000;
+/** An event in one of these has its lock record written. */
+const LOCKED_OR_LATER = ["locked", "scored", "final"] as const;
 
 /** One team's standing going into the event (`team_base_state`). */
 const baseRowSchema = z.object({
@@ -51,7 +63,8 @@ const baseRowSchema = z.object({
  * team's first row sets its `first_event_id`. The batch that finds no more
  * teams sets the event `locked` and an `open` game `running`.
  *
- * Refused while `now` is before `lock_at`, and for an event that is neither
+ * Refused while `now` is before `lock_at`, while an earlier event of the game
+ * (by sequence, not cancelled) hasn't locked, and for an event that is neither
  * `open` nor already `locked`. A bank below 0 outside a Limitless week is a
  * broken rule (the save check prevents it), and fails the batch.
  */
@@ -73,6 +86,7 @@ export async function lockEvent(
     const [event] = await tx
       .select({
         status: gameEvents.status,
+        sequence: gameEvents.sequence,
         rulesetVersionId: gameEvents.rulesetVersionId,
         params: rulesetVersions.params,
         lockAt: events.lockAt,
@@ -92,6 +106,27 @@ export async function lockEvent(
       throw new Error(
         `lockEvent: event ${eventId} is before its lock_at (${event.lockAt.toISOString()}); it is ${now.toISOString()}`,
       );
+    }
+    // Events lock in order, so a team's earlier rows are there when its next
+    // one is computed (team_base_state reads them).
+    if (event.sequence !== null) {
+      const [waiting] = await tx
+        .select({ eventId: gameEvents.eventId, status: gameEvents.status })
+        .from(gameEvents)
+        .where(
+          and(
+            eq(gameEvents.gameId, gameId),
+            lt(gameEvents.sequence, event.sequence),
+            notInArray(gameEvents.status, [...LOCKED_OR_LATER, "cancelled"]),
+          ),
+        )
+        .orderBy(asc(gameEvents.sequence))
+        .limit(1);
+      if (waiting) {
+        throw new Error(
+          `lockEvent: event ${eventId} can't lock before the earlier event ${waiting.eventId}, which is ${waiting.status}`,
+        );
+      }
     }
     if (event.status !== "open" && event.status !== "locked") {
       throw new Error(

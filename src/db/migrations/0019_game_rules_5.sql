@@ -247,3 +247,86 @@ BEGIN
   END IF;
 END;
 $$;
+--> statement-breakpoint
+
+-- Events open in order (decision 1): a game event can't become `open` while an
+-- earlier one of its game, by sequence, has not locked (a cancelled event has
+-- no sequence and doesn't count). So a team's rows are always written in
+-- order, and team_base_state never mistakes "the earlier lock hasn't run" for
+-- a first event. The first event opens freely (openGame). Its own SQLSTATE:
+--   GL005 event_order
+CREATE FUNCTION "game_events_open_in_order"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  waiting uuid;
+BEGIN
+  IF NEW."status" = 'open'
+     AND (TG_OP = 'INSERT' OR OLD."status" IS DISTINCT FROM 'open') THEN
+    SELECT ge."event_id" INTO waiting
+    FROM "game_events" ge
+    WHERE ge."game_id" = NEW."game_id"
+      AND ge."sequence" < NEW."sequence"
+      AND ge."status" NOT IN ('locked', 'scored', 'final', 'cancelled')
+    ORDER BY ge."sequence"
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'game_events: an event opens only once the ones before it have locked'
+        USING ERRCODE = 'GL005',
+              DETAIL = format('event %s of game %s can''t open: event %s before it has not locked',
+                              NEW."event_id", NEW."game_id", waiting);
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+--> statement-breakpoint
+CREATE TRIGGER "game_events_open_in_order"
+  BEFORE INSERT OR UPDATE OF "status" ON "game_events"
+  FOR EACH ROW EXECUTE FUNCTION "game_events_open_in_order"();
+--> statement-breakpoint
+
+-- The price freeze of game_rules_2, moved earlier (DM 3.5, decision 1): an
+-- event's prices are fixed from the moment it opens, since every save is
+-- checked against them. Once its game event is `open` (or later), a price row
+-- can't be changed or removed, and a row can't be moved into it. A price can
+-- still be added there for an asset that has none, such as a substitute added
+-- to the pool for the open event, until the event locks; after that nothing
+-- is added either.
+CREATE FUNCTION "asset_price_is_fixed"(asset uuid, event uuid) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM "pool_assets" a
+    JOIN "game_events" ge ON ge."game_id" = a."game_id"
+    WHERE a."id" = asset
+      AND ge."event_id" = event
+      AND ge."status" IN ('open', 'locked', 'scored', 'final')
+  );
+$$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION "asset_prices_freeze"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP IN ('UPDATE', 'DELETE')
+     AND "asset_price_is_fixed"(OLD."asset_id", OLD."event_id") THEN
+    RAISE EXCEPTION 'prices are frozen: asset_prices % refused', TG_OP
+      USING ERRCODE = 'restrict_violation',
+            DETAIL = format('event %s has opened', OLD."event_id");
+  END IF;
+  IF TG_OP = 'UPDATE'
+     AND "asset_price_is_fixed"(NEW."asset_id", NEW."event_id") THEN
+    RAISE EXCEPTION 'prices are frozen: asset_prices % refused', TG_OP
+      USING ERRCODE = 'restrict_violation',
+            DETAIL = format('event %s has opened', NEW."event_id");
+  END IF;
+  IF TG_OP = 'INSERT'
+     AND "asset_price_is_frozen"(NEW."asset_id", NEW."event_id") THEN
+    RAISE EXCEPTION 'prices are frozen: asset_prices % refused', TG_OP
+      USING ERRCODE = 'restrict_violation',
+            DETAIL = format('event %s has locked', NEW."event_id");
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$;

@@ -19,6 +19,7 @@ import {
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
+import type { GameError } from "./errors";
 import { saveLineup, openGame, type LineupPick } from "./lineups";
 import { lockEvent } from "./lock";
 import { withdrawPoolAsset } from "./pool";
@@ -223,6 +224,7 @@ describe("lockEvent (DM 3.8)", () => {
   it("an owned asset's price rise raises purchasing power", async () => {
     const first = await saveFor(round1, await picksOf());
     const at = await lockRound(t.db, gameId, round1.id);
+    // Set while round 2 is still upcoming: an open event's prices are fixed.
     await adminPrices(round2.id, at, { norris: 300 });
     await openRound(t.db, at, gameId, round2.id);
     expect(await purchasingPower(round2.id)).toBe(1020);
@@ -399,7 +401,7 @@ describe("lockEvent (DM 3.8)", () => {
     expect(ge!.status).toBe("open");
   });
 
-  it("a late lock of round 1, after round 2 opened and teams saved for it, writes what an on-time lock writes", async () => {
+  it("a late lock of round 1 writes what an on-time lock writes", async () => {
     const other = await team("Other");
     await saveFor(round1, await picksOf());
     await saveFor(round1, await picksOf(DRIVERS, EXACT), other);
@@ -429,37 +431,26 @@ describe("lockEvent (DM 3.8)", () => {
     expect(captured.rows).toHaveLength(2);
     expect(await states()).toHaveLength(0);
 
-    // The job didn't run. Round 1 is shut and round 2 opens; teams save for it,
-    // and a new team joins.
-    const opened = new Date(round1.lockAt.getTime() + 2 * HOUR_MS);
-    await setSimulatedClock(t.db, opened);
-    await t.db
-      .update(gameEvents)
-      .set({ status: "locked" })
-      .where(eq(gameEvents.eventId, round1.id));
-    await openRound(t.db, opened, gameId, round2.id);
-    await saveFor(
-      round2,
-      await picksOf(["norris", "piastri", "lawson", "ocon", "stroll"]),
+    // The job doesn't run. A save after the lock is refused, so it can't
+    // change what the late run sees.
+    const after = new Date(round1.lockAt.getTime() + 2 * HOUR_MS);
+    await setSimulatedClock(t.db, after);
+    const refused = await saveLineup(t.db, after, {
       teamId,
-      30,
+      picks: await picksOf(["norris", "piastri", "lawson", "ocon", "stroll"]),
+      basedOnVersionId: null,
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
     );
-    const late = await createTeam(t.db, opened, {
-      gameId,
-      userId: newId(),
-      name: "Late",
-    });
-    await saveFor(round2, await picksOf(), late, 30);
+    expect((refused as GameError).code).toBe("window_closed");
 
     // Now the lock job for round 1 runs, a day late.
     const lateNow = new Date(round1.lockAt.getTime() + 24 * HOUR_MS);
     await setSimulatedClock(t.db, lateNow);
-    const result = await lockEvent(t.db, lateNow, {
-      gameId,
-      eventId: round1.id,
-    });
-    expect(result.written).toBe(2);
-    expect(result.done).toBe(true);
+    expect(
+      await lockEvent(t.db, lateNow, { gameId, eventId: round1.id }),
+    ).toMatchObject({ written: 2, done: true });
 
     const strip = (rows: (typeof teamEventStates.$inferSelect)[]) =>
       rows.map((row) => ({ ...row, createdAt: null, updatedAt: null }));
@@ -468,10 +459,45 @@ describe("lockEvent (DM 3.8)", () => {
       await t.db
         .select({ id: teams.id, firstEventId: teams.firstEventId })
         .from(teams)
-        .where(sql`${teams.id} <> ${late}`)
         .orderBy(asc(teams.id)),
     ).toEqual(captured.firsts);
-    expect(await firstEventOf(late)).toBeNull();
+  });
+
+  it("round 2 can't open before round 1 is locked", async () => {
+    await saveFor(round1, await picksOf());
+    // Past round 1's lock, but its lock job hasn't run.
+    const after = new Date(round1.lockAt.getTime() + HOUR_MS);
+    await setSimulatedClock(t.db, after);
+    const refused = await openRound(t.db, after, gameId, round2.id).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const code =
+      (refused as { cause?: { code?: string } }).cause?.code ??
+      (refused as { code?: string }).code;
+    expect(code).toBe("GL005");
+    const status = async (eventId: string) =>
+      (
+        await t.db
+          .select()
+          .from(gameEvents)
+          .where(eq(gameEvents.eventId, eventId))
+      )[0]!.status;
+    expect(await status(round2.id)).toBe("upcoming");
+
+    // Once round 1 has locked, it opens.
+    await lockRound(t.db, gameId, round1.id);
+    await openRound(t.db, after, gameId, round2.id);
+    expect(await status(round2.id)).toBe("open");
+  });
+
+  it("locking round 2 before round 1 is refused", async () => {
+    await saveFor(round1, await picksOf());
+    await setSimulatedClock(t.db, round2.lockAt);
+    await expect(
+      lockEvent(t.db, round2.lockAt, { gameId, eventId: round2.id }),
+    ).rejects.toThrow(/before the earlier event/);
+    expect(await states()).toHaveLength(0);
   });
 
   it("batches of 2 over 5 teams write all 5 and set locked once", async () => {
