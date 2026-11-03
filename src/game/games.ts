@@ -91,10 +91,13 @@ export async function createGame(
  *   a cancelled event has `sequence` null and status `cancelled`;
  * - `ruleset_version_id` is the version whose effective-from event has the
  *   latest `lock_at` at or before this event's. An event before every version
- *   takes the earliest one, so the column is never empty. A new version is
- *   refused (an error, writing nothing) when it would change the open event's
- *   version or starts from an event that is open or has locked: a rule change
- *   takes effect from an upcoming event;
+ *   takes the earliest one, so the column is never empty. A rule change takes
+ *   effect from an upcoming event: a version that would change the open
+ *   event's version, or that starts from an event that is open or has locked,
+ *   is dropped for the run (the rows keep their versions, and the rest is
+ *   planned as normal), and a warning review item `ruleset_version_refused`
+ *   (dedupe key `ruleset_version_refused:<game>:<version>`) asks an admin to
+ *   look;
  * - a row whose lock has started is never changed: one that is `locked` or
  *   later, whose `lock_at` is at or before `now`, or that has a lock record
  *   row already (the lock job writes in batches), whatever its status. Its
@@ -165,12 +168,15 @@ export async function planGameEvents(
     if (versions.length === 0) {
       throw new Error(`planGameEvents: game ${gameId} has no ruleset version`);
     }
-    const versionFor = (lockAt: Date): string => {
-      let chosen = versions[0]!;
-      for (const v of versions) {
+    // Versions refused this run (below): they apply to no event.
+    const dropped = new Set<string>();
+    const versionFor = (lockAt: Date) => {
+      const live = versions.filter((v) => !dropped.has(v.id));
+      let chosen = live[0] ?? versions[0]!;
+      for (const v of live) {
         if (v.from.getTime() <= lockAt.getTime()) chosen = v;
       }
-      return chosen.id;
+      return chosen;
     };
 
     // A row is frozen once its lock has started, whatever its status: from
@@ -221,6 +227,45 @@ export async function planGameEvents(
       );
     };
 
+    // A version takes effect only from an upcoming event. One that would
+    // change the version of the open event, or that starts from an event the
+    // window has reached, would change rules lineups were already saved
+    // under: it is dropped for this run, for an admin to look at, and the
+    // rest is planned without it. Each drop can uncover an earlier version
+    // that is refused too, so this runs until nothing more is.
+    for (;;) {
+      const refused = calendar
+        .map((event) => {
+          const row = existing.get(event.id);
+          if (!row || frozen.has(event.id) || dropped.has(row.rulesetVersionId))
+            return undefined;
+          const v = versionFor(event.lockAt);
+          if (v.id === row.rulesetVersionId || dropped.has(v.id))
+            return undefined;
+          return row.status === "open" || reached(v.fromEventId)
+            ? { v, event, row }
+            : undefined;
+        })
+        .find((found) => found !== undefined);
+      if (!refused) break;
+      const { v, event, row } = refused;
+      dropped.add(v.id);
+      await openReviewItem(tx, now, {
+        kind: "ruleset_version_refused",
+        seasonId: game.seasonId,
+        eventId: v.fromEventId,
+        details: {
+          gameId,
+          rulesetVersionId: v.id,
+          version: v.version,
+          fromEventStatus: existing.get(v.fromEventId)?.status ?? null,
+          wouldApplyTo: event.id,
+          wouldApplyToStatus: row.status,
+        },
+        dedupeKey: `ruleset_version_refused:${gameId}:${v.version}`,
+      });
+    }
+
     const cancelledNow: { eventId: string; wasOpen: boolean }[] = [];
     for (const [i, event] of calendar.entries()) {
       const row = existing.get(event.id);
@@ -253,18 +298,11 @@ export async function planGameEvents(
           ? row.status
           : "upcoming";
       const sequence = cancelled ? null : nextSequence();
-      const rulesetVersionId = versionFor(event.lockAt);
-      // A version takes effect only from an upcoming event: one that would
-      // change the open event's, or that starts from an event the window has
-      // reached, would change rules lineups were already saved under.
-      if (row && row.rulesetVersionId !== rulesetVersionId) {
-        const v = versions.find((version) => version.id === rulesetVersionId)!;
-        if (row.status === "open" || reached(v.fromEventId)) {
-          throw new Error(
-            `planGameEvents: ruleset version ${v.version} of game ${gameId} takes effect from event ${v.fromEventId}, which is ${existing.get(v.fromEventId)?.status ?? "not in the game"}, and would apply to event ${event.id} (${row.status}): a version can only take effect from an upcoming event`,
-          );
-        }
-      }
+      // A row on a version dropped this run keeps it.
+      const rulesetVersionId =
+        row && dropped.has(row.rulesetVersionId)
+          ? row.rulesetVersionId
+          : versionFor(event.lockAt).id;
 
       if (!row) {
         await tx.insert(gameEvents).values({
