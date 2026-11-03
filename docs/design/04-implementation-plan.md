@@ -164,7 +164,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - team adjustment lines, with base lines as a view;
   - event totals and the earliest-to-reach tiebreak;
   - leagues (global, public, private, auto, mini) and their standings;
-  - the scoring pipeline and the dry run.
+  - the scoring pipeline and the dry run;
+  - the price formula, `price_update_runs` and its calibration on the 2026 replay (moved from M3: it averages fantasy points).
 - **Key tests:**
   - golden cases for every 2026 rule;
   - the property tests above;

@@ -29,8 +29,8 @@
 - [03-ui-brief.md](../design/03-ui-brief.md) "Proposed chip names";
 - [04-implementation-plan.md](../design/04-implementation-plan.md) M3.
 
-## Decisions for you (before Task 1)
-The spec leaves three things open that change what gets built. I've written the plan with my recommendation for each. Say if you want any changed.
+## Decisions (approved 2 Nov 2026)
+The spec left three things open that change what gets built. All three were approved as recommended below.
 
 1. **When the next event's window opens.**
    - **Recommended:** event E+1 opens once event E is final (the +48h finalize check) and E+1's prices are published. If E is still not final 24 hours before E+1's lock, E+1 opens anyway with E's prices carried forward. Between E's lock and the opening, teams can't be changed.
@@ -489,7 +489,7 @@ The spec leaves three things open that change what gets built. I've written the 
   - `src/game/invariants.ts`, `src/game/invariants.test.ts`;
   - `src/providers/replay/season-game.ts`, `src/providers/replay/season-game.test.ts`;
   - `tests/fixtures/game-2026-script.json`.
-- Modify: `docs/design/04-implementation-plan.md`: the M3 exit evidence, and decision 2 added to the M4 scope.
+- Modify: `docs/design/04-implementation-plan.md`: the M3 exit evidence (decision 2 is already in the M4 scope).
 
 **Interfaces:**
 - Consumes: everything above; `runReplayClock` and `setSimulatedClock` (src/replay/clock-loop.ts); `importReference2026`; the handler wiring of `replayWeekend` (src/providers/replay/harness.ts), as the model.
