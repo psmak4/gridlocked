@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
@@ -707,7 +707,7 @@ describe("lineup versions (DM 3.7)", () => {
     ]);
   });
 
-  it("a version is refused at lock_at, and the check runs at commit", async () => {
+  it("a version is refused at lock_at, even when the clock passes it between the insert and the commit", async () => {
     await setSimulatedClock(t.db, LOCK);
     await expectPgError(saveVersion(), WINDOW_CLOSED);
     await setSimulatedClock(t.db, new Date(LOCK.getTime() - 1000));
@@ -833,6 +833,70 @@ describe("lineup versions (DM 3.7)", () => {
       .from(events)
       .where(eq(events.id, eventId));
     expect(row!.lockAt).toEqual(new Date(CLOCK.getTime() + 3_600_000));
+  });
+
+  it("a lock that has passed can't be moved later", async () => {
+    await setSimulatedClock(t.db, new Date(LOCK.getTime() + 60_000));
+    await expectPgError(
+      t.db
+        .update(events)
+        .set({ lockAt: new Date(LOCK.getTime() + 3_600_000) })
+        .where(eq(events.id, eventId)),
+      RESTRICT_VIOLATION,
+    );
+    const [row] = await t.db
+      .select()
+      .from(events)
+      .where(eq(events.id, eventId));
+    expect(row!.lockAt).toEqual(LOCK);
+  });
+
+  it("with no simulated clock the window uses the time at the commit, not the transaction's start", async () => {
+    const lockIn = async (ms: number) => {
+      // Moved while the simulated clock is still set, then the clock is
+      // dropped, as in production.
+      await t.db.execute(
+        sql`update events set lock_at = clock_timestamp() + ${`${ms} milliseconds`}::interval where id = ${eventId}`,
+      );
+    };
+    await lockIn(60_000);
+    await t.db.execute(sql`delete from settings where key = 'simulated_clock'`);
+    await saveVersion();
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
+
+    await t.db.delete(lineupVersions);
+    await t.db.execute(
+      sql`insert into settings (key, value) values ('simulated_clock', '{"at": "2026-02-28T12:00:00Z"}')`,
+    );
+    await lockIn(250);
+    await t.db.execute(sql`delete from settings where key = 'simulated_clock'`);
+    // now() is the start of the transaction, before the lock; by the commit the
+    // lock has passed.
+    const error = await t.db
+      .transaction(async (tx) => {
+        const id = newId();
+        await tx
+          .insert(lineupVersions)
+          .values({ id, teamId, forEventId: eventId, kind: "regular" });
+        await tx.insert(lineupPicks).values([
+          { lineupVersionId: id, assetId: driverAsset, isBoost: true },
+          { lineupVersionId: id, assetId: constructorAsset, isBoost: false },
+        ]);
+        const { rows } = await tx.execute(
+          sql`select (now() < (select lock_at from events where id = ${eventId})) as early`,
+        );
+        expect((rows[0] as { early: boolean }).early).toBe(true);
+        await tx.execute(sql`select pg_sleep(0.4)`);
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(
+      (error as { cause?: { code?: string } }).cause?.code ??
+        (error as { code?: string }).code,
+    ).toBe(WINDOW_CLOSED);
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
   });
 
   it("an event with no game row can have its lock_at moved freely", async () => {

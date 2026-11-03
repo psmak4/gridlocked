@@ -173,6 +173,42 @@ describe("lineups (DM 3.7)", () => {
     expect(await lockedLineup(t.db, { teamId, eventId: round1.id })).toBeNull();
   });
 
+  it("a save nested in a caller's transaction is refused with window_closed at the lock", async () => {
+    const appNow = beforeLock(1);
+    await at(round1.lockAt);
+    const picks = await picksOf();
+    // The refusal comes from saveLineup itself, not from the caller's commit.
+    const refused = await t.db.transaction(async (outer) => {
+      const error = await saveLineup(outer, appNow, {
+        teamId,
+        picks,
+        basedOnVersionId: null,
+      }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(await outer.select().from(lineupVersions)).toHaveLength(0);
+      return error;
+    });
+    expect(refused).toBeInstanceOf(GameError);
+    expect((refused as GameError).code).toBe("window_closed");
+    expect(await versions()).toHaveLength(0);
+
+    // A nested save that is accepted counts, and the caller's own writes after
+    // it are unaffected.
+    await at(beforeLock(5));
+    const { versionId } = await t.db.transaction((outer) =>
+      saveLineup(outer, beforeLock(5), {
+        teamId,
+        picks,
+        basedOnVersionId: null,
+      }),
+    );
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round1.id }))!.versionId,
+    ).toBe(versionId);
+  });
+
   it("six drivers, one constructor, two Boosts, or a Boost on a constructor are refused with composition", async () => {
     const six = await picksOf([...DRIVERS, "hamilton"], CONSTRUCTORS);
     const oneConstructor = await picksOf(DRIVERS, ["mclaren"]);

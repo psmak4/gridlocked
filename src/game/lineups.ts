@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, lt, sql } from "drizzle-orm";
 import {
   events,
   gameEvents,
@@ -129,9 +129,10 @@ export async function openGame(
  * isn't the team's latest version, because another device saved since. The
  * save still goes through.
  *
- * The checks that matter are the database's, made when the transaction
- * commits: the window against `app_now()`, the squad and Boost against the
- * ruleset, and the assets. Each refusal is a `GameError` (`window_closed`,
+ * The checks that matter are the database's, made at the end of this call's
+ * transaction (even when it is nested in a caller's): the window against the
+ * clock at that moment, the squad and Boost against the ruleset, and the
+ * assets. Each refusal is a `GameError` (`window_closed`,
  * `composition`, `asset_unavailable`) and writes nothing. The check here
  * against `now` only gives the friendlier early answer, and a repeated asset
  * is `composition` before it reaches the key.
@@ -220,13 +221,23 @@ export async function saveLineup(
           })),
         );
       }
+      // The checks are deferred to commit. Run them here, inside the try, so a
+      // refusal is mapped even when this transaction is nested in a caller's
+      // (a savepoint, which commits only with the outer one). Then back to
+      // deferred for whatever else the caller does.
+      await tx.execute(
+        sql`set constraints "lineup_versions_check", "lineup_picks_check" immediate`,
+      );
+      await tx.execute(
+        sql`set constraints "lineup_versions_check", "lineup_picks_check" deferred`,
+      );
       return {
         versionId,
         staleBase: (latest?.id ?? null) !== basedOnVersionId,
       };
     });
   } catch (error) {
-    // The deferred checks raise at COMMIT, which is inside the try.
+    // The checks raise at the end of the transaction, inside the try.
     throw refusal(error);
   }
 }

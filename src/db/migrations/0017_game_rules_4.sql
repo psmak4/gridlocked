@@ -41,11 +41,29 @@ CREATE TRIGGER "lineup_versions_immutable"
   FOR EACH ROW EXECUTE FUNCTION "lineup_versions_immutable"();
 --> statement-breakpoint
 
+-- The clock the window is checked against. The check runs at commit, and
+-- app_now() is now() in production, which is the time the transaction STARTED:
+-- a save begun before the lock and committed after it would pass. So the window
+-- uses the wall clock at the moment of the check, unless a simulated clock is
+-- set (a replay branch or a test), which is the clock then. saved_at stays
+-- app_now(), as the spec says.
+CREATE FUNCTION "lineup_window_now"() RETURNS timestamptz
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "settings" WHERE "key" = 'simulated_clock') THEN
+    RETURN app_now();
+  END IF;
+  RETURN clock_timestamp();
+END;
+$$;
+--> statement-breakpoint
+
 -- What the database checks on a lineup version (DM 3.7), in this order. Each
 -- refusal has its own SQLSTATE, so the game layer maps it to an error code
 -- rather than matching message text:
---   GL001 window_closed      the event isn't the game's open one, or app_now()
---                            is at or past its lock_at
+--   GL001 window_closed      the event isn't the game's open one, or the clock
+--                            at the check (lineup_window_now()) is at or past
+--                            its lock_at
 --   GL002 composition        squad counts or the Boost, from the ruleset
 --                            version in force for the event
 --   GL003 asset_unavailable  not in the team's game, added from a later event,
@@ -86,11 +104,11 @@ BEGIN
 
   -- Final Fix has its own window (Task 7).
   IF v."kind" IN ('regular', 'limitless')
-     AND (event_status <> 'open' OR NOT (app_now() < event_lock)) THEN
+     AND (event_status <> 'open' OR NOT (lineup_window_now() < event_lock)) THEN
     RAISE EXCEPTION 'lineup: window closed'
       USING ERRCODE = 'GL001',
             DETAIL = format('event %s is %s and locks at %s; the clock says %s',
-                            v."for_event_id", event_status, event_lock, app_now());
+                            v."for_event_id", event_status, event_lock, lineup_window_now());
   END IF;
 
   SELECT rv."params" -> 'squad' INTO squad
@@ -182,20 +200,21 @@ CREATE CONSTRAINT TRIGGER "lineup_picks_check"
   FOR EACH ROW EXECUTE FUNCTION "lineup_picks_check"();
 --> statement-breakpoint
 
--- No lock_at can be moved to a time already past (DM 3.11), for an event that
--- has a game row, so no saved lineup is retroactively late. The calendar sync
--- already refuses to move a lock that has passed (lock_passed_changed); this
--- is the backstop for a future lock moved into the past. Writing the same
--- value again is not a move.
+-- No lock_at can be moved to a time already past, and a lock that has passed
+-- can't be moved at all (DM 3.11: "lock already happened; nothing changes"),
+-- for an event that has a game row, so no saved lineup is retroactively late
+-- or early. The calendar sync already refuses to move a passed lock
+-- (lock_passed_changed); this is the backstop. Writing the same value again is
+-- not a move.
 CREATE FUNCTION "events_lock_at_guard"() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW."lock_at" IS DISTINCT FROM OLD."lock_at"
-     AND NEW."lock_at" <= app_now()
+     AND (NEW."lock_at" <= app_now() OR OLD."lock_at" <= app_now())
      AND EXISTS (SELECT 1 FROM "game_events" WHERE "event_id" = NEW."id") THEN
-    RAISE EXCEPTION 'events: lock_at can''t move to a time already past'
+    RAISE EXCEPTION 'events: lock_at can''t move once past, or to a time already past'
       USING ERRCODE = 'restrict_violation',
-            DETAIL = format('events %s: %s is at or before the clock, %s', NEW."id", NEW."lock_at", app_now());
+            DETAIL = format('events %s: lock_at %s to %s; the clock says %s', NEW."id", OLD."lock_at", NEW."lock_at", app_now());
   END IF;
   RETURN NEW;
 END;
