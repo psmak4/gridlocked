@@ -176,6 +176,63 @@ describe("per-event prices (DM 3.5)", () => {
     expect(norris.reason).toBe("Rebalanced");
   });
 
+  it("a partial admin publish leaves prices_ready_at null, and carrying then sets it", async () => {
+    const round2 = await eventOf(2);
+    const readyAt = async () =>
+      (
+        await t.db
+          .select()
+          .from(gameEvents)
+          .where(eq(gameEvents.eventId, round2.id))
+      )[0]!.pricesReadyAt;
+    await publishPrices(t.db, NOW, {
+      gameId: game.gameId,
+      eventId: round2.id,
+      source: "admin",
+      prices: [{ assetId: await game.assetId("norris"), price: 300 }],
+      reason: "Rebalanced",
+      actor: ACTOR,
+    });
+    expect(await readyAt()).toBeNull();
+
+    const later = new Date("2026-02-10T00:00:00Z");
+    expect(
+      await carryPrices(t.db, later, {
+        gameId: game.gameId,
+        eventId: round2.id,
+      }),
+    ).toBe(32);
+    expect(await readyAt()).toEqual(later);
+  });
+
+  it("a full publish sets prices_ready_at, withdrawn assets excepted", async () => {
+    const round2 = await eventOf(2);
+    const bottas = await game.assetId("bottas");
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bottas,
+      fromEventId: round2.id,
+      reason: "Out for the season",
+      actor: ACTOR,
+    });
+    const everyone = [...(await list(1))]
+      .filter(([assetId]) => assetId !== bottas)
+      .map(([assetId, price]) => ({ assetId, price }));
+    const at = new Date("2026-02-05T00:00:00Z");
+    await publishPrices(t.db, at, {
+      gameId: game.gameId,
+      eventId: round2.id,
+      source: "admin",
+      prices: everyone,
+      reason: "Rebalanced",
+      actor: ACTOR,
+    });
+    const [ge] = await t.db
+      .select()
+      .from(gameEvents)
+      .where(eq(gameEvents.eventId, round2.id));
+    expect(ge!.pricesReadyAt).toEqual(at);
+  });
+
   it("an admin price without a reason is refused before any write", async () => {
     const round1 = await eventOf(1);
     const assetId = await game.assetId("norris");

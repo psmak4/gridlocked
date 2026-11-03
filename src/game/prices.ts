@@ -132,11 +132,48 @@ export async function upsertPrices(
 }
 
 /**
- * Publishes an event's prices: upserts them and sets `prices_ready_at`, from
- * when builders see them. `initial` is the season's starting list; `admin` is
- * a staff correction, which needs a reason and an actor and is audited in the
- * same transaction. Refuses, writing nothing: a blank reason, a price outside
- * 30-340, an asset from another game, and an event that has locked.
+ * True when every asset available at the event (`active`, added from this
+ * event's sequence or earlier) has a price row for it.
+ */
+async function isComplete(
+  tx: Db,
+  gameId: string,
+  event: { eventId: string; sequence: number | null },
+): Promise<boolean> {
+  const available = await tx
+    .select({ id: poolAssets.id, sequence: gameEvents.sequence })
+    .from(poolAssets)
+    .innerJoin(
+      gameEvents,
+      and(
+        eq(gameEvents.gameId, poolAssets.gameId),
+        eq(gameEvents.eventId, poolAssets.addedFromEventId),
+      ),
+    )
+    .where(and(eq(poolAssets.gameId, gameId), eq(poolAssets.status, "active")));
+  const priced = new Set(
+    (
+      await tx
+        .select({ assetId: assetPrices.assetId })
+        .from(assetPrices)
+        .where(eq(assetPrices.eventId, event.eventId))
+    ).map((row) => row.assetId),
+  );
+  return available
+    .filter((a) => a.sequence !== null && a.sequence <= event.sequence!)
+    .every((a) => priced.has(a.id));
+}
+
+/**
+ * Publishes an event's prices: upserts them and, once the list is complete,
+ * sets `prices_ready_at`, from when builders see it. Complete means every
+ * asset available at the event (`active`, added from this event or an earlier
+ * one) has a price for it; a partial list, such as a single admin correction,
+ * leaves `prices_ready_at` as it was, and `carryPrices` finishes the list.
+ * `initial` is the season's starting list; `admin` is a staff correction,
+ * which needs a reason and an actor and is audited in the same transaction.
+ * Refuses, writing nothing: a blank reason, a price outside 30-340, an asset
+ * from another game, and an event that has locked.
  */
 export async function publishPrices(
   db: Db,
@@ -163,15 +200,20 @@ export async function publishPrices(
       );
     }
     await upsertPrices(tx, now, { ...input, meta });
-    await tx
-      .update(gameEvents)
-      .set({ pricesReadyAt: now, updatedAt: now })
-      .where(
-        and(
-          eq(gameEvents.gameId, input.gameId),
-          eq(gameEvents.eventId, input.eventId),
-        ),
-      );
+    if (
+      event.sequence !== null &&
+      (await isComplete(tx, input.gameId, event))
+    ) {
+      await tx
+        .update(gameEvents)
+        .set({ pricesReadyAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(gameEvents.gameId, input.gameId),
+            eq(gameEvents.eventId, input.eventId),
+          ),
+        );
+    }
   });
 }
 
@@ -180,8 +222,8 @@ export async function publishPrices(
  * `carried` (DM 3.5: no update ran before the lock, so the previous price
  * stands). Withdrawn assets are carried too, since owners keep them. "Earlier"
  * is by the game's event order, so an asset added for a later event has
- * nothing to carry. Sets `prices_ready_at` if it isn't set, and returns the
- * rows written; running it again writes nothing. It must run before the event
+ * nothing to carry. That completes the list, so it sets `prices_ready_at` if
+ * it isn't set, and returns the rows written; running it again writes nothing. It must run before the event
  * locks, which freezes the list.
  */
 export async function carryPrices(
