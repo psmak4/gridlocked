@@ -776,8 +776,8 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 |---|---|---|
 | id | uuid PK | |
 | game_id | uuid FK | |
-| user_id | uuid FK → users | |
-| slot | smallint | **Unique `(game_id, user_id, slot)`.** On insert, a trigger checks `1 ≤ slot ≤` the ruleset's teams-per-user (3). Two simultaneous creates can't both take slot 3, because the unique key serialises them |
+| user_id | uuid FK → users | A plain uuid until `users` arrives in M5, which adds the foreign key |
+| slot | smallint | **Unique `(game_id, user_id, slot)`.** On insert (and when the slot changes), a trigger checks `1 ≤ slot ≤` the `teamsPerUser` of the game's latest ruleset version (3). A retired team keeps its slot. Two simultaneous creates can't both take slot 3, because the unique key serialises them |
 | name | text | User content: filtered and reportable (Part 5) |
 | first_event_id | uuid FK, nullable | The team's first **locked** event. Set by the first lock it takes part in, which drives unlimited transfers and chip unlocks (HLD §5.2) |
 | status | text: `active`, `retired` | Before its first lock, a team can be deleted outright. After that, deleting a team **retires** it, so league history stays correct |
