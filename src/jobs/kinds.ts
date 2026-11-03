@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /**
  * The job kinds of the ingestion pipeline. Scoring and threads add theirs in
- * M4 and M7. `normalize` and `validate` are reserved: the poll and finalize
+ * M4 and M7. `game_lock` and `game_open` are the game layer's (handlers in
+ * `src/game/jobs.ts`). `normalize` and `validate` are reserved: the poll and finalize
  * jobs run both steps inline, so nothing enqueues them yet.
  *
  * `queue.ts` keeps `JobKind = string` so the generic queue and its tests stay
@@ -16,6 +17,8 @@ export const JOB_KINDS = [
   "validate",
   "finalize_check",
   "roster_check",
+  "game_lock",
+  "game_open",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -88,3 +91,44 @@ export type SyncCalendarPayload = z.infer<typeof syncCalendarPayload>;
 /** One calendar sync per season per UTC day. */
 export const syncCalendarKey = (season: number, day: string) =>
   `sync_calendar:${season}:${day}`;
+
+/**
+ * `afterTeamId` continues a lock after a batch of teams. `wait` is set (1, 2,
+ * ...) on a lock job that put itself off: it ran before `lock_at`, or before
+ * the event could lock.
+ */
+export const gameLockPayload = z.object({
+  gameId: z.string().min(1),
+  eventId: z.string().min(1),
+  afterTeamId: z.string().min(1).optional(),
+  wait: z.number().int().positive().optional(),
+});
+export type GameLockPayload = z.infer<typeof gameLockPayload>;
+
+/** `attempt` is absent on the planned job, then 1, 2, ... on its re-checks. */
+export const gameOpenPayload = z.object({
+  gameId: z.string().min(1),
+  eventId: z.string().min(1),
+  attempt: z.number().int().positive().optional(),
+});
+export type GameOpenPayload = z.infer<typeof gameOpenPayload>;
+
+export const gameLockKey = (gameId: string, eventId: string) =>
+  `game_lock:${gameId}:${eventId}`;
+/** The batch of a lock that starts after the given team. */
+export const gameLockAfterKey = (
+  gameId: string,
+  eventId: string,
+  afterTeamId: string,
+) => `game_lock:${gameId}:${eventId}:after:${afterTeamId}`;
+/** The `n`th time a lock job put itself off. */
+export const gameLockWaitKey = (gameId: string, eventId: string, n: number) =>
+  `game_lock:${gameId}:${eventId}:wait:${n}`;
+export const gameOpenKey = (gameId: string, eventId: string) =>
+  `game_open:${gameId}:${eventId}`;
+/** The `n`th re-check of an open job that was not yet time. */
+export const gameOpenRecheckKey = (
+  gameId: string,
+  eventId: string,
+  n: number,
+) => `game_open:${gameId}:${eventId}:${n}`;

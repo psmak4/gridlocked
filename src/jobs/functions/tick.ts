@@ -11,8 +11,9 @@
  * `createDb` (Neon injects DATABASE_URL), `createDueStoreFromEnv` (Neon
  * injects the AWS_* variables for Object Storage), the clock mode from
  * CLOCK_MODE, and `createPipelineClients` / `createPipelineHandlers` with the
- * real fetch and the real timer. Nothing is opened at import time, and a
- * sleeping tick never opens the database.
+ * real fetch and the real timer, plus the game's handlers
+ * (`createGameHandlers`). Nothing is opened at import time, and a sleeping
+ * tick never opens the database.
  *
  * Scheduled calls arrive without credentials. Neon strips client-set
  * `X-Neon-*` headers at the edge, so the presence of
@@ -21,6 +22,7 @@
  * occurrence finds its jobs already claimed or done.
  */
 import { createDb } from "@/db/client";
+import { createGameHandlers } from "@/game/jobs";
 import { systemTimer } from "@/lib/clock";
 import { clockModeFromEnv } from "@/lib/resolve-clock";
 import { createPipelineHandlers } from "@/providers/pipeline";
@@ -185,8 +187,8 @@ export function depsFromEnv(
     store,
     mode,
     timer: systemTimer,
-    handlers: async (db, clock, wake) =>
-      createPipelineHandlers(
+    handlers: async (db, clock, wake) => ({
+      ...createPipelineHandlers(
         await createPipelineClients({
           db,
           clock,
@@ -196,6 +198,9 @@ export function depsFromEnv(
           fetch: (input, init) => fetch(input, init),
         }),
       ),
+      // The game's lock and open jobs; they read the database only.
+      ...createGameHandlers(),
+    }),
   };
 }
 

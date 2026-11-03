@@ -16,8 +16,11 @@ import {
   events,
   jobs,
   rawSnapshots,
+  seasons,
   sessions,
 } from "@/db/schema";
+import { createGame } from "@/game/games";
+import { RULESET_2026 } from "@/game/ruleset";
 import { simulatedClock } from "@/lib/clock";
 import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
 import { DUE_KEY } from "./due-times";
@@ -247,6 +250,40 @@ describe("the sync_calendar handler", () => {
         expect.arrayContaining([`finalize:${event.id}:+48h`]),
       );
     });
+  });
+
+  it("a calendar sync plans the season's game jobs", async () => {
+    await syncAt(T0);
+    const [season] = await t.db.select().from(seasons);
+    const { gameId } = await createGame(t.db, T0, {
+      seasonId: season!.id,
+      slug: "2026-fantasy",
+      name: "2026 Fantasy",
+      params: RULESET_2026,
+      notes: "The 2026 rules.",
+    });
+    const gameJobs = async () =>
+      (await allJobs(t.db)).filter((j) => j.kind.startsWith("game_"));
+    expect(await gameJobs()).toEqual([]);
+
+    await syncAt(new Date(T0.getTime() + DAY));
+
+    // A lock job per event, and an open job per event after the first.
+    const jobsNow = await gameJobs();
+    const locks = jobsNow.filter((j) => j.kind === "game_lock");
+    const opens = jobsNow.filter((j) => j.kind === "game_open");
+    const evs = await t.db.select().from(events);
+    expect(locks).toHaveLength(evs.length);
+    expect(opens).toHaveLength(evs.length - 1);
+    for (const event of evs) {
+      expect(
+        locks.find((j) => j.dedupeKey === `game_lock:${gameId}:${event.id}`),
+      ).toMatchObject({ status: "pending", runAt: event.lockAt });
+    }
+
+    // A second sync moves nothing and adds nothing.
+    await syncAt(new Date(T0.getTime() + 2 * DAY));
+    expect(await gameJobs()).toHaveLength(jobsNow.length);
   });
 
   it("creates the event entries from the seats", async () => {
