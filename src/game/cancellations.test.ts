@@ -14,6 +14,7 @@ import {
   events,
   gameEvents,
   gameSessionExceptions,
+  reviewItems,
   sessions,
   teamEventStates,
   teams,
@@ -487,6 +488,69 @@ describe("cancellations (DM 3.9)", () => {
     expect(
       (await priceList(t.db, { gameId, eventId: round3.id })).get(bearman),
     ).toBe(80);
+  });
+
+  /** The calendar reinstates a cancelled event, and the game is planned again. */
+  const reinstate = async (event: { id: string }, when: Date) => {
+    await t.db
+      .update(events)
+      .set({ status: "scheduled" })
+      .where(eq(events.id, event.id));
+    await planGameEvents(t.db, when, gameId);
+  };
+
+  it("an event reinstated after a later one opened stays cancelled in the game, for an admin to look at", async () => {
+    await saveFor(round1, await picksOf(), teamId, 2);
+    const cancelled = await cancel(round1);
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "open",
+      sequence: 1,
+    });
+    // Back on the calendar before its own lock, with round 2 open.
+    await reinstate(round1, await at(new Date(cancelled.getTime() + 60_000)));
+
+    expect(await gameEventOf(round1.id)).toMatchObject({
+      status: "cancelled",
+      sequence: null,
+    });
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "open",
+      sequence: 1,
+    });
+    const items = await t.db
+      .select()
+      .from(reviewItems)
+      .where(eq(reviewItems.kind, "game_event_reinstated"));
+    expect(items).toMatchObject([
+      {
+        status: "open",
+        severity: "warning",
+        eventId: round1.id,
+        dedupeKey: `game_event_reinstated:${gameId}:${round1.id}`,
+        details: { gameId, openEventId: round2.id },
+      },
+    ]);
+    // Round 2 still locks, with the lineup saved for round 1.
+    await lockRound(t.db, gameId, round2.id);
+    expect(await stateOf(round2.id)).toMatchObject({ isFirstEvent: true });
+  });
+
+  it("an event reinstated before any later one opened is back in the game", async () => {
+    await saveFor(round1, await picksOf());
+    const opened = await toRound2();
+    await cancel(round3, opened);
+    await reinstate(round3, await at(new Date(opened.getTime() + HOUR_MS)));
+
+    expect(await gameEventOf(round3.id)).toMatchObject({
+      status: "upcoming",
+      sequence: 3,
+    });
+    expect(
+      await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.kind, "game_event_reinstated")),
+    ).toEqual([]);
   });
 
   it("an upcoming event cancelled while another is open opens nothing", async () => {

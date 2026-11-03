@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { openReviewItem } from "@/reference/review";
 import { refundChips } from "./chips";
 import { carryPrices } from "./prices";
 import { rulesetParamsSchema, type RulesetParams } from "./ruleset";
@@ -98,6 +99,12 @@ export async function createGame(
  *   numbers, in lock order. So a race called off after qualifying keeps its
  *   lock record and its chips (DM 3.9), and an event called off mid-lock
  *   still locks: only an event cancelled before its lock is cancelled here.
+ *
+ * An event cancelled in the game and then reinstated on the calendar stays
+ * cancelled here once a later event of the game is `open` or has locked: the
+ * window has moved past it. A warning review item `game_event_reinstated`
+ * (dedupe key `game_event_reinstated:<game>:<event>`) asks an admin to look.
+ * Reinstated before any later event opened, it is planned again as normal.
  *
  * An event cancelled before its lock, in the same transaction (DM 3.9): its
  * row becomes `cancelled`, its chips are refunded (`refundChips`), and if it
@@ -199,12 +206,40 @@ export async function planGameEvents(
       return next;
     };
 
+    // A game event the window has reached: open, or locked or later.
+    const reached = (eventId: string) => {
+      const status = existing.get(eventId)?.status;
+      return (
+        status === "open" || (status !== undefined && FROZEN.includes(status))
+      );
+    };
+
     const cancelledNow: { eventId: string; wasOpen: boolean }[] = [];
-    for (const event of calendar) {
+    for (const [i, event] of calendar.entries()) {
       const row = existing.get(event.id);
       if (frozen.has(event.id)) continue;
 
-      const cancelled = event.status === "cancelled";
+      // Reinstated on the calendar after a later event opened: the window has
+      // moved past it, and putting it back ahead of that event would leave
+      // neither able to lock. It stays cancelled here, for an admin to look at.
+      const passed =
+        event.status !== "cancelled" &&
+        row?.status === "cancelled" &&
+        calendar.slice(i + 1).find((later) => reached(later.id));
+      if (passed) {
+        await openReviewItem(tx, now, {
+          kind: "game_event_reinstated",
+          seasonId: game.seasonId,
+          eventId: event.id,
+          details: {
+            gameId,
+            openEventId: passed.id,
+            openEventStatus: existing.get(passed.id)!.status,
+          },
+          dedupeKey: `game_event_reinstated:${gameId}:${event.id}`,
+        });
+      }
+      const cancelled = event.status === "cancelled" || Boolean(passed);
       const status: GameEventStatus = cancelled
         ? "cancelled"
         : row && row.status !== "cancelled"
