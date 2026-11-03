@@ -676,12 +676,25 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 | published_at | timestamptz | |
 
 **What goes in `params`:** these values are read together, never searched, so `jsonb` fits rule 0.3:
-- **Squad:** drivers 5, constructors 2, boosts 1, starting budget `1000` ($100M), teams per user 3.
-- **Transfers:** free per event 2, carry-over max 1, penalty -10, unlimited before the team's first event, and how chip weeks treat carry-over (3.8).
-- **Chips:** the list of chips. Each has our own name, a stable code (`chip_autopilot`, `chip_triple_boost`, …), an unlock rule (`from_start` or `after_first_event`) and an effect code the engine knows.
-- **Knockout cut-offs:** qualifying and sprint qualifying, Q2 from P16 and Q3 from P10 (HLD §5.6).
-- **Prices:** the formula's constants (3.5) and the $3M–$34M bounds (`30`–`340`).
-- **Abandoned sessions:** the default policy is `score_as_classified` (3.9).
+- **Squad:** `squad` drivers 5, constructors 2, boosts 1; `budget` `1000` ($100M); `teamsPerUser` 3.
+- **Transfers:** `freePerEvent` 2, `carryOverMax` 1, `penalty` -10, and `carryOverOutInUnlimitedWeek` 0 (what a chip week with unlimited transfers carries forward, 3.8). Transfers are unlimited before the team's first event; that is a rule of the engine, not a param.
+- **Chips:** the list of chips. Each has our own name, a stable code, an unlock rule (`from_start` or `after_first_event`) and an effect code the engine knows. The 2026 list:
+
+  | Code | Name | Unlock | Effect |
+  |---|---|---|---|
+  | `chip_autopilot` | Strategist | `from_start` | `autopilot` |
+  | `chip_triple_boost` | Overdrive | `from_start` | `triple_boost` |
+  | `chip_no_negative` | Safety Car | `from_start` | `no_negative` |
+  | `chip_wildcard` | Rebuild | `after_first_event` | `wildcard` |
+  | `chip_limitless` | Blank Cheque | `after_first_event` | `limitless` |
+  | `chip_final_fix` | Late Call | `after_first_event` | `final_fix` |
+
+- **Window:** `openCutoffHours` 24 and `recheckHours` 6. An event's transfer window opens once the previous event is complete, or this many hours before this event's lock, whichever comes first; until then the job that opens it looks again every `recheckHours`.
+- **Knockout cut-offs:** `knockout` `q2From` 16 and `q3From` 10, for qualifying and sprint qualifying (HLD §5.6).
+- **Prices:** `prices` `min` 30 and `max` 340 ($3M–$34M). The formula's constants (3.5) join them in M4.
+- **Abandoned sessions:** `abandonedSessions` is `score_as_classified` (3.9).
+
+The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at every level, and the 2026 values are `RULESET_2026` there.
 
 **`scoring_rules`**
 | Column | Type | Notes |
@@ -696,16 +709,17 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 | params | jsonb (Zod-validated per `kind`) | e.g. the points table, a cap of -10 on sprint positions lost, which classifications a penalty applies to |
 | sort_order | integer | Order on the score explanation |
 
-- **A version is frozen once used.** A trigger refuses updates to a version, and to its rules, once any event using it has locked. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
+- **The 2026 `scoring_rules` rows come in M4** (the scoring engine). M3 has the table, its `kind` CHECK and the freeze below.
+- **A version is frozen once used.** A trigger refuses updates and deletes of a version, and every write to its rules, once any `game_events` row using it is `locked`, `scored` or `final`. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
 - **Rule changes are mostly config.** "Sprint DNF penalty reduced to -10" (an official 2026 change, per the FAQ) is a new version with a different param. Only a genuinely new `kind` of calculation needs code.
 
 ### 3.3 `game_events` (an event as the game sees it)
 | Column | Type | Notes |
 |---|---|---|
 | game_id, event_id | composite PK | |
-| sequence | integer | The event's order **in this game**, by `lock_at`. Recomputed if the calendar changes before lock; frozen once locked. Mini-league ranges and "the previous event" use it |
+| sequence | integer, nullable | The event's order **in this game**, by `lock_at` over non-cancelled events; null for a cancelled event. Recomputed if the calendar changes before lock; frozen once locked, and the events still open take the remaining numbers in lock order. Mini-league ranges and "the previous event" use it |
 | status | text: `upcoming`, `open`, `locked`, `scored`, `final`, `cancelled` | `open`: the current transfer window. `scored`: provisional points exist. `final`: the event is final and the price update has run |
-| ruleset_version_id | uuid FK | The version in force for this event. Frozen at lock, except for an audited correction (4.9) |
+| ruleset_version_id | uuid FK | The version in force for this event: the one whose effective-from event has the latest `lock_at` at or before this event's (the earliest version, if none is). Frozen at lock, except for an audited correction (4.9) |
 | prices_ready_at | timestamptz, nullable | When this event's prices were published (3.5) |
 
 **`game_session_exceptions`** handles the rare session the game shouldn't score as normal, such as an abandoned race the admins decide to void (3.9):

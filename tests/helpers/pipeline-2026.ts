@@ -9,7 +9,10 @@ import { createProviderClient } from "@/providers/http/client";
 import { createRateLimiter } from "@/providers/http/rate-limiter";
 import { createPipelineHandlers } from "@/providers/pipeline";
 import { fileURLToPath } from "node:url";
-import { importSeason2026 } from "@/providers/import/import-season";
+import {
+  importReference2026,
+  importSeason2026,
+} from "@/providers/import/import-season";
 import { readFixture } from "./fixtures";
 
 const FIXTURES = fileURLToPath(new URL("../fixtures", import.meta.url));
@@ -17,6 +20,11 @@ const FIXTURES = fileURLToPath(new URL("../fixtures", import.meta.url));
 /** The whole recorded 2026 season imported as of `at` (`importSeason2026`). */
 export async function importFixtures2026(db: Db, at: Date) {
   return importSeason2026(db, fixedClock(at), FIXTURES);
+}
+
+/** Only the calendar, roster, seats and entries of 2026, as of `at`. */
+export async function importReferenceFixtures2026(db: Db, at: Date) {
+  return importReference2026(db, fixedClock(at), FIXTURES);
 }
 
 export const JOLPICA_PATH = "/ergast/f1";

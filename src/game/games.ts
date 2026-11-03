@@ -1,0 +1,196 @@
+import { and, asc, eq, ne } from "drizzle-orm";
+import {
+  events,
+  gameEvents,
+  games,
+  rulesetVersions,
+  type GAME_EVENT_STATUSES,
+} from "@/db/schema";
+import type { Db } from "@/db/types";
+import { newId } from "@/lib/ids";
+import { rulesetParamsSchema, type RulesetParams } from "./ruleset";
+
+// Games and their calendar (DM 3.1, 3.3). Reads reference data, never writes
+// it (DM 0.5).
+
+type GameEventStatus = (typeof GAME_EVENT_STATUSES)[number];
+
+/** A game event in one of these statuses is never changed by planning. */
+const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
+
+/**
+ * Creates a `season_fantasy` game in `setup` for a season, with ruleset
+ * version 1 effective from the season's first non-cancelled event (by lock
+ * time), then plans its events. `params` is checked against the schema first.
+ * A second game for the same season and type is refused by the database.
+ */
+export async function createGame(
+  db: Db,
+  now: Date,
+  input: {
+    seasonId: string;
+    slug: string;
+    name: string;
+    params: RulesetParams;
+    notes: string;
+  },
+): Promise<{ gameId: string; rulesetVersionId: string }> {
+  const params = rulesetParamsSchema.parse(input.params);
+  return db.transaction(async (tx) => {
+    const [first] = await tx
+      .select({ id: events.id })
+      .from(events)
+      .where(
+        and(
+          eq(events.seasonId, input.seasonId),
+          ne(events.status, "cancelled"),
+        ),
+      )
+      .orderBy(asc(events.lockAt), asc(events.round))
+      .limit(1);
+    if (!first) {
+      throw new Error(`createGame: season ${input.seasonId} has no events`);
+    }
+
+    const gameId = newId();
+    await tx.insert(games).values({
+      id: gameId,
+      seasonId: input.seasonId,
+      gameType: "season_fantasy",
+      slug: input.slug,
+      name: input.name,
+      status: "setup",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const rulesetVersionId = newId();
+    await tx.insert(rulesetVersions).values({
+      id: rulesetVersionId,
+      gameId,
+      version: 1,
+      effectiveFromEventId: first.id,
+      params,
+      notes: input.notes,
+      publishedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await planGameEvents(tx, now, gameId);
+    return { gameId, rulesetVersionId };
+  });
+}
+
+/**
+ * Brings a game's `game_events` in line with its season's calendar, one row
+ * per event:
+ * - `sequence` is 1..n by `lock_at` over non-cancelled events (ties by round);
+ *   a cancelled event has `sequence` null and status `cancelled`;
+ * - `ruleset_version_id` is the version whose effective-from event has the
+ *   latest `lock_at` at or before this event's. An event before every version
+ *   takes the earliest one, so the column is never empty;
+ * - a row that is `locked` or later is never changed. Its sequence stays, and
+ *   the events still open for planning take the other numbers, in lock order.
+ *
+ * Writes only what differs, so running it again changes nothing. Call it when
+ * a game is created, a version is added and whenever the calendar changes.
+ */
+export async function planGameEvents(
+  db: Db,
+  now: Date,
+  gameId: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [game] = await tx.select().from(games).where(eq(games.id, gameId));
+    if (!game) throw new Error(`planGameEvents: no game ${gameId}`);
+
+    const calendar = await tx
+      .select()
+      .from(events)
+      .where(eq(events.seasonId, game.seasonId))
+      .orderBy(asc(events.lockAt), asc(events.round));
+    const existing = new Map(
+      (
+        await tx.select().from(gameEvents).where(eq(gameEvents.gameId, gameId))
+      ).map((row) => [row.eventId, row]),
+    );
+
+    // The versions, by the lock time of the event each takes effect from.
+    const versions = (
+      await tx
+        .select({
+          id: rulesetVersions.id,
+          version: rulesetVersions.version,
+          from: events.lockAt,
+        })
+        .from(rulesetVersions)
+        .innerJoin(events, eq(events.id, rulesetVersions.effectiveFromEventId))
+        .where(eq(rulesetVersions.gameId, gameId))
+    ).sort(
+      (a, b) => a.from.getTime() - b.from.getTime() || a.version - b.version,
+    );
+    if (versions.length === 0) {
+      throw new Error(`planGameEvents: game ${gameId} has no ruleset version`);
+    }
+    const versionFor = (lockAt: Date): string => {
+      let chosen = versions[0]!;
+      for (const v of versions) {
+        if (v.from.getTime() <= lockAt.getTime()) chosen = v;
+      }
+      return chosen.id;
+    };
+
+    // Frozen rows keep their numbers; the rest fill the gaps in lock order.
+    const taken = new Set<number>();
+    for (const row of existing.values()) {
+      if (FROZEN.includes(row.status) && row.sequence !== null) {
+        taken.add(row.sequence);
+      }
+    }
+    let next = 0;
+    const nextSequence = (): number => {
+      do next += 1;
+      while (taken.has(next));
+      return next;
+    };
+
+    for (const event of calendar) {
+      const row = existing.get(event.id);
+      if (row && FROZEN.includes(row.status)) continue;
+
+      const cancelled = event.status === "cancelled";
+      const status: GameEventStatus = cancelled
+        ? "cancelled"
+        : row && row.status !== "cancelled"
+          ? row.status
+          : "upcoming";
+      const sequence = cancelled ? null : nextSequence();
+      const rulesetVersionId = versionFor(event.lockAt);
+
+      if (!row) {
+        await tx.insert(gameEvents).values({
+          gameId,
+          eventId: event.id,
+          sequence,
+          status,
+          rulesetVersionId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else if (
+        row.sequence !== sequence ||
+        row.status !== status ||
+        row.rulesetVersionId !== rulesetVersionId
+      ) {
+        await tx
+          .update(gameEvents)
+          .set({ sequence, status, rulesetVersionId, updatedAt: now })
+          .where(
+            and(
+              eq(gameEvents.gameId, gameId),
+              eq(gameEvents.eventId, event.id),
+            ),
+          );
+      }
+    }
+  });
+}
