@@ -5,6 +5,7 @@ import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import {
   assetPrices,
+  chipPlays,
   circuits,
   constructors,
   drivers,
@@ -17,6 +18,8 @@ import {
   rulesetVersions,
   scoringRules,
   seasons,
+  sessionResultState,
+  sessions,
   teams,
 } from "./schema";
 
@@ -42,6 +45,8 @@ const WINDOW_CLOSED = "GL001";
 const COMPOSITION = "GL002";
 const ASSET_UNAVAILABLE = "GL003";
 const OVER_BUDGET = "GL004";
+const CHIP_UNAVAILABLE = "GL006";
+const CHIP_WINDOW_CLOSED = "GL007";
 const NOW = new Date("2026-03-01T00:00:00Z");
 
 describe("the ruleset freeze (DM 3.2)", () => {
@@ -601,6 +606,15 @@ describe("lineup versions (DM 3.7)", () => {
         squad: { drivers: 1, constructors: 1, boosts: 1 },
         teamsPerUser: 3,
         budget: 100,
+        // Playable from the start here, so a first event can use them.
+        chips: [
+          {
+            code: "chip_limitless",
+            name: "Blank Cheque",
+            unlock: "from_start",
+            effect: "limitless",
+          },
+        ],
       },
       notes: "v1",
       publishedAt: NOW,
@@ -800,6 +814,16 @@ describe("lineup versions (DM 3.7)", () => {
     // 70 + 40 against a first event's budget of 100.
     await expectPgError(saveVersion(), OVER_BUDGET);
     expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+    // A limitless version needs Blank Cheque played for the event.
+    await expectPgError(saveVersion({ kind: "limitless" }), CHIP_UNAVAILABLE);
+    await t.db.insert(chipPlays).values({
+      id: newId(),
+      teamId,
+      gameId,
+      chipCode: "chip_limitless",
+      eventId,
+      status: "played",
+    });
     await saveVersion({ kind: "limitless" });
     expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
     // 60 + 40 is exactly the budget.
@@ -964,6 +988,54 @@ describe("lineup versions (DM 3.7)", () => {
       .from(events)
       .where(eq(events.id, eventId));
     expect(row!.lockAt).toEqual(new Date(CLOCK.getTime() - 3_600_000));
+  });
+
+  it("a final_fix version outside its window is refused by the database", async () => {
+    // Qualifying at the lock, the race a day later.
+    const session = (kind: "qualifying" | "race", start: Date) => ({
+      id: newId(),
+      eventId,
+      kind,
+      scheduledStart: start,
+      startConfirmed: true,
+      scheduledEnd: new Date(start.getTime() + 3_600_000),
+      timeSource: "provider" as const,
+      status: "scheduled" as const,
+    });
+    const qualifying = session("qualifying", LOCK);
+    const race = session("race", new Date(LOCK.getTime() + 86_400_000));
+    await t.db.insert(sessions).values([qualifying, race]);
+    const finalFix = () =>
+      saveVersion({ kind: "final_fix", effectiveFromSessionId: race.id });
+    const inTime = new Date(race.scheduledStart.getTime() - 3_600_000);
+
+    // The event hasn't locked.
+    await setSimulatedClock(t.db, inTime);
+    await t.db
+      .insert(sessionResultState)
+      .values({ sessionId: qualifying.id, status: "provisional" });
+    await expectPgError(finalFix(), CHIP_WINDOW_CLOSED);
+    await t.db
+      .update(gameEvents)
+      .set({ status: "locked" })
+      .where(eq(gameEvents.eventId, eventId));
+    // Qualifying's results aren't in.
+    await t.db
+      .update(sessionResultState)
+      .set({ status: "awaiting" })
+      .where(eq(sessionResultState.sessionId, qualifying.id));
+    await expectPgError(finalFix(), CHIP_WINDOW_CLOSED);
+    // The race has started.
+    await t.db
+      .update(sessionResultState)
+      .set({ status: "provisional" })
+      .where(eq(sessionResultState.sessionId, qualifying.id));
+    await setSimulatedClock(t.db, race.scheduledStart);
+    await expectPgError(finalFix(), CHIP_WINDOW_CLOSED);
+    // In the window, but with no Late Call played.
+    await setSimulatedClock(t.db, inTime);
+    await expectPgError(finalFix(), CHIP_UNAVAILABLE);
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
   });
 
   it("rewriting a lock_at that has passed to the same value is left alone", async () => {

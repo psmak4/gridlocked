@@ -19,6 +19,7 @@ import {
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
+import { playChip } from "./chips";
 import type { GameError } from "./errors";
 import { saveLineup, openGame, type LineupPick } from "./lineups";
 import { lockEvent } from "./lock";
@@ -545,11 +546,12 @@ describe("lockEvent (DM 3.8)", () => {
   });
 
   it("a Limitless week reverts the next base to the lineup and bank before it", async () => {
-    // Chips are Task 7; a limitless version is written directly here.
+    // Blank Cheque played, then a limitless version written directly.
     const first = await saveFor(round1, await picksOf());
     await advance(round1, round2);
     const now = new Date(round2.lockAt.getTime() - HOUR_MS);
     await setSimulatedClock(t.db, now);
+    await playChip(t.db, now, { teamId, chipCode: "chip_limitless" });
     const limitless = newId();
     // Far over the budget: 280 + 270 + 250 + 220 + 200 + 300 + 270.
     const big = await picksOf(
@@ -598,5 +600,51 @@ describe("lockEvent (DM 3.8)", () => {
       transfersMade: 0,
       freeTransfers: 2,
     });
+  });
+  it("an Overdrive target missing from the locked lineup fails the lock loudly", async () => {
+    await saveFor(round1, await picksOf());
+    const now = new Date(round1.lockAt.getTime() - HOUR_MS);
+    await playChip(t.db, now, {
+      teamId,
+      chipCode: "chip_triple_boost",
+      targetAssetId: await game.assetId("piastri"),
+    });
+    // The save check refuses dropping the target, so it is switched off to
+    // break the rule here.
+    const without = await picksOf([
+      "norris",
+      "lawson",
+      "hulkenberg",
+      "hadjar",
+      "bearman",
+    ]);
+    await t.db.execute(
+      sql`alter table "lineup_versions" disable trigger "lineup_versions_check"`,
+    );
+    await t.db.execute(
+      sql`alter table "lineup_picks" disable trigger "lineup_picks_check"`,
+    );
+    const id = newId();
+    await t.db.transaction(async (tx) => {
+      await tx.insert(lineupVersions).values({
+        id,
+        teamId,
+        forEventId: round1.id,
+        kind: "regular",
+      });
+      await tx
+        .insert(lineupPicks)
+        .values(without.map((p) => ({ lineupVersionId: id, ...p })));
+    });
+    await t.db.execute(
+      sql`alter table "lineup_versions" enable trigger "lineup_versions_check"`,
+    );
+    await t.db.execute(
+      sql`alter table "lineup_picks" enable trigger "lineup_picks_check"`,
+    );
+    await expect(lockRound(t.db, gameId, round1.id)).rejects.toThrow(
+      /x3 Boost target/,
+    );
+    expect(await states(round1.id)).toHaveLength(0);
   });
 });

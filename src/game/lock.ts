@@ -20,6 +20,7 @@ import {
   teams,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { playedChips } from "./chips";
 import { lockedLineups } from "./lineups";
 import { priceList } from "./prices";
 import { rulesetParamsSchema } from "./ruleset";
@@ -67,6 +68,13 @@ const baseRowSchema = z.object({
  * (by sequence, not cancelled) hasn't locked, and for an event that is neither
  * `open` nor already `locked`. A bank below 0 outside a Limitless week is a
  * broken rule (the save check prevents it), and fails the batch.
+ *
+ * The chip played for the event is recorded on the row (DM 3.9). Rebuild
+ * (Wildcard) and Blank Cheque (Limitless) make the week unlimited, and Blank
+ * Cheque lets the bank go below 0; the next event's base reverts after it
+ * (`team_base_state`). An x3 Boost target missing from the locked lineup, or
+ * holding the 2x Boost, is a broken rule too (the save check refuses both),
+ * and fails the batch.
  */
 export async function lockEvent(
   db: Db,
@@ -155,6 +163,7 @@ export async function lockEvent(
 
     const lineups = await lockedLineups(tx, { eventId, teamIds: ids });
     const taking = ids.filter((id) => lineups.has(id));
+    const chips = await playedChips(tx, { eventId, teamIds: taking });
     let written = 0;
     if (taking.length > 0) {
       // Both functions are the database's: the same sums the save check made.
@@ -202,12 +211,22 @@ export async function lockEvent(
           }
           spent += price;
         }
-        // Wildcard joins this with Task 7's chips.
-        const limitless = lineup.kind === "limitless";
+        const chip = chips.get(teamId);
+        const limitless = chip?.effect === "limitless";
+        if (chip?.effect === "triple_boost") {
+          const target = lineup.picks.find(
+            (p) => p.assetId === chip.targetAssetId,
+          );
+          if (!target || target.isBoost) {
+            throw new Error(
+              `lockEvent: team ${teamId}'s x3 Boost target ${chip.targetAssetId} is not in its locked lineup without the 2x Boost at event ${eventId}: the chip rule is broken`,
+            );
+          }
+        }
         const free = freeTransfers(params, {
           isFirstEvent: base.is_first,
           carryIn: base.carry_in,
-          unlimited: limitless,
+          unlimited: limitless || chip?.effect === "wildcard",
         });
         const made = netTransfers(
           base.base_version_id ? (owned.get(base.base_version_id) ?? []) : [],
@@ -225,6 +244,7 @@ export async function lockEvent(
           gameId,
           baseVersionId: base.base_version_id,
           lockedVersionId: lineup.versionId,
+          chipPlayId: chip?.id ?? null,
           isFirstEvent: base.is_first,
           purchasingPower: base.purchasing_power,
           spent,
