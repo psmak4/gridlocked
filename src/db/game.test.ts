@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { newId } from "@/lib/ids";
+import { setSimulatedClock } from "@/replay/clock-loop";
 import {
   assetPrices,
   circuits,
@@ -10,6 +11,8 @@ import {
   events,
   gameEvents,
   games,
+  lineupPicks,
+  lineupVersions,
   poolAssets,
   rulesetVersions,
   scoringRules,
@@ -34,6 +37,10 @@ async function expectPgError(promise: Promise<unknown>, code: string) {
 const RESTRICT_VIOLATION = "23001";
 const CHECK_VIOLATION = "23514";
 const UNIQUE_VIOLATION = "23505";
+// Lineup refusals carry their own SQLSTATEs, so the game layer can map them.
+const WINDOW_CLOSED = "GL001";
+const COMPOSITION = "GL002";
+const ASSET_UNAVAILABLE = "GL003";
 const NOW = new Date("2026-03-01T00:00:00Z");
 
 describe("the ruleset freeze (DM 3.2)", () => {
@@ -514,5 +521,402 @@ describe("teams (DM 3.6)", () => {
         .where(eq(teams.userId, userId)),
       CHECK_VIOLATION,
     );
+  });
+});
+
+describe("lineup versions (DM 3.7)", () => {
+  let t: TestDb;
+  let eventId: string;
+  let gameEventId: string;
+  let gameId: string;
+  let teamId: string;
+  let driverAsset: string;
+  let constructorAsset: string;
+  const LOCK = new Date("2026-03-01T06:00:00Z");
+  const CLOCK = new Date("2026-02-28T12:00:00Z");
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    const seasonId = newId();
+    await t.db
+      .insert(seasons)
+      .values({ id: seasonId, year: 2026, status: "active" });
+    const circuitId = newId();
+    await t.db.insert(circuits).values({
+      id: circuitId,
+      slug: "melbourne",
+      name: "Albert Park",
+      locality: "Melbourne",
+      country: "Australia",
+      latitude: "-37.849700",
+      longitude: "144.968000",
+      timezone: "Australia/Melbourne",
+    });
+    const event = (round: number, slug: string) => ({
+      id: newId(),
+      seasonId,
+      round,
+      slug,
+      name: slug,
+      circuitId,
+      format: "standard" as const,
+      status: "scheduled" as const,
+      lockAt: new Date(LOCK.getTime() + round * 86_400_000),
+      lockAtSource: "default" as const,
+    });
+    const round1 = { ...event(1, "2026-australia"), lockAt: LOCK };
+    const round2 = event(2, "2026-china");
+    eventId = round1.id;
+    gameEventId = round2.id;
+    await t.db.insert(events).values([round1, round2]);
+    gameId = newId();
+    await t.db.insert(games).values({
+      id: gameId,
+      seasonId,
+      gameType: "season_fantasy",
+      slug: "2026-fantasy",
+      name: "2026 Fantasy",
+      status: "open",
+    });
+    const versionId = newId();
+    await t.db.insert(rulesetVersions).values({
+      id: versionId,
+      gameId,
+      version: 1,
+      effectiveFromEventId: eventId,
+      params: {
+        squad: { drivers: 1, constructors: 1, boosts: 1 },
+        teamsPerUser: 3,
+      },
+      notes: "v1",
+      publishedAt: NOW,
+    });
+    await t.db.insert(gameEvents).values({
+      gameId,
+      eventId,
+      sequence: 1,
+      status: "open",
+      rulesetVersionId: versionId,
+    });
+    const driverId = newId();
+    await t.db.insert(drivers).values({
+      id: driverId,
+      slug: "norris",
+      givenName: "Lando",
+      familyName: "Norris",
+      nationality: "British",
+    });
+    const constructorId = newId();
+    await t.db.insert(constructors).values({
+      id: constructorId,
+      slug: "mclaren",
+      name: "McLaren",
+      nationality: "British",
+    });
+    driverAsset = newId();
+    constructorAsset = newId();
+    await t.db.insert(poolAssets).values([
+      {
+        id: driverAsset,
+        gameId,
+        assetType: "driver",
+        driverId,
+        status: "active",
+        addedFromEventId: eventId,
+      },
+      {
+        id: constructorAsset,
+        gameId,
+        assetType: "constructor",
+        constructorId,
+        status: "active",
+        addedFromEventId: eventId,
+      },
+    ]);
+    teamId = newId();
+    await t.db.insert(teams).values({
+      id: teamId,
+      gameId,
+      userId: newId(),
+      slot: 1,
+      name: "One",
+      status: "active",
+    });
+    await setSimulatedClock(t.db, CLOCK);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  /** One version with its picks, committed together (the check is deferred). */
+  const saveVersion = (
+    over: Partial<typeof lineupVersions.$inferInsert> = {},
+    picks = [
+      { assetId: driverAsset, isBoost: true },
+      { assetId: constructorAsset, isBoost: false },
+    ],
+  ) => {
+    const id = newId();
+    return t.db.transaction(async (tx) => {
+      await tx
+        .insert(lineupVersions)
+        .values({ id, teamId, forEventId: eventId, kind: "regular", ...over });
+      if (picks.length > 0) {
+        await tx
+          .insert(lineupPicks)
+          .values(picks.map((p) => ({ lineupVersionId: id, ...p })));
+      }
+      return id;
+    });
+  };
+
+  it("a version for an event that isn't open is refused", async () => {
+    await t.db
+      .update(gameEvents)
+      .set({ status: "upcoming" })
+      .where(eq(gameEvents.eventId, eventId));
+    await expectPgError(saveVersion(), WINDOW_CLOSED);
+    await t.db
+      .update(gameEvents)
+      .set({ status: "locked" })
+      .where(eq(gameEvents.eventId, eventId));
+    await expectPgError(saveVersion(), WINDOW_CLOSED);
+    // An event the game doesn't have is not open for it either.
+    await expectPgError(
+      saveVersion({ forEventId: gameEventId }),
+      WINDOW_CLOSED,
+    );
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+  });
+
+  it("a version for an open event before lock is accepted", async () => {
+    await saveVersion();
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
+  });
+
+  it("saved_at comes from app_now(), not from the insert", async () => {
+    await saveVersion({ savedAt: new Date("2020-01-01T00:00:00Z") });
+    const [row] = await t.db.select().from(lineupVersions);
+    expect(row!.savedAt).toEqual(CLOCK);
+    await setSimulatedClock(t.db, new Date(CLOCK.getTime() + 60_000));
+    await saveVersion({ savedAt: new Date("2020-01-01T00:00:00Z") });
+    const later = await t.db.select().from(lineupVersions);
+    expect(later.map((r) => r.savedAt.getTime()).sort()).toEqual([
+      CLOCK.getTime(),
+      CLOCK.getTime() + 60_000,
+    ]);
+  });
+
+  it("a version is refused at lock_at, even when the clock passes it between the insert and the commit", async () => {
+    await setSimulatedClock(t.db, LOCK);
+    await expectPgError(saveVersion(), WINDOW_CLOSED);
+    await setSimulatedClock(t.db, new Date(LOCK.getTime() - 1000));
+    await saveVersion();
+    // Inserted before the lock, but the clock passes it before the commit.
+    const error = await t.db
+      .transaction(async (tx) => {
+        const id = newId();
+        await tx
+          .insert(lineupVersions)
+          .values({ id, teamId, forEventId: eventId, kind: "regular" });
+        await tx.insert(lineupPicks).values([
+          { lineupVersionId: id, assetId: driverAsset, isBoost: true },
+          { lineupVersionId: id, assetId: constructorAsset, isBoost: false },
+        ]);
+        await setSimulatedClock(tx, LOCK);
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(error).toBeDefined();
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
+  });
+
+  it("the squad comes from the ruleset params, and a Boost must be on a driver", async () => {
+    await expectPgError(saveVersion({}, []), COMPOSITION);
+    await expectPgError(
+      saveVersion({}, [{ assetId: driverAsset, isBoost: true }]),
+      COMPOSITION,
+    );
+    await expectPgError(
+      saveVersion({}, [
+        { assetId: driverAsset, isBoost: false },
+        { assetId: constructorAsset, isBoost: true },
+      ]),
+      COMPOSITION,
+    );
+    await expectPgError(
+      saveVersion({}, [
+        { assetId: driverAsset, isBoost: true },
+        { assetId: constructorAsset, isBoost: true },
+      ]),
+      COMPOSITION,
+    );
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+  });
+
+  it("an asset withdrawn at or before the event can't be picked", async () => {
+    await t.db
+      .update(poolAssets)
+      .set({ status: "withdrawn", withdrawnFromEventId: eventId })
+      .where(eq(poolAssets.id, constructorAsset));
+    await expectPgError(saveVersion(), ASSET_UNAVAILABLE);
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+  });
+
+  it("picks can't be added to or removed from a version after the lock", async () => {
+    const id = await saveVersion();
+    await setSimulatedClock(t.db, LOCK);
+    await expectPgError(
+      t.db.delete(lineupPicks).where(eq(lineupPicks.lineupVersionId, id)),
+      WINDOW_CLOSED,
+    );
+    await expectPgError(
+      t.db
+        .update(lineupPicks)
+        .set({ isBoost: false })
+        .where(eq(lineupPicks.assetId, driverAsset)),
+      WINDOW_CLOSED,
+    );
+    expect(await t.db.select().from(lineupPicks)).toHaveLength(2);
+  });
+
+  it("a saved version's own columns can't be rewritten", async () => {
+    const id = await saveVersion();
+    for (const change of [
+      { savedAt: new Date("2020-01-01T00:00:00Z") },
+      { forEventId: gameEventId },
+      { kind: "limitless" as const },
+      { teamId: newId() },
+    ]) {
+      await expectPgError(
+        t.db
+          .update(lineupVersions)
+          .set(change)
+          .where(eq(lineupVersions.id, id)),
+        RESTRICT_VIOLATION,
+      );
+    }
+  });
+
+  it("a lineup_picks asset can only be picked once per version", async () => {
+    await expectPgError(
+      saveVersion({}, [
+        { assetId: driverAsset, isBoost: true },
+        { assetId: driverAsset, isBoost: false },
+      ]),
+      UNIQUE_VIOLATION,
+    );
+  });
+
+  it("a version's kind must be one of the three, and final_fix needs a session", async () => {
+    await expectPgError(
+      saveVersion({ kind: "other" as never }),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(saveVersion({ kind: "final_fix" }), CHECK_VIOLATION);
+  });
+
+  it("a lock_at can't be moved to a time already past", async () => {
+    const move = (lockAt: Date, id = eventId) =>
+      t.db.update(events).set({ lockAt }).where(eq(events.id, id));
+    // The clock is CLOCK. At or before it is refused; a future time is fine.
+    await expectPgError(move(CLOCK), RESTRICT_VIOLATION);
+    await expectPgError(
+      move(new Date(CLOCK.getTime() - 3_600_000)),
+      RESTRICT_VIOLATION,
+    );
+    await move(new Date(CLOCK.getTime() + 3_600_000));
+    const [row] = await t.db
+      .select()
+      .from(events)
+      .where(eq(events.id, eventId));
+    expect(row!.lockAt).toEqual(new Date(CLOCK.getTime() + 3_600_000));
+  });
+
+  it("a lock that has passed can't be moved later", async () => {
+    await setSimulatedClock(t.db, new Date(LOCK.getTime() + 60_000));
+    await expectPgError(
+      t.db
+        .update(events)
+        .set({ lockAt: new Date(LOCK.getTime() + 3_600_000) })
+        .where(eq(events.id, eventId)),
+      RESTRICT_VIOLATION,
+    );
+    const [row] = await t.db
+      .select()
+      .from(events)
+      .where(eq(events.id, eventId));
+    expect(row!.lockAt).toEqual(LOCK);
+  });
+
+  it("with no simulated clock the window uses the time at the commit, not the transaction's start", async () => {
+    const lockIn = async (ms: number) => {
+      // Moved while the simulated clock is still set, then the clock is
+      // dropped, as in production.
+      await t.db.execute(
+        sql`update events set lock_at = clock_timestamp() + ${`${ms} milliseconds`}::interval where id = ${eventId}`,
+      );
+    };
+    await lockIn(60_000);
+    await t.db.execute(sql`delete from settings where key = 'simulated_clock'`);
+    await saveVersion();
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
+
+    await t.db.delete(lineupVersions);
+    await t.db.execute(
+      sql`insert into settings (key, value) values ('simulated_clock', '{"at": "2026-02-28T12:00:00Z"}')`,
+    );
+    await lockIn(250);
+    await t.db.execute(sql`delete from settings where key = 'simulated_clock'`);
+    // now() is the start of the transaction, before the lock; by the commit the
+    // lock has passed.
+    const error = await t.db
+      .transaction(async (tx) => {
+        const id = newId();
+        await tx
+          .insert(lineupVersions)
+          .values({ id, teamId, forEventId: eventId, kind: "regular" });
+        await tx.insert(lineupPicks).values([
+          { lineupVersionId: id, assetId: driverAsset, isBoost: true },
+          { lineupVersionId: id, assetId: constructorAsset, isBoost: false },
+        ]);
+        const { rows } = await tx.execute(
+          sql`select (now() < (select lock_at from events where id = ${eventId})) as early`,
+        );
+        expect((rows[0] as { early: boolean }).early).toBe(true);
+        await tx.execute(sql`select pg_sleep(0.4)`);
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(
+      (error as { cause?: { code?: string } }).cause?.code ??
+        (error as { code?: string }).code,
+    ).toBe(WINDOW_CLOSED);
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+  });
+
+  it("an event with no game row can have its lock_at moved freely", async () => {
+    await t.db.delete(gameEvents);
+    await t.db
+      .update(events)
+      .set({ lockAt: new Date(CLOCK.getTime() - 3_600_000) })
+      .where(eq(events.id, eventId));
+    const [row] = await t.db
+      .select()
+      .from(events)
+      .where(eq(events.id, eventId));
+    expect(row!.lockAt).toEqual(new Date(CLOCK.getTime() - 3_600_000));
+  });
+
+  it("rewriting a lock_at that has passed to the same value is left alone", async () => {
+    await setSimulatedClock(t.db, new Date(LOCK.getTime() + 60_000));
+    await t.db
+      .update(events)
+      .set({ lockAt: LOCK, name: "Renamed" })
+      .where(eq(events.id, eventId));
   });
 });

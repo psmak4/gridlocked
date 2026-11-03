@@ -4,6 +4,7 @@ import { createTestDb } from "../../tests/helpers/test-db";
 import { importReferenceFixtures2026 } from "../../tests/helpers/pipeline-2026";
 import { events, gameEvents, rulesetVersions } from "@/db/schema";
 import { newId } from "@/lib/ids";
+import { setSimulatedClock } from "@/replay/clock-loop";
 import { createGame, planGameEvents } from "./games";
 import { RULESET_2026 } from "./ruleset";
 
@@ -20,6 +21,8 @@ describe("the game calendar (DM 3.3)", () => {
   beforeEach(async () => {
     t = await createTestDb();
     ({ seasonId } = await importReferenceFixtures2026(t.db, NOW));
+    // The database clock agrees with the app's: a lock can't move into its past.
+    await setSimulatedClock(t.db, NOW);
   });
   afterEach(async () => {
     await t.close();

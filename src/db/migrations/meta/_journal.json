@@ -113,6 +113,20 @@
       "when": 1793681011911,
       "tag": "0015_game_rules_3",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793681779012,
+      "tag": "0016_lineups",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793681780906,
+      "tag": "0017_game_rules_4",
+      "breakpoints": true
     }
   ]
 }

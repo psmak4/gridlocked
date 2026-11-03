@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   index,
   integer,
@@ -11,6 +12,7 @@ import {
   timestamp,
   unique,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { createdAt, oneOf, updatedAt } from "./helpers";
 import {
@@ -19,6 +21,7 @@ import {
   events,
   seasons,
   SESSION_KINDS,
+  sessions,
 } from "./reference";
 
 // The fantasy core (DM Part 3): game data. It points down at reference data
@@ -26,8 +29,10 @@ import {
 //
 // Not declared here, because Drizzle cannot express it: the freeze trigger on
 // ruleset_versions and scoring_rules (DM 3.2), the price freeze on asset_prices
-// (DM 3.5) and the slot limit on teams (DM 3.6). They live in the `game_rules`,
-// `game_rules_2` and `game_rules_3` migrations.
+// (DM 3.5), the slot limit on teams (DM 3.6), and the lineup checks (DM 3.7):
+// `saved_at` from app_now(), the window, composition and asset availability at
+// commit, and the guard on `events.lock_at`. They live in the `game_rules`,
+// `game_rules_2`, `game_rules_3` and `game_rules_4` migrations.
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
@@ -53,6 +58,8 @@ export const PRICE_SOURCES = [
 export const PRICE_MIN = 30;
 export const PRICE_MAX = 340;
 export const TEAM_STATUSES = ["active", "retired"] as const;
+/** `limitless` and `final_fix` are temporary: they apply to one event (DM 3.7). */
+export const LINEUP_KINDS = ["regular", "limitless", "final_fix"] as const;
 /** A team's name, in characters (DM 3.6). */
 export const TEAM_NAME_MAX = 30;
 export const SCORING_TARGETS = ["driver", "constructor"] as const;
@@ -301,5 +308,71 @@ export const teams = pgTable(
       sql`char_length(${t.name}) between 1 and ${sql.raw(String(TEAM_NAME_MAX))}`,
     ),
     index("teams_user_id_idx").on(t.userId),
+  ],
+);
+
+/**
+ * DM 3.7: a saved lineup. Every save is a new row and none is changed. The
+ * database sets `saved_at` from app_now() whatever the insert says, and checks
+ * the window, the composition and the assets when the transaction commits
+ * (triggers). Deleting a team deletes its versions.
+ */
+export const lineupVersions = pgTable(
+  "lineup_versions",
+  {
+    id: uuid("id").primaryKey(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** The event whose window was open when it was saved. */
+    forEventId: uuid("for_event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: LINEUP_KINDS }).notNull(),
+    /** Only for `final_fix`: the race session it applies from. */
+    effectiveFromSessionId: uuid("effective_from_session_id").references(
+      () => sessions.id,
+      { onDelete: "restrict" },
+    ),
+    /** The version the user was editing; it may no longer be the latest. */
+    basedOnVersionId: uuid("based_on_version_id").references(
+      (): AnyPgColumn => lineupVersions.id,
+      { onDelete: "set null" },
+    ),
+    /** Set by the database (trigger); the default only lets an insert omit it. */
+    savedAt: timestamp("saved_at", { withTimezone: true })
+      .notNull()
+      .default(sql`app_now()`),
+  },
+  (t) => [
+    check("lineup_versions_kind_check", oneOf(t.kind, LINEUP_KINDS)),
+    check(
+      "lineup_versions_final_fix_session_check",
+      sql`(${t.kind} = 'final_fix') = (${t.effectiveFromSessionId} is not null)`,
+    ),
+    index("lineup_versions_team_id_for_event_id_saved_at_idx").on(
+      t.teamId,
+      t.forEventId,
+      t.savedAt.desc(),
+    ),
+  ],
+);
+
+/** DM 3.7: the assets of a version. The same asset can't be picked twice. */
+export const lineupPicks = pgTable(
+  "lineup_picks",
+  {
+    lineupVersionId: uuid("lineup_version_id")
+      .notNull()
+      .references(() => lineupVersions.id, { onDelete: "cascade" }),
+    assetId: uuid("asset_id")
+      .notNull()
+      .references(() => poolAssets.id, { onDelete: "restrict" }),
+    /** The 2x Boost: as many as the ruleset's `squad.boosts`, on drivers. */
+    isBoost: boolean("is_boost").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.lineupVersionId, t.assetId] }),
+    index("lineup_picks_asset_id_idx").on(t.assetId),
   ],
 );
