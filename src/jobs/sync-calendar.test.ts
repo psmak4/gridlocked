@@ -14,6 +14,7 @@ import { readFixture } from "../../tests/helpers/fixtures";
 import {
   eventEntries,
   events,
+  gameEvents,
   jobs,
   rawSnapshots,
   seasons,
@@ -284,6 +285,33 @@ describe("the sync_calendar handler", () => {
     // A second sync moves nothing and adds nothing.
     await syncAt(new Date(T0.getTime() + 2 * DAY));
     expect(await gameJobs()).toHaveLength(jobsNow.length);
+  });
+
+  it("a cancelled event reaches the season's games at the next sync", async () => {
+    await syncAt(T0);
+    const [season] = await t.db.select().from(seasons);
+    const { gameId } = await createGame(t.db, T0, {
+      seasonId: season!.id,
+      slug: "2026-fantasy",
+      name: "2026 Fantasy",
+      params: RULESET_2026,
+      notes: "The 2026 rules.",
+    });
+    const { event } = await eventOfRound(t.db, 5);
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, event.id));
+
+    await syncAt(new Date(T0.getTime() + DAY));
+    const [row] = await t.db
+      .select()
+      .from(gameEvents)
+      .where(eq(gameEvents.eventId, event.id));
+    expect(row).toMatchObject({ gameId, status: "cancelled", sequence: null });
+    // And it gets no lock job.
+    const keys = (await allJobs(t.db)).map((j) => j.dedupeKey);
+    expect(keys).not.toContain(`game_lock:${gameId}:${event.id}`);
   });
 
   it("creates the event entries from the seats", async () => {

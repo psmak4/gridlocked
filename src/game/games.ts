@@ -8,6 +8,8 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { refundChips } from "./chips";
+import { carryPrices } from "./prices";
 import { rulesetParamsSchema, type RulesetParams } from "./ruleset";
 
 // Games and their calendar (DM 3.1, 3.3). Reads reference data, never writes
@@ -90,9 +92,19 @@ export async function createGame(
  *   takes the earliest one, so the column is never empty;
  * - a row that is `locked` or later is never changed. Its sequence stays, and
  *   the events still open for planning take the other numbers, in lock order.
+ *   So a race called off after qualifying keeps its lock record and its chips
+ *   (DM 3.9): only an event cancelled before its lock is cancelled here.
+ *
+ * An event cancelled before its lock, in the same transaction (DM 3.9): its
+ * row becomes `cancelled`, its chips are refunded (`refundChips`), and if it
+ * was the open event, the next upcoming one opens at once, with its prices
+ * carried first when none were published (`carryPrices`: the cancelled
+ * event's, so prices don't change). Nothing locks for it, and lineups saved
+ * for it count at the next lock (`lockedLineup`).
  *
  * Writes only what differs, so running it again changes nothing. Call it when
  * a game is created, a version is added and whenever the calendar changes.
+ * Runs for one game take turns (the game row is held).
  */
 export async function planGameEvents(
   db: Db,
@@ -100,7 +112,11 @@ export async function planGameEvents(
   gameId: string,
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    const [game] = await tx.select().from(games).where(eq(games.id, gameId));
+    const [game] = await tx
+      .select()
+      .from(games)
+      .where(eq(games.id, gameId))
+      .for("update");
     if (!game) throw new Error(`planGameEvents: no game ${gameId}`);
 
     const calendar = await tx
@@ -153,6 +169,7 @@ export async function planGameEvents(
       return next;
     };
 
+    const cancelledNow: { eventId: string; wasOpen: boolean }[] = [];
     for (const event of calendar) {
       const row = existing.get(event.id);
       if (row && FROZEN.includes(row.status)) continue;
@@ -188,6 +205,44 @@ export async function planGameEvents(
             and(
               eq(gameEvents.gameId, gameId),
               eq(gameEvents.eventId, event.id),
+            ),
+          );
+      }
+      if (cancelled && row && row.status !== "cancelled") {
+        cancelledNow.push({
+          eventId: event.id,
+          wasOpen: row.status === "open",
+        });
+      }
+    }
+
+    // Cancelled before its lock: the chips come back (the database allows a
+    // refund only once the event is `cancelled`, as it now is).
+    for (const { eventId } of cancelledNow) {
+      await refundChips(tx, now, { gameId, eventId });
+    }
+    // The open event was cancelled: the window moves on to the next event
+    // (the earlier ones have all locked, since this one was open).
+    if (cancelledNow.some((c) => c.wasOpen)) {
+      const [next] = await tx
+        .select()
+        .from(gameEvents)
+        .where(
+          and(eq(gameEvents.gameId, gameId), eq(gameEvents.status, "upcoming")),
+        )
+        .orderBy(asc(gameEvents.sequence))
+        .limit(1);
+      if (next) {
+        if (next.pricesReadyAt === null) {
+          await carryPrices(tx, now, { gameId, eventId: next.eventId });
+        }
+        await tx
+          .update(gameEvents)
+          .set({ status: "open", updatedAt: now })
+          .where(
+            and(
+              eq(gameEvents.gameId, gameId),
+              eq(gameEvents.eventId, next.eventId),
             ),
           );
       }

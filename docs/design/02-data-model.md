@@ -723,7 +723,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | prices_ready_at | timestamptz, nullable | When this event's prices were published (3.5) |
 
 **`game_session_exceptions`** handles the rare session the game shouldn't score as normal, such as an abandoned race the admins decide to void (3.9):
-- Columns: `game_id`, `session_id`, `policy` (`skip`), `reason`, `decided_by`, `decided_at`.
+- Columns: `game_id`, `session_id` (together the primary key: one per session per game), `policy` (`skip`), `reason`, `decided_by`, `decided_at`.
 - It's audited, and changing it triggers a re-score.
 
 ### 3.4 `pool_assets` (what can be picked)
@@ -877,10 +877,12 @@ The save check calls `team_purchasing_power` for every version except `limitless
 - **Effects M3 enforces:** Wildcard and Limitless make the week's transfers unlimited (`free_transfers` null, no carry-over out); Limitless saves `limitless` versions, which skip the budget, and the next base reverts (3.8). Late Call is one call (`saveFinalFix`) that plays the chip, saves the `final_fix` version and sets the event's `final_fix_version_id` and `chip_play_id`. The points effects (Strategist, the x3 Boost, Safety Car) are M4's.
 
 **Cancelled events (my calls, check these):**
-- **Cancelled before lock:** nothing locks. Chips played for it are **refunded**. There's no `team_event_states` row, so the next event's transfers are counted against the last real locked lineup, and no extra free transfers are granted. Prices don't change.
-- **Session cancelled after lock** (e.g. a race called off after qualifying): sessions already run stay scored, and the cancelled session simply has no results. Chips stay used, because the lock happened. Prices update as normal from what was scored.
+- **Cancelled before lock:** nothing locks. Chips played for it are **refunded**. There's no `team_event_states` row, so the next event's transfers are counted against the last real locked lineup, and no extra free transfers are granted. Prices don't change: the next event, if it has no prices yet, carries the cancelled event's list.
+- **Lineups saved for it still count (decided for M3):** an event cancelled while its window is open doesn't undo what teams saved for it. At the next event's lock, a team that saved nothing for that event locks its latest `regular` version saved for a cancelled event since the previous event's lock (`team_locked_lineup`, in `game_rules_8`; the lock job and the x3 Boost check both read it), and only then its base. A `limitless` version doesn't carry, since its chip was refunded. A team whose first lineup was saved for the cancelled event starts at the next one.
+- **In one transaction** (`planGameEvents`, which the calendar sync runs for each game before planning its jobs): the game event becomes `cancelled` with no sequence, its chips are refunded, and if it was the open event, the next upcoming one opens at once (prices carried first when none were published).
+- **Session cancelled after lock** (e.g. a race called off after qualifying): sessions already run stay scored, and the cancelled session simply has no results. Chips stay used, because the lock happened. Prices update as normal from what was scored. A game event that has locked never becomes `cancelled`, even if its event does: it keeps its sequence, its lock record and its chips.
 
-**Abandoned sessions with a classification** (e.g. Belgium 2021): scored as classified by default (ruleset param). Admins can void one through `game_session_exceptions`. That's audited and triggers a re-score.
+**Abandoned sessions with a classification** (e.g. Belgium 2021): scored as classified by default (ruleset param). Admins can void one through `game_session_exceptions` (`setSessionException`, policy `skip`), and clear it again (`clearSessionException`, which removes the row). Both need a reason and are audited, and both trigger a re-score (M4). A session has at most one exception per game. `decided_by` is a plain uuid until M5 adds users; the audit row names who acted.
 
 ### 3.10 Indexes beyond keys
 - `lineup_versions (team_id, for_event_id, saved_at DESC)`: the locked-lineup lookup and the builder.

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { events, games, jobs, seasons, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { planGameEvents } from "@/game/games";
 import { planGameJobs } from "@/game/jobs";
 import { getSetting } from "@/settings";
 import { syncEventEntries } from "@/reference/sync-event-entries";
@@ -85,9 +86,11 @@ export async function ensureCalendarSync(
  * The `sync_calendar` handler (HLD §4.5): fetch the season's calendar, drivers
  * and constructors and apply them (through the port), then for every event
  * still to be run (`scheduled`: not cancelled, not completed) copy the seats
- * onto its entries and plan its jobs. Both steps are idempotent, so a run
- * that finds nothing new changes nothing; a session time that moved moves its
- * pending jobs.
+ * onto its entries and plan its jobs. Then each of the season's games is
+ * brought in line with the calendar (`planGameEvents`: a moved lock, a
+ * cancelled event) before its jobs are planned. Every step is idempotent, so
+ * a run that finds nothing new changes nothing; a session time that moved
+ * moves its pending jobs.
  *
  * Only events still to finish are planned: those whose latest race ends, plus
  * the last `finalizer_checks` delay, after now (the same for an event with no
@@ -131,13 +134,15 @@ export function createSyncCalendarHandler(
       await syncEventEntries(db, id, now);
       await planEventJobs(db, id);
     }
-    // The season's games lock and open their events on the same calendar.
+    // The season's games follow the calendar (a moved lock, a cancelled
+    // event), then lock and open their events on it.
     for (const { id } of await db
       .select({ id: games.id })
       .from(games)
       .innerJoin(seasons, eq(seasons.id, games.seasonId))
       .where(eq(seasons.year, season))
       .orderBy(asc(games.id))) {
+      await planGameEvents(db, now, id);
       await planGameJobs(db, id);
     }
 
