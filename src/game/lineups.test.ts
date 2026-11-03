@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
-import { seedGame2026 } from "../../tests/helpers/game-2026";
+import {
+  lockRound,
+  openRound,
+  round2026,
+  seedGame2026,
+} from "../../tests/helpers/game-2026";
 import {
   assetPrices,
   events,
@@ -28,8 +33,9 @@ const NOW = new Date("2026-02-01T09:00:00.000Z");
 const USER = newId();
 const ACTOR: StaffActor = { kind: "admin", label: "staff" };
 const SECOND_MS = 1000;
-const DRIVERS = ["norris", "max_verstappen", "piastri", "russell", "leclerc"];
-const CONSTRUCTORS = ["mclaren", "mercedes"];
+// 280 + 250 + 95 + 85 + 80 + 90 + 70 = 950, within the $100M budget.
+const DRIVERS = ["norris", "piastri", "hulkenberg", "hadjar", "bearman"];
+const CONSTRUCTORS = ["haas", "audi"];
 
 describe("lineups (DM 3.7)", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
@@ -279,9 +285,9 @@ describe("lineups (DM 3.7)", () => {
     });
 
     it("a withdrawn asset is refused with asset_unavailable", async () => {
-      const leclerc = await game.assetId("leclerc");
+      const bearman = await game.assetId("bearman");
       await withdrawPoolAsset(t.db, NOW, {
-        assetId: leclerc,
+        assetId: bearman,
         fromEventId: round1.id,
         reason: "Leaves the grid",
         actor: ACTOR,
@@ -296,13 +302,56 @@ describe("lineups (DM 3.7)", () => {
         .from(events)
         .where(eq(events.round, 2));
       await withdrawPoolAsset(t.db, NOW, {
-        assetId: await game.assetId("leclerc"),
+        assetId: await game.assetId("bearman"),
         fromEventId: round2!.id,
         reason: "Leaves after round 1",
         actor: ACTOR,
       });
       await save(NOW, await picksOf());
       expect(await versions()).toHaveLength(1);
+    });
+
+    it("a withdrawn asset already owned can be kept, but not bought back after it's sold", async () => {
+      await save(await at(beforeLock(60)), await picksOf());
+      const locked = await lockRound(t.db, gameId, round1.id);
+      const round2 = await round2026(t.db, 2);
+      await withdrawPoolAsset(t.db, locked, {
+        assetId: await game.assetId("bearman"),
+        fromEventId: round2.id,
+        reason: "Leaves the grid",
+        actor: ACTOR,
+      });
+      await openRound(t.db, locked, gameId, round2.id);
+      const inRound2 = await at(new Date(round2.lockAt.getTime() - 3_600_000));
+
+      // Owned in the base: kept through another change.
+      const kept = await picksOf([
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "lawson",
+        "bearman",
+      ]);
+      await save(inRound2, kept);
+      // Sold, and that sale locks.
+      const sold = await picksOf([
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "stroll",
+      ]);
+      await save(inRound2, sold);
+      const locked2 = await lockRound(t.db, gameId, round2.id);
+      const round3 = await round2026(t.db, 3);
+      await openRound(t.db, locked2, gameId, round3.id);
+
+      const before = (await versions()).length;
+      await expectGameError(
+        save(await at(new Date(round3.lockAt.getTime() - 3_600_000)), kept),
+        "asset_unavailable",
+      );
+      expect(await versions()).toHaveLength(before);
     });
 
     it("another game's asset is refused with asset_unavailable", async () => {
@@ -340,6 +389,32 @@ describe("lineups (DM 3.7)", () => {
     });
   });
 
+  describe("the budget (DM 3.8)", () => {
+    it("an over-budget save is refused with over_budget", async () => {
+      // 790 for the drivers, 300 + 70 for McLaren and Audi: 1160.
+      await expectGameError(
+        save(NOW, await picksOf(DRIVERS, ["mclaren", "audi"])),
+        "over_budget",
+      );
+      expect(await versions()).toHaveLength(0);
+      expect(await t.db.select().from(lineupPicks)).toHaveLength(0);
+    });
+
+    it("a save that spends exactly the purchasing power is accepted", async () => {
+      // 790 + 170 + 40: exactly the 1000 of a first event.
+      const { versionId } = await save(
+        NOW,
+        await picksOf(DRIVERS, ["williams", "cadillac"]),
+      );
+      expect((await versions()).map((v) => v.id)).toEqual([versionId]);
+      // Alpine instead of Cadillac is 20 over.
+      await expectGameError(
+        save(NOW, await picksOf(DRIVERS, ["williams", "alpine"])),
+        "over_budget",
+      );
+    });
+  });
+
   it("two devices: the later save counts, and the earlier one's next save reports staleBase", async () => {
     const picks = await picksOf();
     const a1 = await save(await at(beforeLock(600)), picks);
@@ -347,7 +422,7 @@ describe("lineups (DM 3.7)", () => {
 
     // Device B was open on a1 and saves a change.
     const swapped = await picksOf(
-      ["norris", "max_verstappen", "piastri", "russell", "hamilton"],
+      ["norris", "piastri", "hulkenberg", "hadjar", "lawson"],
       CONSTRUCTORS,
     );
     const b = await save(await at(beforeLock(300)), swapped, a1.versionId);

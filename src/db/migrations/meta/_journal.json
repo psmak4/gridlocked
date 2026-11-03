@@ -127,6 +127,20 @@
       "when": 1793681780906,
       "tag": "0017_game_rules_4",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793683612448,
+      "tag": "0018_transfers",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793683614499,
+      "tag": "0019_game_rules_5",
+      "breakpoints": true
     }
   ]
 }

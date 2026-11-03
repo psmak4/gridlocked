@@ -41,6 +41,7 @@ const UNIQUE_VIOLATION = "23505";
 const WINDOW_CLOSED = "GL001";
 const COMPOSITION = "GL002";
 const ASSET_UNAVAILABLE = "GL003";
+const OVER_BUDGET = "GL004";
 const NOW = new Date("2026-03-01T00:00:00Z");
 
 describe("the ruleset freeze (DM 3.2)", () => {
@@ -322,18 +323,30 @@ describe("pool assets and prices (DM 3.4, 3.5)", () => {
     await t.close();
   });
 
-  const setEventStatus = (status: "open" | "locked") =>
+  const setEventStatus = (status: "upcoming" | "open" | "locked") =>
     t.db
       .update(gameEvents)
       .set({ status })
       .where(eq(gameEvents.eventId, eventId));
   const where = () => eq(assetPrices.assetId, assetId);
 
-  it("a price can change until its event locks", async () => {
-    await setEventStatus("open");
+  it("a price can change until its event opens", async () => {
+    await setEventStatus("upcoming");
     await t.db.update(assetPrices).set({ price: 290 }).where(where());
     const [row] = await t.db.select().from(assetPrices);
     expect(row!.price).toBe(290);
+  });
+
+  it("a price of an open event can't be changed or removed", async () => {
+    await setEventStatus("open");
+    await expectPgError(
+      t.db.update(assetPrices).set({ price: 290 }).where(where()),
+      RESTRICT_VIOLATION,
+    );
+    await expectPgError(
+      t.db.delete(assetPrices).where(where()),
+      RESTRICT_VIOLATION,
+    );
   });
 
   it("a price of a locked event can't be changed or removed", async () => {
@@ -587,6 +600,7 @@ describe("lineup versions (DM 3.7)", () => {
       params: {
         squad: { drivers: 1, constructors: 1, boosts: 1 },
         teamsPerUser: 3,
+        budget: 100,
       },
       notes: "v1",
       publishedAt: NOW,
@@ -632,6 +646,11 @@ describe("lineup versions (DM 3.7)", () => {
         status: "active",
         addedFromEventId: eventId,
       },
+    ]);
+    // 50 + 40: within the budget of 100.
+    await t.db.insert(assetPrices).values([
+      { assetId: driverAsset, eventId, price: 50, source: "initial" },
+      { assetId: constructorAsset, eventId, price: 40, source: "initial" },
     ]);
     teamId = newId();
     await t.db.insert(teams).values({
@@ -762,6 +781,41 @@ describe("lineup versions (DM 3.7)", () => {
       .set({ status: "withdrawn", withdrawnFromEventId: eventId })
       .where(eq(poolAssets.id, constructorAsset));
     await expectPgError(saveVersion(), ASSET_UNAVAILABLE);
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+  });
+
+  /** Prices are fixed once an event is open: reprice it while upcoming. */
+  const repriceDriver = async (price: number) => {
+    const event = eq(gameEvents.eventId, eventId);
+    await t.db.update(gameEvents).set({ status: "upcoming" }).where(event);
+    await t.db
+      .update(assetPrices)
+      .set({ price })
+      .where(eq(assetPrices.assetId, driverAsset));
+    await t.db.update(gameEvents).set({ status: "open" }).where(event);
+  };
+
+  it("a lineup over the team's purchasing power is refused, unless it is limitless", async () => {
+    await repriceDriver(70);
+    // 70 + 40 against a first event's budget of 100.
+    await expectPgError(saveVersion(), OVER_BUDGET);
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
+    await saveVersion({ kind: "limitless" });
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(1);
+    // 60 + 40 is exactly the budget.
+    await repriceDriver(60);
+    await saveVersion();
+    expect(await t.db.select().from(lineupVersions)).toHaveLength(2);
+  });
+
+  it("an asset with no price at the event can't be saved", async () => {
+    const event = eq(gameEvents.eventId, eventId);
+    await t.db.update(gameEvents).set({ status: "upcoming" }).where(event);
+    await t.db
+      .delete(assetPrices)
+      .where(eq(assetPrices.assetId, constructorAsset));
+    await t.db.update(gameEvents).set({ status: "open" }).where(event);
+    await expectPgError(saveVersion(), CHECK_VIOLATION);
     expect(await t.db.select().from(lineupVersions)).toHaveLength(0);
   });
 
