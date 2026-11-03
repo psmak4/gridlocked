@@ -749,11 +749,15 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | event_id | uuid FK | |
 | price | integer, units of $0.1M | `CHECK` within 30–340 |
 | source | text: `initial`, `formula`, `admin`, `carried` | `carried`: no update ran before this event's lock, so the previous price stands |
-| run_id | uuid FK → price_update_runs, nullable | |
+| run_id | uuid FK → price_update_runs, nullable | Added in M4 with `price_update_runs`; M3 stores only the price and its source |
 
 - **Why one row per event** rather than "price from event X onward": a price list per event is about 33 rows, so a season is under 1,000 rows. Every lookup becomes a direct key read. Each event's prices are frozen at lock, so what a team paid can always be explained.
 - **Publishing:** after event E is `final`, the price job writes the rows for event E+1 and sets `prices_ready_at`. Builders see the new prices from then on.
 - **If prices aren't ready by E+1's lock,** for example because E is stuck in review, E+1 uses `carried` prices and admins are alerted. The update is never applied after a lock.
+- **Carried prices open a window.** Carrying writes the `carried` rows and sets `prices_ready_at`, so builders see a list and the window can open on it. It only fills assets with no row for the event, withdrawn ones included, so a price an admin set stays. Running it again writes nothing.
+- **Frozen at lock, by trigger.** Once an event's game event is `locked`, `scored` or `final`, no price for it can be added, changed or removed. Carrying therefore runs before the lock.
+- **Admin prices:** a staff price for an event needs a reason and is audited. A mid-season substitute (3.4) gets its `admin` price for its first event in the same transaction, without marking the rest of the list as published.
+- **The formula is M4's.** `formula` rows come from the price job; M3 has `initial`, `admin` and `carried`.
 
 **`price_update_runs`:** `id`, `game_id`, `after_event_id`, `ruleset_version_id`, `inputs` (jsonb: each asset's last-3 average and tier), `ran_at`, `ran_by` (job or admin). Our published formula can then be shown working for every change.
 
