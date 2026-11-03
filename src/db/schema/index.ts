@@ -3,3 +3,4 @@ export * from "./reference";
 export * from "./jobs";
 export * from "./results";
 export * from "./audit";
+export * from "./game";

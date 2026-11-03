@@ -71,6 +71,20 @@
       "when": 1793471394798,
       "tag": "0009_audit_log_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793679249976,
+      "tag": "0010_polite_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793679255138,
+      "tag": "0011_game_rules",
+      "breakpoints": true
     }
   ]
 }
