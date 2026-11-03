@@ -25,6 +25,7 @@ import { clearSessionException, setSessionException } from "./cancellations";
 import { playChip } from "./chips";
 import { GameError } from "./errors";
 import { planGameEvents } from "./games";
+import { checkGameInvariants } from "./invariants";
 import { lockedLineup, openGame, saveLineup, type LineupPick } from "./lineups";
 import { lockEvent } from "./lock";
 import { withdrawPoolAsset } from "./pool";
@@ -299,6 +300,72 @@ describe("cancellations (DM 3.9)", () => {
       .from(teams)
       .where(eq(teams.id, late));
     expect(lateTeam!.firstEventId).toBe(round3.id);
+  });
+
+  it("a lineup carried from the cancelled event that is over budget at the next one doesn't count, and the base does", async () => {
+    const first = await saveFor(round1, await picksOf());
+    await toRound2();
+    // Alonso costs 200 at round 3, which hasn't opened yet.
+    const alonso = await game.assetId("alonso");
+    await publishPrices(t.db, round2.lockAt, {
+      gameId,
+      eventId: round3.id,
+      source: "admin",
+      reason: "Price update for Japan",
+      actor: ACTOR,
+      prices: [{ assetId: alonso, price: 200 }],
+    });
+    // Bearman (80) out, Alonso (110 at round 2) in: 980 of 1000.
+    await saveFor(
+      round2,
+      await picksOf(["norris", "piastri", "hulkenberg", "hadjar", "alonso"]),
+    );
+    await cancel(round2);
+
+    // Nothing saved for round 3, where that lineup costs 1070 of 1000: the
+    // team's round 1 lineup carries, and round 3 locks.
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round3.id }))?.versionId,
+    ).toBe(first.versionId);
+    await lockRound(t.db, gameId, round3.id);
+    expect(await stateOf(round3.id)).toMatchObject({
+      baseVersionId: first.versionId,
+      lockedVersionId: first.versionId,
+      purchasingPower: 1000,
+      spent: COST,
+      transfersMade: 0,
+    });
+    // The season check works out the same lineup.
+    expect(await checkGameInvariants(t.db, gameId)).toEqual([]);
+  });
+
+  it("a lineup carried from the cancelled event with an asset withdrawn from the next one doesn't count, and the base does", async () => {
+    const first = await saveFor(round1, await picksOf());
+    const opened = await toRound2();
+    await withdrawPoolAsset(t.db, opened, {
+      assetId: await game.assetId("bottas"),
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    // Bearman out, Bottas in: pickable at round 2, not at round 3, and the
+    // team never owned him.
+    await saveFor(
+      round2,
+      await picksOf(["norris", "piastri", "hulkenberg", "hadjar", "bottas"]),
+    );
+    await cancel(round2);
+
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round3.id }))?.versionId,
+    ).toBe(first.versionId);
+    await lockRound(t.db, gameId, round3.id);
+    expect(await stateOf(round3.id)).toMatchObject({
+      lockedVersionId: first.versionId,
+      spent: COST,
+      transfersMade: 0,
+    });
+    expect(await checkGameInvariants(t.db, gameId)).toEqual([]);
   });
 
   it("a Blank Cheque lineup saved for the cancelled event doesn't count, and the regular one before it does", async () => {

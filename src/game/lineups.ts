@@ -224,10 +224,12 @@ export interface LockedLineup {
  * `limitless` version for it saved before its `lock_at`, latest by
  * `(saved_at, id)`. With none, it is the latest `regular` version saved for an
  * event cancelled while its window was open, since the event before this one
- * locked (DM 3.9: a cancellation doesn't undo a team's changes); with none of
- * those either, the base carried forward from the team's earlier events
- * (`team_base_state`, DM 3.8). Null when it has none of these: the team never
- * saved a lineup that counted.
+ * locked (DM 3.9: a cancellation doesn't undo a team's changes), as long as it
+ * would pass the save check's availability and budget at this event (its
+ * prices, the team's base going in); with none, or one that doesn't pass, the
+ * base carried forward from the team's earlier events (`team_base_state`, DM
+ * 3.8). Null when it has none of these: the team never saved a lineup that
+ * counted.
  */
 export async function lockedLineup(
   db: Db,
