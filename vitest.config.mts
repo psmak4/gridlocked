@@ -20,6 +20,7 @@ const dbTests = [
   "src/providers/openf1/roster-check.e2e.test.ts",
   "src/replay/**/*.test.{ts,tsx}",
   "src/providers/replay/harness.test.ts",
+  "src/providers/replay/season-game.test.ts",
 ];
 
 export default defineConfig({
