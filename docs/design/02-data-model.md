@@ -821,15 +821,15 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 |---|---|---|
 | team_id, event_id | composite PK | |
 | game_id | uuid FK | |
-| base_version_id | uuid FK | The lineup compared against: the previous event's locked `regular` lineup, or the pre-Limitless one |
+| base_version_id | uuid FK, nullable | The lineup compared against: the previous event's locked `regular` lineup, or the pre-Limitless one. Null at the team's first event |
 | locked_version_id | uuid FK | What counts for this event |
 | final_fix_version_id | uuid FK, nullable | |
-| chip_play_id | uuid FK, nullable | |
+| chip_play_id | uuid FK, nullable | Added with `chip_plays` (M3 Task 7) |
 | is_first_event | boolean | |
 | purchasing_power | integer | Money available at this event's prices |
 | spent | integer | Cost of the locked lineup at this event's prices |
 | bank | integer | `purchasing_power - spent`, never below 0 (except Limitless) |
-| transfers_made | integer | Net count: assets in the locked lineup that aren't in the base |
+| transfers_made | integer | Net count: assets in the locked lineup that aren't in the base (all of them at the first event, which has none) |
 | free_transfers | integer | Allowance this event, including carry-over in, or "unlimited" (null) |
 | carry_over_out | smallint | 0 or 1 |
 | transfer_penalty | integer | Copied into the ledger as its own line (Part 4) |
@@ -841,14 +841,20 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 
 So price rises of owned assets raise a team's value, and falls lower it. **Keeping an unchanged lineup is always affordable**, because that sum is exactly the base lineup's cost plus a bank that's never negative.
 
+**Two SQL functions hold this (in `game_rules_5`), so the sum is made in one place:**
+- `team_base_state(team_id, event_id)` returns `base_version_id`, `bank`, `carry_in` and `is_first`, from the team's latest row before the event by `game_events.sequence`. With no such row it's the team's first event (no base, no bank). When that row was a Limitless week (its locked version is `limitless`), it returns that row's own base, the bank of the row before it, and a `carry_in` of 0.
+- `team_purchasing_power(team_id, event_id)` is the ruleset's `budget` at a first event, otherwise `bank` plus the base lineup's assets at the event's prices. An owned asset with no price at the event is an error, never 0.
+
+The save check calls `team_purchasing_power` for every version except `limitless` (refused as `over_budget`), and the lock job calls both to write the row. A withdrawn asset passes the save check only while it's in `base_version_id`, so owners keep it at its carried price and get that price back when they sell, but can't buy it back once the sale has locked. **The bank is never below 0 outside Limitless:** a CHECK can't see the chip, so the lock job asserts it and fails loudly if it's broken.
+
 **Chip weeks:**
 - **Limitless:** budget not checked, transfers unlimited, no carry-over out. The next event's base is the **pre-Limitless** lineup, with that lineup's bank, so the team "reverts" automatically. The next event's purchasing power uses current prices for the restored team.
 - **Wildcard:** transfers unlimited and free, but the budget still applies. It stays playable until lock, and the result becomes the new base. Carry-over out in a Wildcard week follows a ruleset param. *Proposed: 0, the same as Limitless.* Official text only says this for Limitless, so it's my call.
 - **Final Fix:** one asset swap, checked against this event's purchasing power. It's free. The next event's base is the **locked** (pre-Final-Fix) lineup.
 
-**Carry-over:** `carry_over_out = min(1, free_transfers - transfers_made)`, never below 0. That keeps "one transfer carries over but must be used then": two unused don't become two carried. The exact formula lives with the ruleset and is pinned by tests.
+**Carry-over:** `carry_over_out = min(carryOverMax, free_transfers - transfers_made)`, never below 0 (`carryOverMax` is 1). That keeps "one transfer carries over but must be used then": two unused don't become two carried. In a week with unlimited transfers (`free_transfers` null: the team's first event, Wildcard or Limitless) it's the ruleset param `carryOverOutInUnlimitedWeek` instead, 0 for 2026, and there's no penalty. Otherwise `transfer_penalty = penalty × max(0, transfers_made - free_transfers)`. These are pure functions in `src/game/transfers.ts`, pinned by tests.
 
-**Lock correctness doesn't depend on the lock job.** If the job is late, the row can be computed afterwards from versions, prices and chip plays with the same result. A team created after lock gets no row for that event and starts at the next one (decided, HLD §5.2).
+**Lock correctness doesn't depend on the lock job.** If the job is late, the row can be computed afterwards from versions, prices and chip plays with the same result: it reads only versions for the event saved before `lock_at`, the event's prices and the team's earlier rows, so a late run after the next window has opened writes what an on-time one would. The job (`lockEvent`) works in batches of about 1,000 `active` teams in id order, inserts each row or leaves one already there, sets `teams.first_event_id` on a team's first row, and on the last batch sets the event `locked` and the game `running`. A team created after lock gets no row for that event and starts at the next one (decided, HLD §5.2), and so does a team that never saved; a retired team gets no row.
 
 ### 3.9 Chips, cancellations and abandoned sessions
 **`chip_plays`**

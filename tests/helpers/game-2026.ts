@@ -3,12 +3,15 @@
 // `provider_ids`, which src/game must not).
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { events, poolAssets, providerIds } from "@/db/schema";
+import { events, gameEvents, poolAssets, providerIds } from "@/db/schema";
 import type { Db } from "@/db/types";
+import type { ClockDb } from "@/lib/resolve-clock";
 import { createGame } from "@/game/games";
+import { lockEvent } from "@/game/lock";
 import { seedPool } from "@/game/pool";
-import { publishPrices } from "@/game/prices";
+import { carryPrices, publishPrices } from "@/game/prices";
 import { RULESET_2026 } from "@/game/ruleset";
+import { setSimulatedClock } from "@/replay/clock-loop";
 import { readFixture } from "./fixtures";
 import { importReferenceFixtures2026 } from "./pipeline-2026";
 
@@ -85,4 +88,55 @@ export async function seedGame2026(db: Db, now: Date) {
     return found[0]!.id;
   };
   return { gameId, assetId };
+}
+
+/** Round `n` of the 2026 season: its event id and lock. */
+export async function round2026(db: Db, n: number) {
+  const [row] = await db
+    .select({ id: events.id, lockAt: events.lockAt })
+    .from(events)
+    .where(eq(events.round, n));
+  if (!row) throw new Error(`no round ${n}`);
+  return row;
+}
+
+/**
+ * Locks an event as the lock job does: both clocks move to its `lock_at`, and
+ * `lockEvent` runs until it is done. Returns the lock time.
+ */
+export async function lockRound(
+  db: Db & ClockDb,
+  gameId: string,
+  eventId: string,
+) {
+  const [event] = await db
+    .select({ lockAt: events.lockAt })
+    .from(events)
+    .where(eq(events.id, eventId));
+  if (!event) throw new Error(`no event ${eventId}`);
+  const { lockAt } = event;
+  await setSimulatedClock(db, lockAt);
+  let afterTeamId: string | undefined;
+  for (;;) {
+    const batch = await lockEvent(db, lockAt, { gameId, eventId, afterTeamId });
+    if (batch.done) return lockAt;
+    afterTeamId = batch.lastTeamId ?? undefined;
+  }
+}
+
+/**
+ * Opens an event as the open job does (Task 6): prices carried where it has
+ * none, then the event is `open`. The clock is left where it is.
+ */
+export async function openRound(
+  db: Db,
+  now: Date,
+  gameId: string,
+  eventId: string,
+) {
+  await carryPrices(db, now, { gameId, eventId });
+  await db
+    .update(gameEvents)
+    .set({ status: "open", updatedAt: now })
+    .where(and(eq(gameEvents.gameId, gameId), eq(gameEvents.eventId, eventId)));
 }

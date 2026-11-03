@@ -29,10 +29,11 @@ import {
 //
 // Not declared here, because Drizzle cannot express it: the freeze trigger on
 // ruleset_versions and scoring_rules (DM 3.2), the price freeze on asset_prices
-// (DM 3.5), the slot limit on teams (DM 3.6), and the lineup checks (DM 3.7):
+// (DM 3.5), the slot limit on teams (DM 3.6), the lineup checks (DM 3.7:
 // `saved_at` from app_now(), the window, composition and asset availability at
-// commit, and the guard on `events.lock_at`. They live in the `game_rules`,
-// `game_rules_2`, `game_rules_3` and `game_rules_4` migrations.
+// commit, and the guard on `events.lock_at`), and the budget with the two
+// functions behind it, `team_base_state` and `team_purchasing_power` (DM 3.8).
+// They live in the `game_rules` to `game_rules_5` migrations.
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
@@ -374,5 +375,64 @@ export const lineupPicks = pgTable(
   (t) => [
     primaryKey({ columns: [t.lineupVersionId, t.assetId] }),
     index("lineup_picks_asset_id_idx").on(t.assetId),
+  ],
+);
+
+/**
+ * DM 3.8: one row per team per event it took part in, written by the lock job
+ * (`lockEvent`) and never rewritten by it. Money is in units of $0.1M. The bank
+ * is never below 0 outside a Limitless week; a CHECK can't see the chip, so the
+ * lock job asserts it. `chip_play_id` comes with `chip_plays` (Task 7).
+ */
+export const teamEventStates = pgTable(
+  "team_event_states",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    /**
+     * The lineup the transfers are counted against: the previous event's
+     * locked one, or the one before a Limitless week. Null at the first event.
+     */
+    baseVersionId: uuid("base_version_id").references(() => lineupVersions.id, {
+      onDelete: "restrict",
+    }),
+    /** What counts for this event. */
+    lockedVersionId: uuid("locked_version_id")
+      .notNull()
+      .references(() => lineupVersions.id, { onDelete: "restrict" }),
+    finalFixVersionId: uuid("final_fix_version_id").references(
+      () => lineupVersions.id,
+      { onDelete: "restrict" },
+    ),
+    isFirstEvent: boolean("is_first_event").notNull(),
+    /** Money available at this event's prices. */
+    purchasingPower: integer("purchasing_power").notNull(),
+    /** The locked lineup's cost at this event's prices. */
+    spent: integer("spent").notNull(),
+    /** `purchasing_power - spent`. */
+    bank: integer("bank").notNull(),
+    /** Assets in the locked lineup that aren't in the base. */
+    transfersMade: integer("transfers_made").notNull(),
+    /** This event's allowance with the carry-over in; null is unlimited. */
+    freeTransfers: integer("free_transfers"),
+    carryOverOut: smallint("carry_over_out").notNull(),
+    /** Points, zero or less; the ledger copies it as its own line (Part 4). */
+    transferPenalty: integer("transfer_penalty").notNull(),
+    rulesetVersionId: uuid("ruleset_version_id")
+      .notNull()
+      .references(() => rulesetVersions.id, { onDelete: "restrict" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.eventId] }),
+    index("team_event_states_event_id_idx").on(t.eventId),
   ],
 );

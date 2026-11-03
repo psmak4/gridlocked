@@ -4,6 +4,7 @@ import {
   gameEvents,
   games,
   lineupPicks,
+  type LINEUP_KINDS,
   lineupVersions,
   poolAssets,
   teams,
@@ -21,7 +22,10 @@ export interface LineupPick {
   isBoost: boolean;
 }
 
-/** The SQLSTATE each lineup trigger raises (game_rules_4), and what it means. */
+/**
+ * The SQLSTATE each lineup trigger refusal raises (game_rules_4, GL004 from
+ * game_rules_5), and what it means.
+ */
 const REFUSALS: Record<string, GameErrorCode> = {
   GL001: "window_closed",
   GL002: "composition",
@@ -131,9 +135,11 @@ export async function openGame(
  *
  * The checks that matter are the database's, made at the end of this call's
  * transaction (even when it is nested in a caller's): the window against the
- * clock at that moment, the squad and Boost against the ruleset, and the
- * assets. Each refusal is a `GameError` (`window_closed`,
- * `composition`, `asset_unavailable`) and writes nothing. The check here
+ * clock at that moment, the squad and Boost against the ruleset, the assets
+ * (a withdrawn one only if the team owns it), and the cost against the team's
+ * purchasing power at this event's prices (DM 3.8). Each refusal is a
+ * `GameError` (`window_closed`, `composition`, `asset_unavailable`,
+ * `over_budget`) and writes nothing. The check here
  * against `now` only gives the friendlier early answer, and a repeated asset
  * is `composition` before it reaches the key.
  */
@@ -242,41 +248,118 @@ export async function saveLineup(
   }
 }
 
+/** A team's lineup for an event, as it counts. */
+export interface LockedLineup {
+  versionId: string;
+  kind: (typeof LINEUP_KINDS)[number];
+  picks: LineupPick[];
+}
+
 /**
  * The lineup that counts for an event (DM 3.7): the team's latest `regular` or
  * `limitless` version for it saved before its `lock_at`, latest by
- * `(saved_at, id)`. Null when it has none. (The base carried forward from
- * earlier events is added with budgets.)
+ * `(saved_at, id)`. With none, it is the base carried forward from the team's
+ * earlier events (`team_base_state`, DM 3.8). Null when it has neither: the
+ * team never saved a lineup that counted.
  */
 export async function lockedLineup(
   db: Db,
   input: { teamId: string; eventId: string },
-): Promise<{ versionId: string; picks: LineupPick[] } | null> {
+): Promise<LockedLineup | null> {
+  const found = await lockedLineups(db, {
+    eventId: input.eventId,
+    teamIds: [input.teamId],
+  });
+  return found.get(input.teamId) ?? null;
+}
+
+/**
+ * `lockedLineup` for many teams at once, by team id; a team with no lineup
+ * that counts is left out. The lock job reads a batch of teams with it.
+ */
+export async function lockedLineups(
+  db: Db,
+  input: { eventId: string; teamIds: string[] },
+): Promise<Map<string, LockedLineup>> {
+  const { eventId, teamIds } = input;
+  const found = new Map<string, LockedLineup>();
+  if (teamIds.length === 0) return found;
   const [event] = await db
     .select({ lockAt: events.lockAt })
     .from(events)
-    .where(eq(events.id, input.eventId));
-  if (!event) throw new Error(`lockedLineup: no event ${input.eventId}`);
+    .where(eq(events.id, eventId));
+  if (!event) throw new Error(`lockedLineup: no event ${eventId}`);
 
-  const [version] = await db
-    .select({ id: lineupVersions.id })
+  const saved = await db
+    .selectDistinctOn([lineupVersions.teamId], {
+      teamId: lineupVersions.teamId,
+      id: lineupVersions.id,
+      kind: lineupVersions.kind,
+    })
     .from(lineupVersions)
     .where(
       and(
-        eq(lineupVersions.teamId, input.teamId),
-        eq(lineupVersions.forEventId, input.eventId),
+        inArray(lineupVersions.teamId, teamIds),
+        eq(lineupVersions.forEventId, eventId),
         inArray(lineupVersions.kind, ["regular", "limitless"]),
         lt(lineupVersions.savedAt, event.lockAt),
       ),
     )
-    .orderBy(desc(lineupVersions.savedAt), desc(lineupVersions.id))
-    .limit(1);
-  if (!version) return null;
+    .orderBy(
+      asc(lineupVersions.teamId),
+      desc(lineupVersions.savedAt),
+      desc(lineupVersions.id),
+    );
+  const chosen = new Map(saved.map((v) => [v.teamId, v]));
+
+  // Teams with nothing saved for the event keep their base.
+  const rest = teamIds.filter((id) => !chosen.has(id));
+  if (rest.length > 0) {
+    const bases = await db
+      .select({
+        teamId: teams.id,
+        id: lineupVersions.id,
+        kind: lineupVersions.kind,
+      })
+      .from(teams)
+      .innerJoin(
+        lineupVersions,
+        eq(
+          lineupVersions.id,
+          sql`(select b.base_version_id from team_base_state(${teams.id}, ${eventId}::uuid) b)`,
+        ),
+      )
+      .where(inArray(teams.id, rest));
+    for (const base of bases) chosen.set(base.teamId, base);
+  }
+  if (chosen.size === 0) return found;
 
   const picks = await db
-    .select({ assetId: lineupPicks.assetId, isBoost: lineupPicks.isBoost })
+    .select({
+      versionId: lineupPicks.lineupVersionId,
+      assetId: lineupPicks.assetId,
+      isBoost: lineupPicks.isBoost,
+    })
     .from(lineupPicks)
-    .where(eq(lineupPicks.lineupVersionId, version.id))
+    .where(
+      inArray(
+        lineupPicks.lineupVersionId,
+        [...chosen.values()].map((v) => v.id),
+      ),
+    )
     .orderBy(asc(lineupPicks.assetId));
-  return { versionId: version.id, picks };
+  const byVersion = new Map<string, LineupPick[]>();
+  for (const { versionId, assetId, isBoost } of picks) {
+    const list = byVersion.get(versionId) ?? [];
+    list.push({ assetId, isBoost });
+    byVersion.set(versionId, list);
+  }
+  for (const [teamId, version] of chosen) {
+    found.set(teamId, {
+      versionId: version.id,
+      kind: version.kind,
+      picks: byVersion.get(version.id) ?? [],
+    });
+  }
+  return found;
 }
