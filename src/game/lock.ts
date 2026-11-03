@@ -59,8 +59,8 @@ const baseRowSchema = z.object({
  * `afterTeamId`, in id order; the next batch starts after `lastTeamId`.
  *
  * Each team with a locked lineup (`lockedLineup`: what it saved, else what it
- * saved for an event cancelled with its window open since the last lock, else
- * its base) gets one row; a team with none, or a retired one, gets none. A
+ * saved for an event cancelled with its window open since the last lock when
+ * that passes availability and the budget here, else its base) gets one row; a team with none, or a retired one, gets none. A
  * cancelled event itself never locks: it is neither `open` nor `locked`. A row that is
  * already there is left as it is, so running a batch again writes nothing. A
  * team's first row sets its `first_event_id`. The batch that finds no more

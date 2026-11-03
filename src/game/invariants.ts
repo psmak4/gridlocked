@@ -14,7 +14,7 @@ import {
   teams,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { rulesetParamsSchema } from "./ruleset";
+import { rulesetParamsSchema, type RulesetParams } from "./ruleset";
 import { transferPenalty } from "./transfers";
 
 // The game's rules checked over what a season left behind (M3 Task 9), for
@@ -45,7 +45,8 @@ interface Worked {
  * - every lock record (`team_event_states`) equals the one worked out from
  *   the team's versions, the event's prices and its chip plays: the lineup
  *   that counts (the latest saved for the event before its lock, else one
- *   saved for an event cancelled since the last lock, else the base), the
+ *   saved for an event cancelled since the last lock, if it passes
+ *   availability and the budget at this event, else the base), the
  *   base and bank carried from the team's previous record (reverted after a
  *   Limitless week), purchasing power, spent, transfers, carry-over, the
  *   penalty and the chip; a team that took part has a record, and only then;
@@ -177,6 +178,64 @@ export async function checkGameInvariants(
     return sum;
   };
 
+  const assets = new Map(
+    (
+      await db.select().from(poolAssets).where(eq(poolAssets.gameId, gameId))
+    ).map((a) => [a.id, a]),
+  );
+  /**
+   * `game_event_sequence_from`: the event's sequence, or for a cancelled one
+   * the next scheduled event's by lock time; null for none.
+   */
+  const sequenceFrom = (eventId: string | null): number | null => {
+    const event = eventId === null ? undefined : eventOf.get(eventId);
+    if (!event) return null;
+    if (event.sequence !== null) return event.sequence;
+    return (
+      calendar.find(
+        (e) =>
+          e.sequence !== null && e.lockAt.getTime() > event.lockAt.getTime(),
+      )?.sequence ?? null
+    );
+  };
+  /** The lineup's cost at the event's prices, or null when one is missing. */
+  const priced = (versionId: string | null, eventId: string) => {
+    let sum = 0;
+    for (const { assetId } of picks(versionId)) {
+      const price = prices.get(`${assetId}|${eventId}`);
+      if (price === undefined) return null;
+      sum += price;
+    }
+    return sum;
+  };
+  /**
+   * Whether a version saved for a cancelled event would pass the save check's
+   * availability and budget at `event`, against the team's base going into
+   * it (game_rules_9). A price missing here fails it.
+   */
+  const passesAt = (
+    versionId: string,
+    event: { eventId: string; sequence: number | null; rules: RulesetParams },
+    base: { versionId: string | null; bank: number | null; isFirst: boolean },
+  ): boolean => {
+    const owned = new Set(picks(base.versionId).map((p) => p.assetId));
+    for (const { assetId } of picks(versionId)) {
+      const asset = assets.get(assetId);
+      if (!asset) return false;
+      const added = sequenceFrom(asset.addedFromEventId);
+      if (added === null || added > event.sequence!) return false;
+      const gone = sequenceFrom(asset.withdrawnFromEventId);
+      const withdrawn =
+        (asset.status === "withdrawn" && asset.withdrawnFromEventId === null) ||
+        (gone !== null && gone <= event.sequence!);
+      if (withdrawn && !owned.has(assetId)) return false;
+    }
+    const spent = priced(versionId, event.eventId);
+    const value = base.isFirst ? 0 : priced(base.versionId, event.eventId);
+    if (spent === null || value === null) return false;
+    return spent <= (base.isFirst ? event.rules.budget : base.bank! + value);
+  };
+
   const plays = await db
     .select()
     .from(chipPlays)
@@ -236,10 +295,18 @@ export async function checkGameInvariants(
         };
       }
 
-      // The lineup that counts.
+      // The lineup that counts. One carried from a cancelled event counts
+      // only if it passes availability and the budget here.
       const before = (v: (typeof versions)[number]) =>
         v.savedAt.getTime() < event.lockAt.getTime();
       const since = bySequence.get(event.sequence! - 1)?.lockAt.getTime();
+      const carried = mine.findLast(
+        (v) =>
+          eventOf.get(v.forEventId)?.status === "cancelled" &&
+          v.kind === "regular" &&
+          before(v) &&
+          (since === undefined || v.savedAt.getTime() >= since),
+      );
       const counted =
         mine.findLast(
           (v) =>
@@ -247,13 +314,7 @@ export async function checkGameInvariants(
             (v.kind === "regular" || v.kind === "limitless") &&
             before(v),
         ) ??
-        mine.findLast(
-          (v) =>
-            eventOf.get(v.forEventId)?.status === "cancelled" &&
-            v.kind === "regular" &&
-            before(v) &&
-            (since === undefined || v.savedAt.getTime() >= since),
-        );
+        (carried && passesAt(carried.id, event, base) ? carried : undefined);
       const lockedVersionId = counted?.id ?? base.versionId;
 
       if (lockedVersionId === null) {

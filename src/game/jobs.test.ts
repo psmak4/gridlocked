@@ -22,9 +22,12 @@ import { gameLockKey, gameOpenKey, type GameOpenPayload } from "@/jobs/kinds";
 import { enqueue } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
 import { setSimulatedClock } from "@/replay/clock-loop";
+import type { StaffActor } from "@/staff/roster";
 import { RULESET_2026 } from "./ruleset";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { createGameHandlers, planGameJobs } from "./jobs";
+import { withdrawPoolAsset } from "./pool";
+import { priceList, publishPrices } from "./prices";
 import { createTeam } from "./teams";
 
 // The lock and open jobs over the recorded 2026 game. The jobs are driven the
@@ -35,6 +38,7 @@ const NOW = new Date("2026-02-01T09:00:00.000Z");
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const LEASE = 5 * MIN;
+const ACTOR: StaffActor = { kind: "admin", label: "staff" };
 
 describe("the game jobs (HLD §3.3)", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
@@ -148,7 +152,7 @@ describe("the game jobs (HLD §3.3)", () => {
   const lockStates = () => t.db.select().from(teamEventStates);
 
   it("planning puts a lock job at each event's lock_at", async () => {
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
 
     const rows = await t.db
       .select({
@@ -190,7 +194,7 @@ describe("the game jobs (HLD §3.3)", () => {
 
   it("planning skips events that have locked", async () => {
     await lockRound(t.db, gameId, round1.id);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const keys = (await gameJobs()).map((j) => j.dedupeKey);
     expect(keys).not.toContain(`game_lock:${gameId}:${round1.id}`);
     expect(keys).toContain(`game_lock:${gameId}:${round2.id}`);
@@ -198,7 +202,7 @@ describe("the game jobs (HLD §3.3)", () => {
   });
 
   it("planning again moves a job when lock_at moved", async () => {
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const before = (await gameJobs()).length;
     const moved = new Date(round2.lockAt.getTime() + 3 * HOUR);
     await t.db
@@ -206,7 +210,7 @@ describe("the game jobs (HLD §3.3)", () => {
       .set({ lockAt: moved })
       .where(eq(events.id, round2.id));
 
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const jobsNow = await gameJobs();
     expect(jobsNow).toHaveLength(before);
     expect(await jobByKey(`game_lock:${gameId}:${round2.id}`)).toMatchObject({
@@ -218,7 +222,7 @@ describe("the game jobs (HLD §3.3)", () => {
   it("a lock job that runs early because qualifying moved later reschedules and locks nothing", async () => {
     await teamWithLineup();
     await at(NOW);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const later = new Date(round1.lockAt.getTime() + 2 * HOUR);
     await t.db
       .update(events)
@@ -252,7 +256,7 @@ describe("the game jobs (HLD §3.3)", () => {
   });
 
   it("planning again moves a lock job that already put itself off, when lock_at moves earlier", async () => {
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const later = new Date(round1.lockAt.getTime() + 2 * HOUR);
     await t.db
       .update(events)
@@ -269,7 +273,7 @@ describe("the game jobs (HLD §3.3)", () => {
       .update(events)
       .set({ lockAt: earlier })
       .where(eq(events.id, round1.id));
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
 
     const pending = (await gameJobs()).filter(
       (j) =>
@@ -298,7 +302,7 @@ describe("the game jobs (HLD §3.3)", () => {
       basedOnVersionId: null,
     });
     await at(NOW);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const batch = createGameHandlers({ batch: 1 });
     const move = (lockAt: Date) =>
       t.db.update(events).set({ lockAt }).where(eq(events.id, round1.id));
@@ -385,7 +389,7 @@ describe("the game jobs (HLD §3.3)", () => {
       basedOnVersionId: null,
     });
     await at(NOW);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
 
     await at(round1.lockAt);
     // One team per batch: the first job leaves the event open and queues the
@@ -442,7 +446,7 @@ describe("the game jobs (HLD §3.3)", () => {
   it("round 2 opens with carried prices once round 1 is completed", async () => {
     await lockRound(t.db, gameId, round1.id);
     await complete(round1.id);
-    await planGameJobs(t.db, gameId);
+    await planGameJobs(t.db, clock.now(), gameId);
     const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
     await at(planned);
     expect(await statusOf(round2.id)).toBe("upcoming");
@@ -554,6 +558,319 @@ describe("the game jobs (HLD §3.3)", () => {
     await lockRound(t.db, gameId, round1.id);
     await at(new Date(first.getTime() + 6 * HOUR));
     expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round2.id)).toBe("open");
+  });
+  /**
+   * An admin publishes a full list for round 2 at `now`: round 1's price for
+   * every asset whose pool status is `active`.
+   */
+  async function publishActiveList(now: Date) {
+    const active = new Set(
+      (
+        await t.db
+          .select({ id: poolAssets.id })
+          .from(poolAssets)
+          .where(
+            and(eq(poolAssets.gameId, gameId), eq(poolAssets.status, "active")),
+          )
+      ).map((a) => a.id),
+    );
+    await publishPrices(t.db, now, {
+      gameId,
+      eventId: round2.id,
+      source: "admin",
+      reason: "Prices after Australia",
+      actor: ACTOR,
+      prices: [...(await priceList(t.db, { gameId, eventId: round1.id }))]
+        .filter(([assetId]) => active.has(assetId))
+        .map(([assetId, price]) => ({ assetId, price })),
+    });
+  }
+  /** Round 1 is completed, and round 2's planned open job runs. */
+  async function openRound2() {
+    await complete(round1.id);
+    await planGameJobs(t.db, clock.now(), gameId);
+    const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
+    await at(planned);
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round2.id)).toBe("open");
+    return planned;
+  }
+
+  it("an owned asset withdrawn from round 2 has its price carried when round 2 opens, after a full list was published", async () => {
+    const teamId = await teamWithLineup();
+    const locked = await lockRound(t.db, gameId, round1.id);
+    const bearman = await game.assetId("bearman");
+    await withdrawPoolAsset(t.db, locked, {
+      assetId: bearman,
+      fromEventId: round2.id,
+      reason: "Leaves the grid",
+      actor: ACTOR,
+    });
+    await publishActiveList(locked);
+    const opened = await openRound2();
+
+    // The team still owns Bearman: it can save and lock with him, at his
+    // carried price.
+    const saved = await saveLineup(t.db, opened, {
+      teamId,
+      picks: await picks(),
+      basedOnVersionId: null,
+    });
+    await lockRound(t.db, gameId, round2.id);
+    expect(
+      (await lockStates()).find((s) => s.eventId === round2.id),
+    ).toMatchObject({ teamId, lockedVersionId: saved.versionId, bank: 50 });
+    expect(
+      (await priceList(t.db, { gameId, eventId: round2.id })).get(bearman),
+    ).toBe(80);
+  });
+
+  it("an asset withdrawn from round 3 is still priced for round 2, where it can be bought", async () => {
+    const teamId = await teamWithLineup();
+    const bottas = await game.assetId("bottas");
+    const round3 = await round2026(t.db, 3);
+    // Its pool status is `withdrawn` at once, but it goes from round 3.
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bottas,
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    const locked = await lockRound(t.db, gameId, round1.id);
+    await publishActiveList(locked);
+    const opened = await openRound2();
+
+    // Bearman (80) out, Bottas (36) in.
+    const bearman = await game.assetId("bearman");
+    const saved = await saveLineup(t.db, opened, {
+      teamId,
+      picks: (await picks()).map((p) =>
+        p.assetId === bearman ? { assetId: bottas, isBoost: false } : p,
+      ),
+      basedOnVersionId: null,
+    });
+    await lockRound(t.db, gameId, round2.id);
+    expect(
+      (await lockStates()).find((s) => s.eventId === round2.id),
+    ).toMatchObject({ teamId, lockedVersionId: saved.versionId, bank: 94 });
+    expect(
+      (await priceList(t.db, { gameId, eventId: round2.id })).get(bottas),
+    ).toBe(36);
+  });
+  it("a list of the active assets isn't complete while a withdrawn asset is owned, or still pickable, at the event", async () => {
+    await teamWithLineup();
+    const round3 = await round2026(t.db, 3);
+    const bottas = await game.assetId("bottas");
+    const bearman = await game.assetId("bearman");
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bottas,
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    const locked = await lockRound(t.db, gameId, round1.id);
+    await withdrawPoolAsset(t.db, locked, {
+      assetId: bearman,
+      fromEventId: round2.id,
+      reason: "Leaves the grid",
+      actor: ACTOR,
+    });
+    const readyAt = async () =>
+      (
+        await t.db
+          .select()
+          .from(gameEvents)
+          .where(eq(gameEvents.eventId, round2.id))
+      )[0]!.pricesReadyAt;
+    const priceOne = (assetId: string, price: number) =>
+      publishPrices(t.db, locked, {
+        gameId,
+        eventId: round2.id,
+        source: "admin",
+        reason: "Prices after Australia",
+        actor: ACTOR,
+        prices: [{ assetId, price }],
+      });
+
+    await publishActiveList(locked);
+    expect(await readyAt()).toBeNull();
+    // Bottas can still be bought at round 2...
+    await priceOne(bottas, 36);
+    expect(await readyAt()).toBeNull();
+    // ...and the team owns Bearman.
+    await priceOne(bearman, 80);
+    expect(await readyAt()).toEqual(locked);
+  });
+  it("a lock job that died is swept up by the next planning, and the sweep locks the event", async () => {
+    const teamId = await teamWithLineup();
+    await at(NOW);
+    await planGameJobs(t.db, clock.now(), gameId);
+    const key = gameLockKey(gameId, round1.id);
+    // Five failures in a row, a few minutes apart: the job is dead.
+    const broken = {
+      ...createGameHandlers(),
+      game_lock: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(key))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(key)).toMatchObject({ status: "dead", attempts: 5 });
+    expect(await statusOf(round1.id)).toBe("open");
+
+    // The next planning, a day after the lock, queues a sweep for the day.
+    const later = new Date(round1.lockAt.getTime() + 24 * HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    const sweepKey = `game_lock:${gameId}:${round1.id}:sweep:${later.toISOString().slice(0, 10)}`;
+    expect(await jobByKey(sweepKey)).toMatchObject({
+      kind: "game_lock",
+      status: "pending",
+      runAt: later,
+      payload: {
+        gameId,
+        eventId: round1.id,
+        sweep: later.toISOString().slice(0, 10),
+      },
+    });
+    // Planning again the same day queues nothing more.
+    const count = (await gameJobs()).length;
+    await planGameJobs(t.db, later, gameId);
+    expect(await gameJobs()).toHaveLength(count);
+
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round1.id)).toBe("locked");
+    expect(await lockStates()).toMatchObject([{ teamId, eventId: round1.id }]);
+    // Locked, the event gets no more sweeps.
+    await planGameJobs(t.db, new Date(later.getTime() + 24 * HOUR), gameId);
+    expect(
+      (await gameJobs()).filter((j) => j.dedupeKey.includes(":sweep:")),
+    ).toHaveLength(1);
+  });
+  it("a sweep after a lock chain died mid-batch finishes the lock under keys of its own", async () => {
+    await teamWithLineup();
+    const second = await createTeam(t.db, clock.now(), {
+      gameId,
+      userId: newId(),
+      name: "U",
+    });
+    await saveLineup(t.db, clock.now(), {
+      teamId: second,
+      picks: await picks(),
+      basedOnVersionId: null,
+    });
+    await at(NOW);
+    await planGameJobs(t.db, clock.now(), gameId);
+    await at(round1.lockAt);
+    const oneByOne = createGameHandlers({ batch: 1 });
+    expect(await run(1, oneByOne)).toMatchObject({ failed: 0 });
+    // The second batch's job dies.
+    const after = (await gameJobs()).find((j) =>
+      j.dedupeKey.includes(":after:"),
+    )!;
+    const broken = {
+      ...oneByOne,
+      game_lock: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(after.dedupeKey))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(after.dedupeKey)).toMatchObject({ status: "dead" });
+
+    const later = new Date(round1.lockAt.getTime() + 24 * HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    // The sweep starts again from the first team: its next batch can't reuse
+    // the dead chain's key, which is taken.
+    expect(await run(5, oneByOne)).toMatchObject({ failed: 0 });
+    expect(await statusOf(round1.id)).toBe("locked");
+    expect(await lockStates()).toHaveLength(2);
+  });
+  it("an open job that died is swept up by the next planning, and the sweep opens the event", async () => {
+    await lockRound(t.db, gameId, round1.id);
+    await at(clock.now());
+    await planGameJobs(t.db, clock.now(), gameId);
+    const key = gameOpenKey(gameId, round2.id);
+    const broken = {
+      ...createGameHandlers(),
+      game_open: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(key))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(key)).toMatchObject({ status: "dead", attempts: 5 });
+    expect(await statusOf(round2.id)).toBe("upcoming");
+
+    await complete(round1.id);
+    const later = new Date((await jobByKey(key))!.runAt.getTime() + HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    const day = later.toISOString().slice(0, 10);
+    expect(
+      await jobByKey(`game_open:${gameId}:${round2.id}:sweep:${day}`),
+    ).toMatchObject({
+      kind: "game_open",
+      status: "pending",
+      runAt: later,
+      payload: { gameId, eventId: round2.id, sweep: day },
+    });
+    // Planning again the same day queues nothing more.
+    const count = (await gameJobs()).length;
+    await planGameJobs(t.db, later, gameId);
+    expect(await gameJobs()).toHaveLength(count);
+
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round2.id)).toBe("open");
+    // Open, the event gets no more open sweeps.
+    await planGameJobs(t.db, new Date(later.getTime() + 24 * HOUR), gameId);
+    expect(
+      (await gameJobs()).filter(
+        (j) => j.kind === "game_open" && j.dedupeKey.includes(":sweep:"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("an open sweep that has to re-check does so under keys of its own", async () => {
+    await lockRound(t.db, gameId, round1.id);
+    await at(clock.now());
+    await planGameJobs(t.db, clock.now(), gameId);
+    const key = gameOpenKey(gameId, round2.id);
+    // The planned job re-checks once (round 1 isn't completed), and the
+    // re-check dies.
+    await at((await jobByKey(key))!.runAt);
+    expect(await run(1)).toMatchObject({ failed: 0 });
+    const recheck = `game_open:${gameId}:${round2.id}:1`;
+    const broken = {
+      ...createGameHandlers(),
+      game_open: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(recheck))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(recheck)).toMatchObject({ status: "dead" });
+
+    // Still not completed: the sweep re-checks, then opens once it is.
+    const later = new Date((await jobByKey(recheck))!.runAt.getTime() + HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    expect(await run(1)).toMatchObject({ failed: 0 });
+    expect(await statusOf(round2.id)).toBe("upcoming");
+    await complete(round1.id);
+    const [next] = (await gameJobs()).filter(
+      (j) =>
+        j.status === "pending" &&
+        (j.payload as { eventId: string }).eventId === round2.id &&
+        j.kind === "game_open",
+    );
+    expect(next!.dedupeKey).toBe(
+      `game_open:${gameId}:${round2.id}:sweep:${later.toISOString().slice(0, 10)}:1`,
+    );
+    await at(next!.runAt);
+    expect(await run(1)).toMatchObject({ failed: 0 });
     expect(await statusOf(round2.id)).toBe("open");
   });
 });

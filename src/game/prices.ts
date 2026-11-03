@@ -1,4 +1,5 @@
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { z } from "zod";
 import { writeAudit } from "@/audit/log";
 import {
   assetPrices,
@@ -139,26 +140,58 @@ export async function upsertPrices(
   return changed;
 }
 
+/** One row of `team_base_state`'s owned assets: an asset id. */
+const ownedRowSchema = z.object({ asset_id: z.string() });
+
 /**
- * True when every asset available at the event (`active`, added from this
- * event's sequence or earlier) has a price row for it.
+ * The assets an event's price list must have, by id: every asset pickable at
+ * the event and every one a team owns going into it. Both are placed by
+ * sequence, as the lineup check places them (`game_event_sequence_from`), not
+ * by the pool's `status`, which says `withdrawn` from the moment an asset is
+ * withdrawn, whatever event it goes from:
+ * - pickable: added from this event or an earlier one (one added from a
+ *   cancelled event counts from the event after it), and not withdrawn by it;
+ * - owned: in an active team's base lineup for the event (`team_base_state`),
+ *   such as an asset withdrawn since the team bought it, which it keeps.
  */
+export async function neededAssetIds(
+  tx: Db,
+  gameId: string,
+  event: { eventId: string; sequence: number },
+): Promise<Set<string>> {
+  const pickable = await tx
+    .select({ id: poolAssets.id })
+    .from(poolAssets)
+    .where(
+      and(
+        eq(poolAssets.gameId, gameId),
+        sql`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId}) <= ${event.sequence}`,
+        sql`not coalesce((${poolAssets.status} = 'withdrawn' and ${poolAssets.withdrawnFromEventId} is null)
+              or game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.withdrawnFromEventId}) <= ${event.sequence}, false)`,
+      ),
+    );
+  const { rows } = (await tx.execute(sql`
+    select distinct lp."asset_id" as asset_id
+    from "teams" t
+    cross join lateral team_base_state(t."id", ${event.eventId}::uuid) b
+    join "lineup_picks" lp on lp."lineup_version_id" = b."base_version_id"
+    where t."game_id" = ${gameId} and t."status" = 'active'
+  `)) as { rows: unknown[] };
+  return new Set([
+    ...pickable.map((a) => a.id),
+    ...z
+      .array(ownedRowSchema)
+      .parse(rows)
+      .map((row) => row.asset_id),
+  ]);
+}
+
+/** True when every asset the event needs (`neededAssetIds`) has a price. */
 async function isComplete(
   tx: Db,
   gameId: string,
-  event: { eventId: string; sequence: number | null },
+  event: { eventId: string; sequence: number },
 ): Promise<boolean> {
-  // Placed as the lineup check places them: an asset added from a cancelled
-  // event counts from the event after it.
-  const available = await tx
-    .select({
-      id: poolAssets.id,
-      sequence: sql<
-        number | null
-      >`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId})`,
-    })
-    .from(poolAssets)
-    .where(and(eq(poolAssets.gameId, gameId), eq(poolAssets.status, "active")));
   const priced = new Set(
     (
       await tx
@@ -167,17 +200,18 @@ async function isComplete(
         .where(eq(assetPrices.eventId, event.eventId))
     ).map((row) => row.assetId),
   );
-  return available
-    .filter((a) => a.sequence !== null && a.sequence <= event.sequence!)
-    .every((a) => priced.has(a.id));
+  return [...(await neededAssetIds(tx, gameId, event))].every((id) =>
+    priced.has(id),
+  );
 }
 
 /**
  * Publishes an event's prices: upserts them and, once the list is complete,
  * sets `prices_ready_at`, from when builders see it. Complete means every
- * asset available at the event (`active`, added from this event or an earlier
- * one) has a price for it; a partial list, such as a single admin correction,
- * leaves `prices_ready_at` as it was, and `carryPrices` finishes the list.
+ * asset the event needs (`neededAssetIds`: pickable there, or owned going
+ * into it) has a price for it; a partial list, such as a single admin
+ * correction, leaves `prices_ready_at` as it was. Opening the event always
+ * runs `carryPrices`, which fills any gap left.
  * `initial` is the season's starting list; `admin` is a staff correction,
  * which needs a reason and an actor and is audited in the same transaction.
  * Refuses, writing nothing: a blank reason, a price outside 30-340, an asset
@@ -211,7 +245,10 @@ export async function publishPrices(
     await upsertPrices(tx, now, { ...input, meta });
     if (
       event.sequence !== null &&
-      (await isComplete(tx, input.gameId, event))
+      (await isComplete(tx, input.gameId, {
+        eventId: input.eventId,
+        sequence: event.sequence,
+      }))
     ) {
       await tx
         .update(gameEvents)

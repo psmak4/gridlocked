@@ -169,6 +169,13 @@
       "when": 1793689362053,
       "tag": "0023_game_rules_8",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793694907257,
+      "tag": "0024_game_rules_9",
+      "breakpoints": true
     }
   ]
 }

@@ -2,10 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { importReferenceFixtures2026 } from "../../tests/helpers/pipeline-2026";
-import { events, gameEvents, rulesetVersions } from "@/db/schema";
+import {
+  events,
+  gameEvents,
+  jobs,
+  reviewItems,
+  rulesetVersions,
+} from "@/db/schema";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { createGame, planGameEvents } from "./games";
+import { planGameJobs } from "./jobs";
 import { RULESET_2026 } from "./ruleset";
 
 // The game calendar over the recorded 2026 calendar: one game_events row per
@@ -190,5 +197,132 @@ describe("the game calendar (DM 3.3)", () => {
     for (const r of rows) {
       expect(r.rulesetVersionId).toBe(r.round < 4 ? rulesetVersionId : v2);
     }
+  });
+  it("a ruleset version from the open event or a locked one is dropped for an admin, and planning goes on", async () => {
+    const { gameId, rulesetVersionId } = await createGame(t.db, NOW, input());
+    const first = await roundEvent(1);
+    const second = await roundEvent(2);
+    const third = await roundEvent(3);
+    const setStatus = (eventId: string, status: "open" | "locked") =>
+      t.db
+        .update(gameEvents)
+        .set({ status })
+        .where(eq(gameEvents.eventId, eventId));
+    const addVersion = async (version: number, fromEventId: string) => {
+      const id = newId();
+      await t.db.insert(rulesetVersions).values({
+        id,
+        gameId,
+        version,
+        effectiveFromEventId: fromEventId,
+        params: RULESET_2026,
+        notes: "A change.",
+        publishedAt: NOW,
+      });
+      return id;
+    };
+    // Round 1 locked, round 2 open. Two versions start where the window has
+    // reached (rounds 1 and 2), one from the next upcoming round, and round 5
+    // is called off in the same run.
+    await setStatus(first.id, "locked");
+    await setStatus(second.id, "open");
+    await addVersion(2, first.id);
+    await addVersion(3, second.id);
+    const v4 = await addVersion(4, third.id);
+    const fifth = await roundEvent(5);
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, fifth.id));
+
+    await planGameEvents(t.db, NOW, gameId);
+
+    // The two are dropped, each with an item for an admin; the one from round
+    // 3 applies, and the cancellation is planned.
+    const rows = await calendar(gameId);
+    for (const r of rows) {
+      expect(r.rulesetVersionId).toBe(r.round < 3 ? rulesetVersionId : v4);
+    }
+    expect(rows[1]).toMatchObject({ status: "open", sequence: 2 });
+    expect(rows[4]).toMatchObject({ status: "cancelled", sequence: null });
+    expect(rows[5]!.sequence).toBe(5);
+    const items = await t.db
+      .select()
+      .from(reviewItems)
+      .where(eq(reviewItems.kind, "ruleset_version_refused"))
+      .orderBy(asc(reviewItems.dedupeKey));
+    expect(items).toMatchObject([
+      {
+        status: "open",
+        severity: "warning",
+        dedupeKey: `ruleset_version_refused:${gameId}:2`,
+        eventId: first.id,
+      },
+      {
+        status: "open",
+        severity: "warning",
+        dedupeKey: `ruleset_version_refused:${gameId}:3`,
+        eventId: second.id,
+      },
+    ]);
+
+    // The game's jobs are planned after it, and planning again adds nothing.
+    await planGameJobs(t.db, NOW, gameId);
+    expect(
+      (await t.db.select().from(jobs)).filter((j) => j.kind === "game_lock"),
+    ).toHaveLength(
+      rows.filter((r) => r.status !== "cancelled" && r.status !== "locked")
+        .length,
+    );
+    await planGameEvents(t.db, NOW, gameId);
+    expect(await calendar(gameId)).toEqual(rows);
+    expect(
+      await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.kind, "ruleset_version_refused")),
+    ).toHaveLength(2);
+  });
+  it("a lock_at move that puts a version's event ahead of the open one drops it, and the rows keep their versions", async () => {
+    const { gameId, rulesetVersionId } = await createGame(t.db, NOW, input());
+    const second = await roundEvent(2);
+    const fourth = await roundEvent(4);
+    const v2 = newId();
+    await t.db.insert(rulesetVersions).values({
+      id: v2,
+      gameId,
+      version: 2,
+      effectiveFromEventId: fourth.id,
+      params: RULESET_2026,
+      notes: "A change.",
+      publishedAt: NOW,
+    });
+    await planGameEvents(t.db, NOW, gameId);
+    const first = await roundEvent(1);
+    await t.db
+      .update(gameEvents)
+      .set({ status: "locked" })
+      .where(eq(gameEvents.eventId, first.id));
+    await t.db
+      .update(gameEvents)
+      .set({ status: "open" })
+      .where(eq(gameEvents.eventId, second.id));
+    // Round 4 now locks before the open round 2.
+    await t.db
+      .update(events)
+      .set({ lockAt: new Date(second.lockAt.getTime() - HOUR) })
+      .where(eq(events.id, fourth.id));
+
+    await planGameEvents(t.db, NOW, gameId);
+
+    for (const r of await calendar(gameId)) {
+      expect(r.rulesetVersionId).toBe(r.round < 4 ? rulesetVersionId : v2);
+    }
+    expect(
+      await t.db
+        .select({ key: reviewItems.dedupeKey })
+        .from(reviewItems)
+        .where(eq(reviewItems.kind, "ruleset_version_refused")),
+    ).toEqual([{ key: `ruleset_version_refused:${gameId}:2` }]);
   });
 });

@@ -6,14 +6,13 @@ import {
   lineupPicks,
   type LINEUP_KINDS,
   lineupVersions,
-  poolAssets,
   teams,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import { playedChips } from "./chips";
 import { GameError, refusal } from "./errors";
-import { priceList } from "./prices";
+import { neededAssetIds, priceList } from "./prices";
 
 // Lineups (DM 3.7): every save is a new version, and the database decides
 // whether a save came in time. Reads reference data, never writes it (DM 0.5).
@@ -26,8 +25,9 @@ export interface LineupPick {
 /**
  * Opens a game for play: the game goes from `setup` to `open` and its
  * sequence-1 event to `open`, so teams can be created and lineups saved. The
- * event must have a price for every active asset added from it or earlier. An
- * error, writing nothing, if the game isn't in `setup` or a price is missing.
+ * event must have a price for every asset pickable there (`neededAssetIds`).
+ * An error, writing nothing, if the game isn't in `setup` or a price is
+ * missing.
  */
 export async function openGame(
   db: Db,
@@ -55,22 +55,16 @@ export async function openGame(
     }
 
     const prices = await priceList(tx, { gameId, eventId: first.eventId });
-    // Added from this event or an earlier one, as the lineup check places it
-    // (a cancelled one counts from the event after it).
-    const needed = await tx
-      .select({ id: poolAssets.id })
-      .from(poolAssets)
-      .where(
-        and(
-          eq(poolAssets.gameId, gameId),
-          eq(poolAssets.status, "active"),
-          sql`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId}) <= 1`,
-        ),
-      );
-    const missing = needed.filter((asset) => !prices.has(asset.id));
+    // Placed by sequence, as the lineup check places them: an asset withdrawn
+    // from a later event is still pickable here, and needs a price.
+    const needed = await neededAssetIds(tx, gameId, {
+      eventId: first.eventId,
+      sequence: 1,
+    });
+    const missing = [...needed].filter((id) => !prices.has(id));
     if (missing.length > 0) {
       throw new Error(
-        `openGame: ${missing.length} active assets have no price for the first event`,
+        `openGame: ${missing.length} pickable assets have no price for the first event`,
       );
     }
 
@@ -230,10 +224,12 @@ export interface LockedLineup {
  * `limitless` version for it saved before its `lock_at`, latest by
  * `(saved_at, id)`. With none, it is the latest `regular` version saved for an
  * event cancelled while its window was open, since the event before this one
- * locked (DM 3.9: a cancellation doesn't undo a team's changes); with none of
- * those either, the base carried forward from the team's earlier events
- * (`team_base_state`, DM 3.8). Null when it has none of these: the team never
- * saved a lineup that counted.
+ * locked (DM 3.9: a cancellation doesn't undo a team's changes), as long as it
+ * would pass the save check's availability and budget at this event (its
+ * prices, the team's base going in); with none, or one that doesn't pass, the
+ * base carried forward from the team's earlier events (`team_base_state`, DM
+ * 3.8). Null when it has none of these: the team never saved a lineup that
+ * counted.
  */
 export async function lockedLineup(
   db: Db,

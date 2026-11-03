@@ -14,6 +14,7 @@ import {
   events,
   gameEvents,
   gameSessionExceptions,
+  reviewItems,
   sessions,
   teamEventStates,
   teams,
@@ -25,6 +26,7 @@ import { clearSessionException, setSessionException } from "./cancellations";
 import { playChip } from "./chips";
 import { GameError } from "./errors";
 import { planGameEvents } from "./games";
+import { checkGameInvariants } from "./invariants";
 import { lockedLineup, openGame, saveLineup, type LineupPick } from "./lineups";
 import { lockEvent } from "./lock";
 import { withdrawPoolAsset } from "./pool";
@@ -301,6 +303,72 @@ describe("cancellations (DM 3.9)", () => {
     expect(lateTeam!.firstEventId).toBe(round3.id);
   });
 
+  it("a lineup carried from the cancelled event that is over budget at the next one doesn't count, and the base does", async () => {
+    const first = await saveFor(round1, await picksOf());
+    await toRound2();
+    // Alonso costs 200 at round 3, which hasn't opened yet.
+    const alonso = await game.assetId("alonso");
+    await publishPrices(t.db, round2.lockAt, {
+      gameId,
+      eventId: round3.id,
+      source: "admin",
+      reason: "Price update for Japan",
+      actor: ACTOR,
+      prices: [{ assetId: alonso, price: 200 }],
+    });
+    // Bearman (80) out, Alonso (110 at round 2) in: 980 of 1000.
+    await saveFor(
+      round2,
+      await picksOf(["norris", "piastri", "hulkenberg", "hadjar", "alonso"]),
+    );
+    await cancel(round2);
+
+    // Nothing saved for round 3, where that lineup costs 1070 of 1000: the
+    // team's round 1 lineup carries, and round 3 locks.
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round3.id }))?.versionId,
+    ).toBe(first.versionId);
+    await lockRound(t.db, gameId, round3.id);
+    expect(await stateOf(round3.id)).toMatchObject({
+      baseVersionId: first.versionId,
+      lockedVersionId: first.versionId,
+      purchasingPower: 1000,
+      spent: COST,
+      transfersMade: 0,
+    });
+    // The season check works out the same lineup.
+    expect(await checkGameInvariants(t.db, gameId)).toEqual([]);
+  });
+
+  it("a lineup carried from the cancelled event with an asset withdrawn from the next one doesn't count, and the base does", async () => {
+    const first = await saveFor(round1, await picksOf());
+    const opened = await toRound2();
+    await withdrawPoolAsset(t.db, opened, {
+      assetId: await game.assetId("bottas"),
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    // Bearman out, Bottas in: pickable at round 2, not at round 3, and the
+    // team never owned him.
+    await saveFor(
+      round2,
+      await picksOf(["norris", "piastri", "hulkenberg", "hadjar", "bottas"]),
+    );
+    await cancel(round2);
+
+    expect(
+      (await lockedLineup(t.db, { teamId, eventId: round3.id }))?.versionId,
+    ).toBe(first.versionId);
+    await lockRound(t.db, gameId, round3.id);
+    expect(await stateOf(round3.id)).toMatchObject({
+      lockedVersionId: first.versionId,
+      spent: COST,
+      transfersMade: 0,
+    });
+    expect(await checkGameInvariants(t.db, gameId)).toEqual([]);
+  });
+
   it("a Blank Cheque lineup saved for the cancelled event doesn't count, and the regular one before it does", async () => {
     await saveFor(round1, await picksOf());
     await toRound2();
@@ -379,6 +447,201 @@ describe("cancellations (DM 3.9)", () => {
     expect(
       await t.db.select().from(gameEvents).where(eq(gameEvents.gameId, gameId)),
     ).toEqual(rows);
+  });
+
+  it("the event opened for a cancelled one carries an owned asset's price, though its list was complete when published", async () => {
+    const bearman = await game.assetId("bearman");
+    await withdrawPoolAsset(t.db, NOW, {
+      assetId: bearman,
+      fromEventId: round3.id,
+      reason: "Leaves after China",
+      actor: ACTOR,
+    });
+    // Round 3's full list, published before anyone owned Bearman.
+    await publishPrices(t.db, NOW, {
+      gameId,
+      eventId: round3.id,
+      source: "admin",
+      reason: "Early prices for Japan",
+      actor: ACTOR,
+      prices: [...(await priceList(t.db, { gameId, eventId: round1.id }))]
+        .filter(([assetId]) => assetId !== bearman)
+        .map(([assetId, price]) => ({ assetId, price })),
+    });
+    expect((await gameEventOf(round3.id)).pricesReadyAt).toEqual(NOW);
+    await saveFor(round1, await picksOf());
+    await toRound2();
+    const when = await cancel(round2);
+
+    // Round 3 opens with Bearman's price carried, so his owner can save and
+    // lock with him.
+    const saved = await saveLineup(t.db, when, {
+      teamId,
+      picks: await picksOf(),
+      basedOnVersionId: null,
+    });
+    await lockRound(t.db, gameId, round3.id);
+    expect(await stateOf(round3.id)).toMatchObject({
+      lockedVersionId: saved.versionId,
+      spent: COST,
+    });
+    expect(
+      (await priceList(t.db, { gameId, eventId: round3.id })).get(bearman),
+    ).toBe(80);
+  });
+
+  /**
+   * `t.db` for planGameEvents, with `race` run in its transaction just before
+   * its first write to game_events: as if another transaction (the lock job's
+   * last batch) committed between planning's read and that write.
+   */
+  function racing(race: (tx: typeof t.db) => Promise<unknown>): typeof t.db {
+    let raced = false;
+    type Query = PromiseLike<unknown> & {
+      returning: (...args: unknown[]) => Query;
+    };
+    const after = (tx: typeof t.db, query: Query): Query => ({
+      returning: (...args) => after(tx, query.returning(...args)),
+      then: (done, failed) =>
+        race(tx)
+          .then(() => query)
+          .then(done, failed),
+    });
+    const wrap = (tx: typeof t.db) =>
+      new Proxy(tx, {
+        get(target, prop) {
+          if (prop === "update") {
+            return (table: typeof gameEvents) => {
+              const builder = target.update(table);
+              if (table !== gameEvents || raced) return builder;
+              raced = true;
+              return {
+                set: (values: Parameters<typeof builder.set>[0]) => ({
+                  where: (
+                    where: Parameters<
+                      ReturnType<typeof builder.set>["where"]
+                    >[0],
+                  ) =>
+                    after(
+                      target,
+                      builder.set(values).where(where) as unknown as Query,
+                    ),
+                }),
+              };
+            };
+          }
+          const value: unknown = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    return new Proxy(t.db, {
+      get(target, prop) {
+        if (prop === "transaction") {
+          return (run: (tx: typeof t.db) => Promise<unknown>) =>
+            target.transaction((tx) => run(wrap(tx as unknown as typeof t.db)));
+        }
+        const value: unknown = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  it("planning that loses a race with the lock leaves the locked event alone", async () => {
+    await saveFor(round1, await picksOf());
+    await play(round1, "chip_autopilot");
+    // The calendar calls round 1 off just as it locks: planning reads it
+    // `open`, and the lock's last batch commits before planning writes.
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, round1.id));
+    const when = await at(new Date(round1.lockAt.getTime() - 1000));
+    const lock = (tx: typeof t.db) =>
+      tx
+        .update(gameEvents)
+        .set({ status: "locked" })
+        .where(
+          and(eq(gameEvents.gameId, gameId), eq(gameEvents.eventId, round1.id)),
+        );
+    await expect(planGameEvents(racing(lock), when, gameId)).rejects.toThrow(
+      /no longer open/,
+    );
+
+    // Nothing planning did stays: round 1 is as the lock left it, its chip
+    // played, and round 2 neither renumbered nor opened.
+    await lock(t.db);
+    expect(await gameEventOf(round1.id)).toMatchObject({
+      status: "locked",
+      sequence: 1,
+    });
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "upcoming",
+      sequence: 2,
+    });
+    expect((await plays()).map((p) => p.status)).toEqual(["played"]);
+  });
+
+  /** The calendar reinstates a cancelled event, and the game is planned again. */
+  const reinstate = async (event: { id: string }, when: Date) => {
+    await t.db
+      .update(events)
+      .set({ status: "scheduled" })
+      .where(eq(events.id, event.id));
+    await planGameEvents(t.db, when, gameId);
+  };
+
+  it("an event reinstated after a later one opened stays cancelled in the game, for an admin to look at", async () => {
+    await saveFor(round1, await picksOf(), teamId, 2);
+    const cancelled = await cancel(round1);
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "open",
+      sequence: 1,
+    });
+    // Back on the calendar before its own lock, with round 2 open.
+    await reinstate(round1, await at(new Date(cancelled.getTime() + 60_000)));
+
+    expect(await gameEventOf(round1.id)).toMatchObject({
+      status: "cancelled",
+      sequence: null,
+    });
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "open",
+      sequence: 1,
+    });
+    const items = await t.db
+      .select()
+      .from(reviewItems)
+      .where(eq(reviewItems.kind, "game_event_reinstated"));
+    expect(items).toMatchObject([
+      {
+        status: "open",
+        severity: "warning",
+        eventId: round1.id,
+        dedupeKey: `game_event_reinstated:${gameId}:${round1.id}`,
+        details: { gameId, openEventId: round2.id },
+      },
+    ]);
+    // Round 2 still locks, with the lineup saved for round 1.
+    await lockRound(t.db, gameId, round2.id);
+    expect(await stateOf(round2.id)).toMatchObject({ isFirstEvent: true });
+  });
+
+  it("an event reinstated before any later one opened is back in the game", async () => {
+    await saveFor(round1, await picksOf());
+    const opened = await toRound2();
+    await cancel(round3, opened);
+    await reinstate(round3, await at(new Date(opened.getTime() + HOUR_MS)));
+
+    expect(await gameEventOf(round3.id)).toMatchObject({
+      status: "upcoming",
+      sequence: 3,
+    });
+    expect(
+      await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.kind, "game_event_reinstated")),
+    ).toEqual([]);
   });
 
   it("an upcoming event cancelled while another is open opens nothing", async () => {
