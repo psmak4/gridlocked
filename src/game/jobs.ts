@@ -17,6 +17,7 @@ import {
   gameOpenKey,
   gameOpenPayload,
   gameOpenRecheckKey,
+  gameOpenSweepKey,
   type GameLockPayload,
   type GameOpenPayload,
 } from "@/jobs/kinds";
@@ -62,7 +63,11 @@ const isLockedOrLater = (status: GameEventStatus) =>
  *   at `now`, for an `open` event whose `lock_at` has passed and that has no
  *   `game_lock` job pending, running or waiting to retry: its lock chain died
  *   (a job dead after its last attempt is never re-queued under its own key).
- *   The sweep is an ordinary lock job, so it picks the lock up where it was.
+ *   The sweep is an ordinary lock job, so it picks the lock up where it was;
+ * - `game_open:<game>:<event>:sweep:<yyyy-mm-dd>` likewise, due at `now`, for
+ *   an `upcoming` event whose planned open time has passed and that has no
+ *   `game_open` job pending, running or waiting to retry. It is an ordinary
+ *   open job, so its order and timing checks are the same.
  *
  * An event that has locked, or been cancelled, gets nothing. Call it whenever
  * the calendar is synced.
@@ -159,13 +164,45 @@ export async function planGameJobs(
       if (event.status !== "upcoming" || !previous) continue;
       const weekend = ends.get(previous.eventId);
       const over = weekend?.race ?? weekend?.any ?? previous.lockAt.getTime();
+      const opensAt = new Date(over + settleMs);
       const open: GameOpenPayload = { gameId, eventId: event.eventId };
       await enqueue(tx, {
         kind: "game_open",
         dedupeKey: gameOpenKey(gameId, event.eventId),
-        runAt: new Date(over + settleMs),
+        runAt: opensAt,
         payload: open,
       });
+
+      // Past its planned open with no open job left alive (the last one
+      // died): a sweep runs the open handler again, once a day at most.
+      if (opensAt.getTime() <= now.getTime()) {
+        const [alive] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.kind, "game_open"),
+              sql`${jobs.payload}->>'gameId' = ${gameId}`,
+              sql`${jobs.payload}->>'eventId' = ${event.eventId}`,
+              inArray(jobs.status, ["pending", "running", "failed"]),
+            ),
+          )
+          .limit(1);
+        if (!alive) {
+          const day = now.toISOString().slice(0, 10);
+          const payload: GameOpenPayload = {
+            gameId,
+            eventId: event.eventId,
+            sweep: day,
+          };
+          await enqueue(tx, {
+            kind: "game_open",
+            dedupeKey: gameOpenSweepKey(gameId, event.eventId, day),
+            runAt: now,
+            payload,
+          });
+        }
+      }
     }
   });
 }
@@ -225,7 +262,8 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
  * so a key it enqueues is never one an earlier job of the chain used. A lock
  * sweep's chain carries its day on (`sweep`), so its keys are never the dead
  * chain's either; it starts again from the first team, and a batch already
- * written writes nothing.
+ * written writes nothing. An open sweep's re-checks carry its day the same
+ * way.
  *
  * Both check the order before they write, so the database's guard on opening
  * out of order never reaches the job runtime.
@@ -303,7 +341,9 @@ export function createGameHandlers(
 
   const open: JobHandler = async (job, ctx) => {
     const db = ctx.db as Db;
-    const { gameId, eventId, attempt } = gameOpenPayload.parse(job.payload);
+    const { gameId, eventId, attempt, sweep } = gameOpenPayload.parse(
+      job.payload,
+    );
     const now = ctx.clock.now();
     const { own, before, window } = await loadOrder(db, gameId, eventId);
     // Opened already (or locked, or cancelled), and the first event is opened
@@ -313,10 +353,10 @@ export function createGameHandlers(
 
     const recheck = async () => {
       const n = (attempt ?? 0) + 1;
-      const payload: GameOpenPayload = { gameId, eventId, attempt: n };
+      const payload: GameOpenPayload = { gameId, eventId, attempt: n, sweep };
       await enqueue(db, {
         kind: "game_open",
-        dedupeKey: gameOpenRecheckKey(gameId, eventId, n),
+        dedupeKey: gameOpenRecheckKey(gameId, eventId, n, sweep),
         runAt: new Date(now.getTime() + window.recheckHours * HOUR_MS),
         payload,
       });

@@ -788,4 +788,89 @@ describe("the game jobs (HLD §3.3)", () => {
     expect(await statusOf(round1.id)).toBe("locked");
     expect(await lockStates()).toHaveLength(2);
   });
+  it("an open job that died is swept up by the next planning, and the sweep opens the event", async () => {
+    await lockRound(t.db, gameId, round1.id);
+    await at(clock.now());
+    await planGameJobs(t.db, clock.now(), gameId);
+    const key = gameOpenKey(gameId, round2.id);
+    const broken = {
+      ...createGameHandlers(),
+      game_open: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(key))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(key)).toMatchObject({ status: "dead", attempts: 5 });
+    expect(await statusOf(round2.id)).toBe("upcoming");
+
+    await complete(round1.id);
+    const later = new Date((await jobByKey(key))!.runAt.getTime() + HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    const day = later.toISOString().slice(0, 10);
+    expect(
+      await jobByKey(`game_open:${gameId}:${round2.id}:sweep:${day}`),
+    ).toMatchObject({
+      kind: "game_open",
+      status: "pending",
+      runAt: later,
+      payload: { gameId, eventId: round2.id, sweep: day },
+    });
+    // Planning again the same day queues nothing more.
+    const count = (await gameJobs()).length;
+    await planGameJobs(t.db, later, gameId);
+    expect(await gameJobs()).toHaveLength(count);
+
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round2.id)).toBe("open");
+    // Open, the event gets no more open sweeps.
+    await planGameJobs(t.db, new Date(later.getTime() + 24 * HOUR), gameId);
+    expect(
+      (await gameJobs()).filter(
+        (j) => j.kind === "game_open" && j.dedupeKey.includes(":sweep:"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("an open sweep that has to re-check does so under keys of its own", async () => {
+    await lockRound(t.db, gameId, round1.id);
+    await at(clock.now());
+    await planGameJobs(t.db, clock.now(), gameId);
+    const key = gameOpenKey(gameId, round2.id);
+    // The planned job re-checks once (round 1 isn't completed), and the
+    // re-check dies.
+    await at((await jobByKey(key))!.runAt);
+    expect(await run(1)).toMatchObject({ failed: 0 });
+    const recheck = `game_open:${gameId}:${round2.id}:1`;
+    const broken = {
+      ...createGameHandlers(),
+      game_open: () => Promise.reject(new Error("the database went away")),
+    };
+    for (let i = 0; i < 5; i++) {
+      await at((await jobByKey(recheck))!.runAt);
+      expect(await run(1, broken)).toMatchObject({ failed: 1 });
+    }
+    expect(await jobByKey(recheck)).toMatchObject({ status: "dead" });
+
+    // Still not completed: the sweep re-checks, then opens once it is.
+    const later = new Date((await jobByKey(recheck))!.runAt.getTime() + HOUR);
+    await at(later);
+    await planGameJobs(t.db, later, gameId);
+    expect(await run(1)).toMatchObject({ failed: 0 });
+    expect(await statusOf(round2.id)).toBe("upcoming");
+    await complete(round1.id);
+    const [next] = (await gameJobs()).filter(
+      (j) =>
+        j.status === "pending" &&
+        (j.payload as { eventId: string }).eventId === round2.id &&
+        j.kind === "game_open",
+    );
+    expect(next!.dedupeKey).toBe(
+      `game_open:${gameId}:${round2.id}:sweep:${later.toISOString().slice(0, 10)}:1`,
+    );
+    await at(next!.runAt);
+    expect(await run(1)).toMatchObject({ failed: 0 });
+    expect(await statusOf(round2.id)).toBe("open");
+  });
 });

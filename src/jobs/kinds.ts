@@ -111,11 +111,19 @@ export const gameLockPayload = z.object({
 });
 export type GameLockPayload = z.infer<typeof gameLockPayload>;
 
-/** `attempt` is absent on the planned job, then 1, 2, ... on its re-checks. */
+/**
+ * `attempt` is absent on the planned job, then 1, 2, ... on its re-checks.
+ * `sweep` is the UTC day (YYYY-MM-DD) of the planning sweep that started the
+ * chain, for an open whose own chain died; its re-check keys carry it.
+ */
 export const gameOpenPayload = z.object({
   gameId: z.string().min(1),
   eventId: z.string().min(1),
   attempt: z.number().int().positive().optional(),
+  sweep: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 export type GameOpenPayload = z.infer<typeof gameOpenPayload>;
 
@@ -152,8 +160,19 @@ export const gameLockWaitKey = (
 export const gameOpenKey = (gameId: string, eventId: string) =>
   `game_open:${gameId}:${eventId}`;
 /** The `n`th re-check of an open job that was not yet time. */
+/**
+ * An open sweep for the UTC day `day` (YYYY-MM-DD): queued by planning for an
+ * upcoming event past its planned open with no open job left alive.
+ */
+export const gameOpenSweepKey = (
+  gameId: string,
+  eventId: string,
+  day: string,
+) => `game_open:${gameId}:${eventId}:sweep:${day}`;
 export const gameOpenRecheckKey = (
   gameId: string,
   eventId: string,
   n: number,
-) => `game_open:${gameId}:${eventId}:${n}`;
+  sweep?: string,
+) =>
+  `${sweep === undefined ? gameOpenKey(gameId, eventId) : gameOpenSweepKey(gameId, eventId, sweep)}:${n}`;
