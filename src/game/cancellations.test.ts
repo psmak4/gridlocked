@@ -490,6 +490,97 @@ describe("cancellations (DM 3.9)", () => {
     ).toBe(80);
   });
 
+  /**
+   * `t.db` for planGameEvents, with `race` run in its transaction just before
+   * its first write to game_events: as if another transaction (the lock job's
+   * last batch) committed between planning's read and that write.
+   */
+  function racing(race: (tx: typeof t.db) => Promise<unknown>): typeof t.db {
+    let raced = false;
+    type Query = PromiseLike<unknown> & {
+      returning: (...args: unknown[]) => Query;
+    };
+    const after = (tx: typeof t.db, query: Query): Query => ({
+      returning: (...args) => after(tx, query.returning(...args)),
+      then: (done, failed) =>
+        race(tx)
+          .then(() => query)
+          .then(done, failed),
+    });
+    const wrap = (tx: typeof t.db) =>
+      new Proxy(tx, {
+        get(target, prop) {
+          if (prop === "update") {
+            return (table: typeof gameEvents) => {
+              const builder = target.update(table);
+              if (table !== gameEvents || raced) return builder;
+              raced = true;
+              return {
+                set: (values: Parameters<typeof builder.set>[0]) => ({
+                  where: (
+                    where: Parameters<
+                      ReturnType<typeof builder.set>["where"]
+                    >[0],
+                  ) =>
+                    after(
+                      target,
+                      builder.set(values).where(where) as unknown as Query,
+                    ),
+                }),
+              };
+            };
+          }
+          const value: unknown = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    return new Proxy(t.db, {
+      get(target, prop) {
+        if (prop === "transaction") {
+          return (run: (tx: typeof t.db) => Promise<unknown>) =>
+            target.transaction((tx) => run(wrap(tx as unknown as typeof t.db)));
+        }
+        const value: unknown = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  it("planning that loses a race with the lock leaves the locked event alone", async () => {
+    await saveFor(round1, await picksOf());
+    await play(round1, "chip_autopilot");
+    // The calendar calls round 1 off just as it locks: planning reads it
+    // `open`, and the lock's last batch commits before planning writes.
+    await t.db
+      .update(events)
+      .set({ status: "cancelled" })
+      .where(eq(events.id, round1.id));
+    const when = await at(new Date(round1.lockAt.getTime() - 1000));
+    const lock = (tx: typeof t.db) =>
+      tx
+        .update(gameEvents)
+        .set({ status: "locked" })
+        .where(
+          and(eq(gameEvents.gameId, gameId), eq(gameEvents.eventId, round1.id)),
+        );
+    await expect(planGameEvents(racing(lock), when, gameId)).rejects.toThrow(
+      /no longer open/,
+    );
+
+    // Nothing planning did stays: round 1 is as the lock left it, its chip
+    // played, and round 2 neither renumbered nor opened.
+    await lock(t.db);
+    expect(await gameEventOf(round1.id)).toMatchObject({
+      status: "locked",
+      sequence: 1,
+    });
+    expect(await gameEventOf(round2.id)).toMatchObject({
+      status: "upcoming",
+      sequence: 2,
+    });
+    expect((await plays()).map((p) => p.status)).toEqual(["played"]);
+  });
+
   /** The calendar reinstates a cancelled event, and the game is planned again. */
   const reinstate = async (event: { id: string }, when: Date) => {
     await t.db

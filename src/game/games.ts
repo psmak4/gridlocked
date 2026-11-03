@@ -115,7 +115,10 @@ export async function createGame(
  *
  * Writes only what differs, so running it again changes nothing. Call it when
  * a game is created, a version is added and whenever the calendar changes.
- * Runs for one game take turns (the game row is held).
+ * Runs for one game take turns (the game row is held). A row is written only
+ * from the status this run read: if another writer (the lock job, which
+ * doesn't hold the game row) changed it since, the run throws and writes
+ * nothing, and planning again sees the new status.
  */
 export async function planGameEvents(
   db: Db,
@@ -263,15 +266,27 @@ export async function planGameEvents(
         row.status !== status ||
         row.rulesetVersionId !== rulesetVersionId
       ) {
-        await tx
+        // Only from the status read: the lock job doesn't hold the game row,
+        // and its last batch may have locked the event since. Losing that
+        // race rolls the whole run back, leaving the row as the lock left it
+        // (the rest was planned around the status read); the caller plans
+        // again.
+        const [updated] = await tx
           .update(gameEvents)
           .set({ sequence, status, rulesetVersionId, updatedAt: now })
           .where(
             and(
               eq(gameEvents.gameId, gameId),
               eq(gameEvents.eventId, event.id),
+              eq(gameEvents.status, row.status),
             ),
+          )
+          .returning({ eventId: gameEvents.eventId });
+        if (!updated) {
+          throw new Error(
+            `planGameEvents: event ${event.id} of game ${gameId} is no longer ${row.status}; plan again`,
           );
+        }
       }
       if (cancelled && row && row.status !== "cancelled") {
         cancelledNow.push({
