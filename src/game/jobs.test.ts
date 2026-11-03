@@ -12,6 +12,7 @@ import {
   events,
   gameEvents,
   poolAssets,
+  rulesetVersions,
   sessions,
   teamEventStates,
 } from "@/db/schema";
@@ -21,6 +22,7 @@ import { gameLockKey, gameOpenKey, type GameOpenPayload } from "@/jobs/kinds";
 import { enqueue } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
 import { setSimulatedClock } from "@/replay/clock-loop";
+import { RULESET_2026 } from "./ruleset";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { createGameHandlers, planGameJobs } from "./jobs";
 import { createTeam } from "./teams";
@@ -247,6 +249,127 @@ describe("the game jobs (HLD §3.3)", () => {
     expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
     expect(await statusOf(round1.id)).toBe("locked");
     expect(await lockStates()).toHaveLength(1);
+  });
+
+  it("planning again moves a lock job that already put itself off, when lock_at moves earlier", async () => {
+    await planGameJobs(t.db, gameId);
+    const later = new Date(round1.lockAt.getTime() + 2 * HOUR);
+    await t.db
+      .update(events)
+      .set({ lockAt: later })
+      .where(eq(events.id, round1.id));
+    await at(round1.lockAt);
+    expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
+    const waitKey = `game_lock:${gameId}:${round1.id}:wait:1`;
+    expect((await jobByKey(waitKey))!.runAt).toEqual(later);
+
+    // The lock comes forward again: the live job is the wait job.
+    const earlier = new Date(round1.lockAt.getTime() + HOUR);
+    await t.db
+      .update(events)
+      .set({ lockAt: earlier })
+      .where(eq(events.id, round1.id));
+    await planGameJobs(t.db, gameId);
+
+    const pending = (await gameJobs()).filter(
+      (j) =>
+        j.kind === "game_lock" &&
+        j.status === "pending" &&
+        (j.payload as { eventId: string }).eventId === round1.id,
+    );
+    expect(pending.map((j) => [j.dedupeKey, j.runAt])).toEqual([
+      [waitKey, earlier],
+    ]);
+    await at(earlier);
+    expect(await run(1)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round1.id)).toBe("locked");
+  });
+
+  it("a continuation that has to wait again isn't lost", async () => {
+    await teamWithLineup();
+    const second = await createTeam(t.db, clock.now(), {
+      gameId,
+      userId: newId(),
+      name: "U",
+    });
+    await saveLineup(t.db, clock.now(), {
+      teamId: second,
+      picks: await picks(),
+      basedOnVersionId: null,
+    });
+    await at(NOW);
+    await planGameJobs(t.db, gameId);
+    const batch = createGameHandlers({ batch: 1 });
+    const move = (lockAt: Date) =>
+      t.db.update(events).set({ lockAt }).where(eq(events.id, round1.id));
+
+    // Run early once (wait:1), then lock one team and leave a continuation.
+    const moved = new Date(round1.lockAt.getTime() + HOUR);
+    await move(moved);
+    await at(round1.lockAt);
+    await run(1, batch);
+    await at(moved);
+    await run(1, batch);
+    expect(await lockStates()).toHaveLength(1);
+    expect(await statusOf(round1.id)).toBe("open");
+
+    // The lock moves again before the continuation runs, so it has to wait.
+    // The database refuses that once lock_at is past (as it should), so the
+    // database's clock goes back for the move: the job's own defence is what
+    // is under test.
+    const again = new Date(moved.getTime() + HOUR);
+    await setSimulatedClock(t.db, NOW);
+    await move(again);
+    clock.set(moved);
+    expect(await run(1, batch)).toEqual({ ran: 1, failed: 0, lost: 0 });
+    const live = (await gameJobs()).filter(
+      (j) => j.kind === "game_lock" && j.status === "pending",
+    );
+    const mine = live.filter(
+      (j) => (j.payload as { eventId: string }).eventId === round1.id,
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({
+      dedupeKey: `game_lock:${gameId}:${round1.id}:wait:2`,
+      runAt: again,
+    });
+
+    await at(again);
+    expect(await run(5, batch)).toMatchObject({ failed: 0 });
+    expect(await lockStates()).toHaveLength(2);
+    expect(await statusOf(round1.id)).toBe("locked");
+  });
+
+  it("a game whose rules say 12 and 4 opens 12 hours before the lock and re-checks every 4", async () => {
+    // The version is not yet frozen: no event of the game has locked.
+    const [version] = await t.db.select().from(rulesetVersions);
+    await t.db
+      .update(rulesetVersions)
+      .set({
+        params: {
+          ...RULESET_2026,
+          window: { openCutoffHours: 12, recheckHours: 4 },
+        },
+      })
+      .where(eq(rulesetVersions.id, version!.id));
+    await lockRound(t.db, gameId, round1.id);
+    const first = new Date((await raceEnd(round1.id)).getTime() + 48 * HOUR);
+    await queueOpen(first);
+
+    await at(first);
+    await run();
+    expect(await jobByKey(`game_open:${gameId}:${round2.id}:1`)).toMatchObject({
+      runAt: new Date(first.getTime() + 4 * HOUR),
+    });
+
+    await runOpenChain();
+    expect(await statusOf(round2.id)).toBe("open");
+    const [done] = (await gameJobs())
+      .filter((j) => j.kind === "game_open" && j.status === "succeeded")
+      .slice(-1);
+    const cutoff = round2.lockAt.getTime() - 12 * HOUR;
+    expect(done!.runAt.getTime()).toBeGreaterThanOrEqual(cutoff);
+    expect(done!.runAt.getTime()).toBeLessThan(cutoff + 4 * HOUR);
   });
 
   it("a lock job at lock_at writes the lock record in batches, one job each", async () => {
