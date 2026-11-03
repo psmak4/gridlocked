@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -10,14 +12,21 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { createdAt, oneOf, updatedAt } from "./helpers";
-import { events, seasons, SESSION_KINDS } from "./reference";
+import {
+  constructors,
+  drivers,
+  events,
+  seasons,
+  SESSION_KINDS,
+} from "./reference";
 
 // The fantasy core (DM Part 3): game data. It points down at reference data
 // and never the other way (DM 0.5). IDs are UUIDv7 values supplied by the app.
 //
 // Not declared here, because Drizzle cannot express it: the freeze trigger on
-// ruleset_versions and scoring_rules (DM 3.2). It lives in the `game_rules`
-// migration.
+// ruleset_versions and scoring_rules (DM 3.2), and the price freeze on
+// asset_prices (DM 3.5). They live in the `game_rules` and `game_rules_2`
+// migrations.
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
@@ -30,6 +39,18 @@ export const GAME_EVENT_STATUSES = [
   "final",
   "cancelled",
 ] as const;
+export const POOL_ASSET_TYPES = ["driver", "constructor"] as const;
+export const POOL_ASSET_STATUSES = ["active", "withdrawn"] as const;
+/** `formula` is written by the price update (M4). */
+export const PRICE_SOURCES = [
+  "initial",
+  "formula",
+  "admin",
+  "carried",
+] as const;
+/** Prices are in units of $0.1M: $3.0M to $34.0M (DM 3.5). */
+export const PRICE_MIN = 30;
+export const PRICE_MAX = 340;
 export const SCORING_TARGETS = ["driver", "constructor"] as const;
 /** The calculations the scoring engine knows (HLD 5.6, DM 3.2). */
 export const SCORING_RULE_KINDS = [
@@ -161,5 +182,83 @@ export const gameEvents = pgTable(
   (t) => [
     primaryKey({ columns: [t.gameId, t.eventId] }),
     check("game_events_status_check", oneOf(t.status, GAME_EVENT_STATUSES)),
+  ],
+);
+
+/**
+ * DM 3.4: what can be picked. The one ID the game layer uses for a driver or a
+ * constructor, in picks, prices and score lines.
+ */
+export const poolAssets = pgTable(
+  "pool_assets",
+  {
+    id: uuid("id").primaryKey(),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    assetType: text("asset_type", { enum: POOL_ASSET_TYPES }).notNull(),
+    driverId: uuid("driver_id").references(() => drivers.id, {
+      onDelete: "restrict",
+    }),
+    constructorId: uuid("constructor_id").references(() => constructors.id, {
+      onDelete: "restrict",
+    }),
+    /** `withdrawn` can't be bought, but owners keep it and its penalties. */
+    status: text("status", { enum: POOL_ASSET_STATUSES }).notNull(),
+    /** When it became pickable. */
+    addedFromEventId: uuid("added_from_event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    withdrawnFromEventId: uuid("withdrawn_from_event_id").references(
+      () => events.id,
+      { onDelete: "restrict" },
+    ),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique("pool_assets_game_id_driver_id_unique").on(t.gameId, t.driverId),
+    unique("pool_assets_game_id_constructor_id_unique").on(
+      t.gameId,
+      t.constructorId,
+    ),
+    check("pool_assets_asset_type_check", oneOf(t.assetType, POOL_ASSET_TYPES)),
+    check("pool_assets_status_check", oneOf(t.status, POOL_ASSET_STATUSES)),
+    // Exactly one of the two ids, the one the type names.
+    check(
+      "pool_assets_one_subject_check",
+      sql`(${t.assetType} = 'driver' and ${t.driverId} is not null and ${t.constructorId} is null)
+        or (${t.assetType} = 'constructor' and ${t.constructorId} is not null and ${t.driverId} is null)`,
+    ),
+  ],
+);
+
+/**
+ * DM 3.5: one price per asset per event, frozen once the event locks (trigger).
+ * `run_id` comes in M4, with `price_update_runs`.
+ */
+export const assetPrices = pgTable(
+  "asset_prices",
+  {
+    assetId: uuid("asset_id")
+      .notNull()
+      .references(() => poolAssets.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    /** Units of $0.1M. */
+    price: integer("price").notNull(),
+    source: text("source", { enum: PRICE_SOURCES }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.assetId, t.eventId] }),
+    check(
+      "asset_prices_price_check",
+      sql`${t.price} between ${sql.raw(String(PRICE_MIN))} and ${sql.raw(String(PRICE_MAX))}`,
+    ),
+    check("asset_prices_source_check", oneOf(t.source, PRICE_SOURCES)),
+    index("asset_prices_event_id_idx").on(t.eventId),
   ],
 );

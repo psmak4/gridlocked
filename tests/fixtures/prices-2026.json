@@ -1,0 +1,41 @@
+{
+  "note": "Our own starting prices for the 2026 pool, in units of $0.1M (not the official game's). Banded by 2025 championship position and kept within 30-340. Drivers with no 2025 season (rookies, returners) take the lowest bands; Tsunoda has no seat in round 1 and is here for when he is added. Constructors follow the 2025 order, with the new team (Cadillac) lowest. Keys are Jolpica driver and constructor ids.",
+  "drivers": {
+    "norris": 280,
+    "max_verstappen": 270,
+    "piastri": 250,
+    "russell": 220,
+    "leclerc": 200,
+    "hamilton": 180,
+    "antonelli": 160,
+    "albon": 135,
+    "sainz": 120,
+    "alonso": 110,
+    "hulkenberg": 95,
+    "hadjar": 85,
+    "bearman": 80,
+    "lawson": 72,
+    "ocon": 66,
+    "stroll": 60,
+    "tsunoda": 56,
+    "gasly": 52,
+    "bortoleto": 48,
+    "colapinto": 44,
+    "perez": 40,
+    "bottas": 36,
+    "arvid_lindblad": 32
+  },
+  "constructors": {
+    "mclaren": 300,
+    "mercedes": 270,
+    "red_bull": 240,
+    "ferrari": 220,
+    "williams": 170,
+    "rb": 130,
+    "aston_martin": 110,
+    "haas": 90,
+    "audi": 70,
+    "alpine": 60,
+    "cadillac": 40
+  }
+}

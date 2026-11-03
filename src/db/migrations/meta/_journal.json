@@ -85,6 +85,20 @@
       "when": 1793679255138,
       "tag": "0011_game_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793679997197,
+      "tag": "0012_fresh_magus",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793679999077,
+      "tag": "0013_game_rules_2",
+      "breakpoints": true
     }
   ]
 }
