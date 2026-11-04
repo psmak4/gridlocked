@@ -66,7 +66,7 @@ interface ConstructorScored extends Scored {
 
 interface Context {
   knockout: SessionInput["knockout"];
-  /** How many cars started: the grid slot of a pit-lane start. */
+  /** How many result rows there are (DNS and withdrawn included): the grid slot of a pit-lane start. */
   rowCount: number;
 }
 
@@ -163,8 +163,10 @@ function knockoutStage(
   rows: ResultFact[],
   context: Context,
 ): Scored {
+  // Only a classified driver reaches a stage; a disqualified one keeping a
+  // position does not.
   const reached = (from: number) =>
-    rows.filter((r) => r.position !== null && r.position <= from).length;
+    rows.filter((r) => (classifiedPosition(r) ?? Infinity) <= from).length;
   const q3 = reached(context.knockout.q3From);
   const q2 = reached(context.knockout.q2From);
   const [tier, points] =
@@ -257,7 +259,20 @@ export function scoreSession(input: SessionInput): AssetLine[] {
     rowCount: input.results.length,
   };
 
-  const rowByDriver = new Map(input.results.map((r) => [r.driverId, r]));
+  const rowByDriver = new Map<string, ResultFact>();
+  for (const row of input.results) {
+    if (rowByDriver.has(row.driverId)) {
+      throw new Error(`driver "${row.driverId}" is in the results twice`);
+    }
+    rowByDriver.set(row.driverId, row);
+  }
+  const assetIds = new Set<string>();
+  for (const entry of input.pool) {
+    if (assetIds.has(entry.assetId)) {
+      throw new Error(`asset "${entry.assetId}" is in the pool twice`);
+    }
+    assetIds.add(entry.assetId);
+  }
   const rowsByConstructor = new Map<string, ResultFact[]>();
   for (const row of input.results) {
     const rows = rowsByConstructor.get(row.constructorId) ?? [];
@@ -268,7 +283,9 @@ export function scoreSession(input: SessionInput): AssetLine[] {
   const lines: { sortOrder: number; line: AssetLine }[] = [];
   for (const entry of input.pool) {
     if (entry.assetType === "driver") {
-      if (entry.driverId === null) continue;
+      if (entry.driverId === null) {
+        throw new Error(`driver asset "${entry.assetId}" has no driver id`);
+      }
       const row = rowByDriver.get(entry.driverId) ?? null;
       for (const rule of driverRules) {
         const scored = scoreDriverRule(rule, row, context);
@@ -277,7 +294,11 @@ export function scoreSession(input: SessionInput): AssetLine[] {
         }
       }
     } else {
-      if (entry.constructorId === null) continue;
+      if (entry.constructorId === null) {
+        throw new Error(
+          `constructor asset "${entry.assetId}" has no constructor id`,
+        );
+      }
       const rows = rowsByConstructor.get(entry.constructorId) ?? [];
       for (const rule of constructorRules) {
         for (const scored of scoreConstructorRule(

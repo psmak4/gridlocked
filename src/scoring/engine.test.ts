@@ -156,14 +156,45 @@ describe("qualifying", () => {
   });
 
   it("a Q3 driver with no Q3 time still counts as reaching Q3", () => {
-    // The engine reads the position only, so a Q3 driver who set no time
-    // (their Q3 was a crash) is still in Q3.
+    // The engine never reads Q3 times (ResultFact has none), so position
+    // alone decides: a Q3 driver who set no time is still in Q3.
     const lines = score(
       "qualifying",
       [row("a", "team", { position: 9 }), row("b", "team", { position: 4 })],
       [poolConstructor("team")],
     ).filter((l) => l.ruleCode === "qualifying.knockout");
     expect(brief(lines)).toEqual([["team", "qualifying.knockout", null, 10]]);
+  });
+
+  it("a disqualified qualifier with a position doesn't reach Q3", () => {
+    const lines = score(
+      "qualifying",
+      [
+        row("a", "team", { position: 3, classification: "disqualified" }),
+        row("b", "team", { position: 5 }),
+      ],
+      [poolConstructor("team")],
+    ).filter((l) => l.ruleCode === "qualifying.knockout");
+    expect(brief(lines)).toEqual([["team", "qualifying.knockout", null, 5]]);
+    expect(lines[0]?.detail).toEqual({ tier: "oneQ3" });
+  });
+
+  it("a constructor with one qualifying driver row scores on that driver", () => {
+    const lines = score(
+      "qualifying",
+      [row("a", "team", { position: 5 })],
+      [poolConstructor("team")],
+    ).filter((l) => l.ruleCode === "qualifying.knockout");
+    expect(brief(lines)).toEqual([["team", "qualifying.knockout", null, 5]]);
+  });
+
+  it("a constructor with no qualifying rows has no knockout line", () => {
+    const lines = score(
+      "qualifying",
+      [row("a", "other", { position: 5 })],
+      [poolConstructor("team")],
+    );
+    expect(lines).toEqual([]);
   });
 
   it("a qualifying DSQ costs the constructor -5 twice", () => {
@@ -443,5 +474,64 @@ describe("the lines returned", () => {
       [poolDriver("a")],
     );
     expect(brief(lines)).toEqual([["a", "qualifying.position", null, 10]]);
+  });
+});
+
+describe("bad input is refused", () => {
+  it("a driver asset without a driver id is refused", () => {
+    expect(() =>
+      score(
+        "race",
+        [],
+        [
+          {
+            assetId: "ghost",
+            assetType: "driver",
+            driverId: null,
+            constructorId: null,
+          },
+        ],
+      ),
+    ).toThrow(/driver asset "ghost"/);
+  });
+
+  it("a constructor asset without a constructor id is refused", () => {
+    expect(() =>
+      score(
+        "race",
+        [],
+        [
+          {
+            assetId: "ghost",
+            assetType: "constructor",
+            driverId: null,
+            constructorId: null,
+          },
+        ],
+      ),
+    ).toThrow(/constructor asset "ghost"/);
+  });
+
+  it("a driver twice in the results is refused", () => {
+    expect(() =>
+      score(
+        "race",
+        [
+          row("a", "t1", { grid: 1, position: 1 }),
+          row("a", "t1", { grid: 1, position: 2 }),
+        ],
+        [poolDriver("a")],
+      ),
+    ).toThrow(/driver "a" .* twice/);
+  });
+
+  it("an asset twice in the pool is refused", () => {
+    expect(() =>
+      score(
+        "race",
+        [row("a", "t1", { grid: 2, position: 1 })],
+        [poolDriver("a"), poolDriver("a")],
+      ),
+    ).toThrow(/asset "a" .* twice/);
   });
 });

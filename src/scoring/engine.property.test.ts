@@ -59,7 +59,8 @@ function randomSession(random: Random): SessionInput {
     driverId,
     // Two to a team, with the odd substitute driving for another team.
     constructorId: `c${random() < 0.1 ? Math.floor(random() * teams) : Math.floor(i / 2)}`,
-    // A few unclassified rows keep a position, which must not score.
+    // A few unclassified rows keep a position, which must not score, nor
+    // count towards a constructor's knockout stage.
     position:
       positionOf.get(i) ??
       (random() < 0.3 ? 1 + Math.floor(random() * count) : null),
