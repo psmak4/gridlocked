@@ -5,7 +5,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * The job kinds of the ingestion pipeline. Threads add theirs in M7.
  * `game_lock` and `game_open` are the game layer's (handlers in
  * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
- * pipeline's (handlers in `src/game/score-jobs.ts`). `normalize` and `validate`
+ * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
+ * daily checks (handler in `src/game/corrections.ts`). `normalize` and `validate`
  * are reserved: the poll and finalize jobs run both steps inline, so nothing
  * enqueues them yet.
  *
@@ -24,6 +25,7 @@ export const JOB_KINDS = [
   "game_open",
   "score_session",
   "game_finalize",
+  "game_checks",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -135,7 +137,9 @@ export type GameOpenPayload = z.infer<typeof gameOpenPayload>;
 /**
  * One step of a scoring run (DM 4.8). The first job is `assets`, with no
  * `runId`: it starts the run. `teams` then runs a batch after `afterTeamId`,
- * and `standings` closes the run. `trigger` says why the run started.
+ * and `standings` closes the run. `trigger` says why the run started. `force`,
+ * on an `assets` job, starts the run even with the current run's inputs: a
+ * re-score an admin approved.
  */
 export const scoreSessionPayload = z.object({
   gameId: z.string().min(1),
@@ -144,6 +148,7 @@ export const scoreSessionPayload = z.object({
   runId: z.string().min(1).optional(),
   step: z.enum(["assets", "teams", "standings"]),
   afterTeamId: z.string().min(1).optional(),
+  force: z.boolean().optional(),
 });
 export type ScoreSessionPayload = z.infer<typeof scoreSessionPayload>;
 
@@ -161,9 +166,14 @@ export const gameFinalizePayload = z.object({
 });
 export type GameFinalizePayload = z.infer<typeof gameFinalizePayload>;
 
+/** One game's daily checks (DM 4.8). */
+export const gameChecksPayload = z.object({ gameId: z.string().min(1) });
+export type GameChecksPayload = z.infer<typeof gameChecksPayload>;
+
 /**
  * The first job of a run. `stamp` says what changed: `v<resultsVersion>` for
- * the results hooks, `x:<auditId>` for an exception change.
+ * the results hooks, `x:<auditId>` for an exception change, `c:<auditId>` for a
+ * correction version and `r:<auditId>` for an approved re-score.
  */
 export const scoreKey = (gameId: string, sessionId: string, stamp: string) =>
   `score:${gameId}:${sessionId}:${stamp}`;
@@ -173,6 +183,9 @@ export const scoreStepKey = (
   step: "teams" | "standings",
   afterTeamId?: string,
 ) => `score:${runId}:${step}:${afterTeamId ?? "start"}`;
+/** One game's checks for the UTC day `day` (YYYY-MM-DD). */
+export const gameChecksKey = (gameId: string, day: string) =>
+  `game_checks:${gameId}:${day}`;
 export const gameFinalizeKey = (gameId: string, eventId: string) =>
   `game_finalize:${gameId}:${eventId}`;
 /**

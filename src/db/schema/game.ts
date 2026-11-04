@@ -124,6 +124,11 @@ export const rulesetVersions = pgTable(
     effectiveFromEventId: uuid("effective_from_event_id")
       .notNull()
       .references(() => events.id, { onDelete: "restrict" }),
+    /**
+     * A correction (DM 4.9): it applies only to the past events re-pointed to
+     * it, so planning never gives it to another event.
+     */
+    isCorrection: boolean("is_correction").notNull().default(false),
     params: jsonb("params").notNull(),
     /** What changed and why. Shown on the public rules page. */
     notes: text("notes").notNull(),
@@ -192,7 +197,7 @@ export const gameEvents = pgTable(
      */
     sequence: integer("sequence"),
     status: text("status", { enum: GAME_EVENT_STATUSES }).notNull(),
-    /** The version in force for this event. */
+    /** The version in force for this event. Frozen at lock, but for a correction. */
     rulesetVersionId: uuid("ruleset_version_id")
       .notNull()
       .references(() => rulesetVersions.id, { onDelete: "restrict" }),

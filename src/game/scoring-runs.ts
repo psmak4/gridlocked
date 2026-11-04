@@ -6,7 +6,9 @@ import {
   getTableColumns,
   gt,
   inArray,
+  isNotNull,
   lt,
+  or,
   sql,
 } from "drizzle-orm";
 import { z } from "zod";
@@ -27,6 +29,7 @@ import {
   sessions,
   teamAdjustmentLines,
   teamEventStates,
+  teamEventTotals,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
@@ -41,6 +44,7 @@ import { scoringRuleSchema, type ScoringRule } from "@/scoring/rules";
 import {
   effectiveLineup,
   teamAdjustments,
+  type AdjustmentLine,
   type AssetSessionPoints,
   type TeamEventInput,
   type TeamPick,
@@ -89,7 +93,7 @@ const changeSchema = z.object({
   after: z.number().int(),
   change: z.number().int(),
 });
-type Change = z.infer<typeof changeSchema>;
+export type Change = z.infer<typeof changeSchema>;
 
 /**
  * A run's `diff_summary`. `assets` is every asset whose session points
@@ -211,14 +215,25 @@ export async function writeAssetLines(
   now: Date,
   runId: string,
 ): Promise<"written" | "superseded"> {
+  return (await assetStep(db, now, runId)).status;
+}
+
+/** `writeAssetLines`, which also hands back the lines it scored, if it did. */
+async function assetStep(
+  db: Db,
+  now: Date,
+  runId: string,
+): Promise<{ status: "written" | "superseded"; lines?: AssetLine[] }> {
   return db.transaction(async (tx) => {
     const run = await loadRun(tx, runId);
     await lockLedger(tx, run);
-    if (await isSuperseded(tx, run)) return supersede(tx, now, run.id);
+    if (await isSuperseded(tx, run)) {
+      return { status: await supersede(tx, now, run.id) };
+    }
     if (run.status !== "running") {
       throw new Error(`writeAssetLines: run ${runId} is ${run.status}`);
     }
-    if (run.inputs !== null) return "written";
+    if (run.inputs !== null) return { status: "written" };
 
     const session = await loadSession(tx, run.gameId, run.sessionId);
     const read = await readInputs(
@@ -255,16 +270,13 @@ export async function writeAssetLines(
           )
       ).map((row) => [row.assetId, row.points]),
     );
-    const after = new Map<string, number>();
-    for (const line of lines) {
-      after.set(line.assetId, (after.get(line.assetId) ?? 0) + line.points);
-    }
+    const after = assetTotals(lines);
     const assets = [...new Set([...before.keys(), ...after.keys()])]
       .sort(byText)
       .map((assetId) => ({
         assetId,
         before: before.get(assetId) ?? 0,
-        after: after.get(assetId) ?? 0,
+        after: after.get(assetId)?.total ?? 0,
       }))
       .filter((a) => a.before !== a.after);
     const diff: DiffSummary = {
@@ -291,7 +303,7 @@ export async function writeAssetLines(
     };
     if (run.mode === "dry_run") {
       await tx.update(scoringRuns).set(done).where(eq(scoringRuns.id, run.id));
-      return "written";
+      return { status: "written", lines };
     }
     await tx
       .delete(assetScoreLines)
@@ -317,7 +329,7 @@ export async function writeAssetLines(
       .update(scoringRuns)
       .set({ ...done, isCurrent: true })
       .where(eq(scoringRuns.id, run.id));
-    return "written";
+    return { status: "written", lines };
   });
 }
 
@@ -386,24 +398,7 @@ export async function writeTeamAdjustments(
     if (batch.length === 0) return { done: !more, lastTeamId };
 
     const ledger = await eventLedger(tx, gameId, eventId);
-    const versionIds = batch.flatMap((s) =>
-      s.finalFixVersionId === null
-        ? [s.lockedVersionId]
-        : [s.lockedVersionId, s.finalFixVersionId],
-    );
-    const picks = await versionPicks(tx, versionIds, ledger.assetTypes);
-    const finalFixFrom = new Map(
-      (
-        await tx
-          .select({
-            id: lineupVersions.id,
-            fromSessionId: lineupVersions.effectiveFromSessionId,
-          })
-          .from(lineupVersions)
-          .where(inArray(lineupVersions.id, versionIds))
-      ).map((v) => [v.id, v.fromSessionId]),
-    );
-    const chips = await playedChips(tx, { eventId, teamIds });
+    const inputs = await teamInputs(tx, ledger, eventId, batch);
     const oldPoints = new Map<string, number>();
     for (const line of await tx
       .select({
@@ -431,34 +426,7 @@ export async function writeTeamAdjustments(
     const rows: (typeof teamAdjustmentLines.$inferInsert)[] = [];
     const changes: Change[] = [];
     for (const state of batch) {
-      const chip = chips.get(state.teamId);
-      if (state.chipPlayId !== (chip?.id ?? null)) {
-        throw new Error(
-          `writeTeamAdjustments: team ${state.teamId}'s lock record names chip play ${state.chipPlayId}, but its played chip is ${chip?.id ?? "none"}`,
-        );
-      }
-      const finalFix =
-        state.finalFixVersionId === null
-          ? null
-          : {
-              picks: picks.get(state.finalFixVersionId) ?? [],
-              fromSessionId: lateCallFrom(
-                finalFixFrom,
-                state.finalFixVersionId,
-              ),
-            };
-      const input: TeamEventInput = {
-        sessions: ledger.sessions,
-        assetPoints: ledger.assetPoints,
-        locked: picks.get(state.lockedVersionId) ?? [],
-        finalFix,
-        chip:
-          chip && chip.effect !== null
-            ? { effect: chip.effect, targetAssetId: chip.targetAssetId }
-            : null,
-        transferPenalty: state.transferPenalty,
-        prices: ledger.prices,
-      };
+      const input = inputs.get(state.teamId)!;
       const lines = teamAdjustments(input);
       for (const line of lines) {
         rows.push({
@@ -475,17 +443,10 @@ export async function writeTeamAdjustments(
         });
       }
 
-      // The team's event points: its base over the scored sessions plus its
-      // adjustments. Before this run, the scored session's assets had their
-      // previous totals and the team its previous lines.
+      // Before this run, the scored session's assets had their previous
+      // totals and the team its previous lines.
       const adjusted = lines.reduce((sum, l) => sum + l.points, 0);
-      let after = adjusted;
-      for (const { sessionId } of ledger.sessions) {
-        for (const pick of effectiveLineup(input, sessionId)) {
-          after +=
-            ledger.assetPoints.get(sessionId)?.get(pick.assetId)?.total ?? 0;
-        }
-      }
+      const after = teamEventPoints(input, lines);
       const change =
         effectiveLineup(input, run.sessionId).reduce(
           (sum, pick) => sum + (assetChange.get(pick.assetId) ?? 0),
@@ -497,13 +458,7 @@ export async function writeTeamAdjustments(
         change !== 0 &&
         (countedThrough === null || state.teamId > countedThrough)
       ) {
-        changes.push({
-          kind: "team",
-          id: state.teamId,
-          before: after - change,
-          after,
-          change,
-        });
+        changes.push(teamChange(state.teamId, after - change, after));
       }
     }
 
@@ -535,6 +490,153 @@ export async function writeTeamAdjustments(
       .where(eq(scoringRuns.id, run.id));
     return { done: !more, lastTeamId };
   });
+}
+
+/**
+ * A dry run's scoring of one event (DM 4.9), for runs `startRun` began for its
+ * sessions. Nothing here writes a line or a total: each run gets its inputs and
+ * diff summary and finishes.
+ *
+ * Each session is scored as `writeAssetLines` scores it, and the lines are kept
+ * in memory. Then every team with a lock record, in batches, is worked out
+ * through the code a live run uses, once per session in order: the sessions
+ * before it as re-scored and those after it as they stand, which is what a
+ * re-score would have written by that session. A team's first `before` is its
+ * stored `team_event_totals.points` (0 with no row), so a team changes where
+ * the stored total disagrees, and each session's changes run on from the
+ * last, adding up to the event's whole change. A run's `teamsChanged` and
+ * `biggest` count what its session changes.
+ *
+ * Returns every asset and team that changed and the biggest changes, or
+ * `superseded` if a newer dry run took over, which stops this one there.
+ */
+export async function dryRunEvent(
+  db: Db,
+  now: Date,
+  input: {
+    gameId: string;
+    eventId: string;
+    runs: { runId: string; sessionId: string }[];
+    batchSize?: number;
+  },
+): Promise<
+  { assets: Set<string>; teams: Set<string>; biggest: Change[] } | "superseded"
+> {
+  const { gameId, eventId, runs, batchSize = BATCH } = input;
+  const rescored = new Map<
+    string,
+    { runId: string; points: Map<string, AssetSessionPoints> }
+  >();
+  for (const { runId, sessionId } of runs) {
+    const { status, lines } = await assetStep(db, now, runId);
+    if (status === "superseded") return status;
+    if (!lines) throw new Error(`dryRunEvent: run ${runId} has already scored`);
+    rescored.set(sessionId, { runId, points: assetTotals(lines) });
+  }
+
+  const ledger = await eventLedger(db, gameId, eventId, [...rescored.keys()]);
+  const seen = new Set(
+    ledger.sessions.filter((s) => s.current).map((s) => s.sessionId),
+  );
+  const assetPoints = new Map(ledger.assetPoints);
+  const steps = ledger.sessions.flatMap(({ sessionId }) => {
+    const session = rescored.get(sessionId);
+    if (!session) return [];
+    seen.add(sessionId);
+    assetPoints.set(sessionId, session.points);
+    return {
+      runId: session.runId,
+      sessions: ledger.sessions.filter((s) => seen.has(s.sessionId)),
+      assetPoints: new Map(assetPoints),
+      teamsChanged: 0,
+      biggest: [] as Change[],
+    };
+  });
+
+  const teams = new Set<string>();
+  let afterTeamId: string | null = null;
+  for (;;) {
+    const batch: (typeof teamEventStates.$inferSelect)[] = await db
+      .select()
+      .from(teamEventStates)
+      .where(
+        and(
+          eq(teamEventStates.gameId, gameId),
+          eq(teamEventStates.eventId, eventId),
+          afterTeamId === null
+            ? undefined
+            : gt(teamEventStates.teamId, afterTeamId),
+        ),
+      )
+      .orderBy(asc(teamEventStates.teamId))
+      .limit(batchSize);
+    if (batch.length === 0) break;
+    const inputs = await teamInputs(db, ledger, eventId, batch);
+    const stored = new Map(
+      (
+        await db
+          .select({
+            teamId: teamEventTotals.teamId,
+            points: teamEventTotals.points,
+          })
+          .from(teamEventTotals)
+          .where(
+            and(
+              eq(teamEventTotals.eventId, eventId),
+              inArray(
+                teamEventTotals.teamId,
+                batch.map((s) => s.teamId),
+              ),
+            ),
+          )
+      ).map((row) => [row.teamId, row.points]),
+    );
+    for (const { teamId } of batch) {
+      let before = stored.get(teamId) ?? 0;
+      for (const step of steps) {
+        const team = {
+          ...inputs.get(teamId)!,
+          sessions: step.sessions,
+          assetPoints: step.assetPoints,
+        };
+        const after = teamEventPoints(team, teamAdjustments(team));
+        if (after !== before) {
+          teams.add(teamId);
+          step.teamsChanged += 1;
+          step.biggest = biggestOf([
+            ...step.biggest,
+            teamChange(teamId, before, after),
+          ]);
+        }
+        before = after;
+      }
+    }
+    afterTeamId = batch.at(-1)!.teamId;
+  }
+
+  const assets = new Set<string>();
+  let biggest: Change[] = [];
+  for (const step of steps) {
+    const { diffSummary } = await loadRun(db, step.runId);
+    const diff = diffSchema.parse(diffSummary);
+    const merged = biggestOf([...diff.biggest, ...step.biggest]);
+    await db
+      .update(scoringRuns)
+      .set({
+        diffSummary: {
+          ...diff,
+          teamsChanged: step.teamsChanged,
+          biggest: merged,
+        },
+      })
+      .where(eq(scoringRuns.id, step.runId));
+    if ((await finishRun(db, now, step.runId)) === "superseded") {
+      return "superseded";
+    }
+    for (const { assetId } of diff.assets) assets.add(assetId);
+    biggest = biggestOf([...biggest, ...merged]);
+  }
+  return { assets, teams, biggest };
 }
 
 /**
@@ -855,17 +957,24 @@ async function supersede(
 
 /**
  * What every team of the event shares: the event's scored sessions (those
- * with a current run) in order, their asset totals, the pool's asset types
- * and the event's prices.
+ * with a current run, and any of `alsoSessionIds`, a dry run's: `current` says
+ * which is which) in order, their asset totals, the pool's asset types and the
+ * event's prices.
  */
-async function eventLedger(db: Db, gameId: string, eventId: string) {
+async function eventLedger(
+  db: Db,
+  gameId: string,
+  eventId: string,
+  alsoSessionIds: string[] = [],
+) {
   const scored = await db
     .select({
       sessionId: sessions.id,
       kind: sessions.kind,
+      runId: scoringRuns.id,
     })
     .from(sessions)
-    .innerJoin(
+    .leftJoin(
       scoringRuns,
       and(
         eq(scoringRuns.sessionId, sessions.id),
@@ -873,16 +982,26 @@ async function eventLedger(db: Db, gameId: string, eventId: string) {
         eq(scoringRuns.isCurrent, true),
       ),
     )
-    .where(eq(sessions.eventId, eventId))
+    .where(
+      and(
+        eq(sessions.eventId, eventId),
+        or(
+          isNotNull(scoringRuns.id),
+          alsoSessionIds.length === 0
+            ? undefined
+            : inArray(sessions.id, alsoSessionIds),
+        ),
+      ),
+    )
     // The order team_base_lines places a Late Call by.
     .orderBy(asc(sessions.scheduledStart), asc(sessions.id));
-  const ordered = scored.map(({ sessionId, kind }, order) => {
+  const ordered = scored.map(({ sessionId, kind, runId }, order) => {
     if (!isScoredKind(kind)) {
       throw new Error(
         `scoring: session ${sessionId} is ${kind}, which never scores`,
       );
     }
-    return { sessionId, kind, order };
+    return { sessionId, kind, order, current: runId !== null };
   });
 
   const assetPoints = new Map<string, Map<string, AssetSessionPoints>>();
@@ -917,6 +1036,107 @@ async function eventLedger(db: Db, gameId: string, eventId: string) {
   );
   const prices = await priceList(db, { gameId, eventId });
   return { sessions: ordered, assetPoints, assetTypes, prices };
+}
+
+type EventLedger = Awaited<ReturnType<typeof eventLedger>>;
+
+/**
+ * Each team's `teamAdjustments` input, by team id, from its lock record: the
+ * locked and Late Call versions, the chip played and the transfer penalty, over
+ * the ledger's sessions, points and prices.
+ */
+async function teamInputs(
+  db: Db,
+  ledger: EventLedger,
+  eventId: string,
+  states: (typeof teamEventStates.$inferSelect)[],
+): Promise<Map<string, TeamEventInput>> {
+  const versionIds = states.flatMap((s) =>
+    s.finalFixVersionId === null
+      ? [s.lockedVersionId]
+      : [s.lockedVersionId, s.finalFixVersionId],
+  );
+  const picks = await versionPicks(db, versionIds, ledger.assetTypes);
+  const finalFixFrom = new Map(
+    (
+      await db
+        .select({
+          id: lineupVersions.id,
+          fromSessionId: lineupVersions.effectiveFromSessionId,
+        })
+        .from(lineupVersions)
+        .where(inArray(lineupVersions.id, versionIds))
+    ).map((v) => [v.id, v.fromSessionId]),
+  );
+  const chips = await playedChips(db, {
+    eventId,
+    teamIds: states.map((s) => s.teamId),
+  });
+  const inputs = new Map<string, TeamEventInput>();
+  for (const state of states) {
+    const chip = chips.get(state.teamId);
+    if (state.chipPlayId !== (chip?.id ?? null)) {
+      throw new Error(
+        `scoring: team ${state.teamId}'s lock record names chip play ${state.chipPlayId}, but its played chip is ${chip?.id ?? "none"}`,
+      );
+    }
+    inputs.set(state.teamId, {
+      sessions: ledger.sessions,
+      assetPoints: ledger.assetPoints,
+      locked: picks.get(state.lockedVersionId) ?? [],
+      finalFix:
+        state.finalFixVersionId === null
+          ? null
+          : {
+              picks: picks.get(state.finalFixVersionId) ?? [],
+              fromSessionId: lateCallFrom(
+                finalFixFrom,
+                state.finalFixVersionId,
+              ),
+            },
+      chip:
+        chip && chip.effect !== null
+          ? { effect: chip.effect, targetAssetId: chip.targetAssetId }
+          : null,
+      transferPenalty: state.transferPenalty,
+      prices: ledger.prices,
+    });
+  }
+  return inputs;
+}
+
+/** A team's event points: its base over the scored sessions plus its lines. */
+function teamEventPoints(
+  input: TeamEventInput,
+  lines: AdjustmentLine[],
+): number {
+  let points = lines.reduce((sum, l) => sum + l.points, 0);
+  for (const { sessionId } of input.sessions) {
+    for (const pick of effectiveLineup(input, sessionId)) {
+      points += input.assetPoints.get(sessionId)?.get(pick.assetId)?.total ?? 0;
+    }
+  }
+  return points;
+}
+
+const teamChange = (id: string, before: number, after: number): Change => ({
+  kind: "team",
+  id,
+  before,
+  after,
+  change: after - before,
+});
+
+/** Lines totalled as `asset_session_totals` totals them. */
+function assetTotals(lines: AssetLine[]): Map<string, AssetSessionPoints> {
+  const totals = new Map<string, AssetSessionPoints>();
+  for (const { assetId, category, points } of lines) {
+    const asset = totals.get(assetId) ?? { total: 0, byCategory: {} };
+    asset.total += points;
+    asset.byCategory[category] = (asset.byCategory[category] ?? 0) + points;
+    totals.set(assetId, asset);
+  }
+  return totals;
 }
 
 /** The picks of each version, by version id, in asset id order. */
@@ -963,7 +1183,7 @@ function lineRow(
 }
 
 /** The biggest changes first, then assets before teams, then by id. */
-function biggestOf(changes: Change[]): Change[] {
+export function biggestOf(changes: Change[]): Change[] {
   return [...changes]
     .sort(
       (a, b) =>

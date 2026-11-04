@@ -56,6 +56,51 @@ const isFinalizable = (status: string) =>
   (FINALIZABLE as readonly string[]).includes(status);
 
 /**
+ * The sessions `enqueueScoring` accepts for a game (with `eventIds`, only of
+ * those events), by event sequence and then in session order: the game is
+ * `running`, its game event `locked`, `scored` or `final`, and the session is
+ * one the engine scores, not cancelled, with `provisional` or `final` results.
+ */
+export async function scoredSessions(
+  db: Db,
+  gameId: string,
+  eventIds?: string[],
+): Promise<{ sessionId: string; eventId: string }[]> {
+  return db
+    .select({ sessionId: sessions.id, eventId: sessions.eventId })
+    .from(sessions)
+    .innerJoin(
+      sessionResultState,
+      eq(sessionResultState.sessionId, sessions.id),
+    )
+    .innerJoin(
+      gameEvents,
+      and(
+        eq(gameEvents.eventId, sessions.eventId),
+        eq(gameEvents.gameId, gameId),
+      ),
+    )
+    .innerJoin(games, eq(games.id, gameEvents.gameId))
+    .where(
+      and(
+        eq(games.status, "running"),
+        inArray(gameEvents.status, [...LOCKED_OR_LATER]),
+        ne(sessions.status, "cancelled"),
+        inArray(sessions.kind, [...SCORED_KINDS]),
+        inArray(sessionResultState.status, [...SCORABLE_RESULTS]),
+        eventIds === undefined
+          ? undefined
+          : inArray(sessions.eventId, eventIds),
+      ),
+    )
+    .orderBy(
+      asc(gameEvents.sequence),
+      asc(sessions.scheduledStart),
+      asc(sessions.id),
+    );
+}
+
+/**
  * Queues scoring of a session, one job per `running` game whose game event for
  * the session's event is `locked`, `scored` or `final` (or only for `gameId`,
  * given an exception, which belongs to one game), and returns how many it
@@ -64,10 +109,12 @@ const isFinalizable = (status: string) =>
  * under review waits: resolving it moves no status, and the next `finalize_check`
  * or revalidate does, which calls this again.
  *
- * `stamp` is `v<resultsVersion>` from the results hooks and `x:<auditId>` from
- * an exception change. It is in the job's key, so calling this again for the
- * same change queues nothing. Call it with the transaction of the change when
- * there is one.
+ * `stamp` is `v<resultsVersion>` from the results hooks, `x:<auditId>` from an
+ * exception change, `c:<auditId>` from a correction version and `r:<auditId>`
+ * from an approved re-score. It is in the job's key, so calling this again for
+ * the same change queues nothing. Call it with the transaction of the change
+ * when there is one. `force` runs the session even with the current run's
+ * inputs.
  */
 export async function enqueueScoring(
   db: Db,
@@ -77,9 +124,10 @@ export async function enqueueScoring(
     stamp: string;
     trigger: Trigger;
     gameId?: string;
+    force?: boolean;
   },
 ): Promise<number> {
-  const { sessionId, stamp, trigger, gameId } = input;
+  const { sessionId, stamp, trigger, gameId, force } = input;
   const [session] = await db
     .select({
       kind: sessions.kind,
@@ -119,6 +167,7 @@ export async function enqueueScoring(
       sessionId,
       trigger,
       step: "assets",
+      force,
     };
     const { created } = await enqueue(db, {
       kind: "score_session",
@@ -356,7 +405,8 @@ async function isRunning(db: Db, runId: string): Promise<boolean> {
  * `score_session` runs one step of a run, and the next step is a job of its
  * own, keyed by the run:
  * - **`assets`** starts the run (a skip, the same inputs as the current run,
- *   ends the chain with nothing else run) and writes the asset lines.
+ *   ends the chain with nothing else run, unless the job is forced) and writes
+ *   the asset lines.
  * - **`teams`** writes one batch, then queues the next batch or `standings`.
  *   Totals wait for `standings`: the ledger lock doesn't span a run, so they
  *   are only right after the last batch.
@@ -424,6 +474,7 @@ export function createScoreHandlers(
           sessionId,
           trigger,
           mode: "live",
+          force: payload.force,
         });
         if (!("runId" in started)) return;
         runId = started.runId;

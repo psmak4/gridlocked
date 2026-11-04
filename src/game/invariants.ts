@@ -77,6 +77,7 @@ export async function checkGameInvariants(
       status: gameEvents.status,
       rulesetVersionId: gameEvents.rulesetVersionId,
       params: rulesetVersions.params,
+      isCorrection: rulesetVersions.isCorrection,
       round: events.round,
       lockAt: events.lockAt,
     })
@@ -88,11 +89,41 @@ export async function checkGameInvariants(
     )
     .where(eq(gameEvents.gameId, gameId))
     .orderBy(asc(events.lockAt), asc(events.round));
+  // An event re-pointed to a correction (DM 4.9) was locked under the version
+  // its lock records kept, so that is the one they are checked against.
+  const allVersions = new Map(
+    (
+      await db
+        .select({ id: rulesetVersions.id, params: rulesetVersions.params })
+        .from(rulesetVersions)
+        .where(eq(rulesetVersions.gameId, gameId))
+    ).map((v) => [v.id, v.params]),
+  );
+  const lockedUnder = new Map(
+    (
+      await db
+        .selectDistinct({
+          eventId: teamEventStates.eventId,
+          versionId: teamEventStates.rulesetVersionId,
+        })
+        .from(teamEventStates)
+        .where(eq(teamEventStates.gameId, gameId))
+    ).map((row) => [row.eventId, row.versionId]),
+  );
   const eventOf = new Map(
-    calendar.map((e) => [
-      e.eventId,
-      { ...e, rules: rulesetParamsSchema.parse(e.params) },
-    ]),
+    calendar.map((e) => {
+      const rulesetVersionId =
+        (e.isCorrection ? lockedUnder.get(e.eventId) : undefined) ??
+        e.rulesetVersionId;
+      return [
+        e.eventId,
+        {
+          ...e,
+          rulesetVersionId,
+          rules: rulesetParamsSchema.parse(allVersions.get(rulesetVersionId)),
+        },
+      ];
+    }),
   );
   const bySequence = new Map(
     [...eventOf.values()]

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { asc, eq, ne } from "drizzle-orm";
+import { asc, eq, ne, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedWorldWithSeats } from "../../tests/helpers/ingest-2026";
 import { seedSeats2026 } from "../../tests/helpers/seats-2026";
@@ -15,6 +15,7 @@ import {
   eventEntries,
   events,
   gameEvents,
+  games,
   jobs,
   rawSnapshots,
   seasons,
@@ -113,6 +114,91 @@ describe("the sync_calendar handler", () => {
     m.puts.length = 0;
     await enqueueCalendarSync(t.db, T0, 2026, m.store);
     expect(m.puts).toHaveLength(0);
+  });
+
+  describe("the daily game checks", () => {
+    /** A game for 2026, in the status given. */
+    async function aGame(status: "setup" | "running") {
+      await importFixtures2026(t.db, T0);
+      const [season] = await t.db
+        .select()
+        .from(seasons)
+        .where(eq(seasons.year, 2026));
+      const { gameId } = await createGame(t.db, T0, {
+        seasonId: season!.id,
+        slug: "2026-fantasy",
+        name: "2026 Fantasy",
+        params: RULESET_2026,
+        rules: SCORING_RULES_2026,
+        notes: "The 2026 rules.",
+      });
+      await t.db.update(games).set({ status }).where(eq(games.id, gameId));
+      return gameId;
+    }
+    const checks = async () =>
+      (await allJobs(t.db)).filter((j) => j.kind === "game_checks");
+    const nextSync = async () =>
+      (await allJobs(t.db)).filter(
+        (j) => j.dedupeKey === "sync_calendar:2026:2026-02-02",
+      );
+
+    it("queues one for each running game, due now", async () => {
+      const gameId = await aGame("running");
+      expect(await syncAt(T0)).toEqual({ ran: 1, failed: 0, lost: 0 });
+      expect(await checks()).toMatchObject([
+        {
+          dedupeKey: `game_checks:${gameId}:2026-02-01`,
+          runAt: T0,
+          payload: { gameId },
+          status: "pending",
+        },
+      ]);
+      expect(await nextSync()).toHaveLength(1);
+    });
+
+    it("queues none for a game that isn't running", async () => {
+      await aGame("setup");
+      await syncAt(T0);
+      expect(await checks()).toEqual([]);
+    });
+
+    it("a failing check leaves the calendar chain alone", async () => {
+      const gameId = await aGame("running");
+      await syncAt(T0);
+      const failing = {
+        ...pipeline.handlers,
+        game_checks: () => Promise.reject(new Error("a check broke")),
+      };
+      expect(
+        await runDue(t.db, clock, failing, { maxJobs: 1, leaseMs: 5 * MIN }),
+      ).toEqual({ ran: 0, failed: 1, lost: 0 });
+      expect(await checks()).toMatchObject([
+        { dedupeKey: `game_checks:${gameId}:2026-02-01`, status: "failed" },
+      ]);
+      expect(await nextSync()).toMatchObject([{ status: "pending" }]);
+    });
+
+    it("the next day's sync is queued even if queueing a check fails", async () => {
+      await aGame("running");
+      await t.db.execute(sql`
+        create function refuse_checks() returns trigger language plpgsql as $$
+        begin
+          raise exception 'no checks today';
+        end;
+        $$
+      `);
+      await t.db.execute(sql`
+        create trigger refuse_checks before insert on jobs
+        for each row when (new.kind = 'game_checks')
+        execute function refuse_checks()
+      `);
+      expect(await syncAt(T0)).toEqual({ ran: 0, failed: 1, lost: 0 });
+      expect(await nextSync()).toMatchObject([{ status: "pending" }]);
+    });
+
+    it("the handler is wired into the pipeline", () => {
+      expect(pipeline.handlers).toHaveProperty("game_checks");
+    });
   });
 
   it("from nothing: syncs the calendar, drivers and constructors, and plans every event", async () => {
