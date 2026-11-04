@@ -35,7 +35,7 @@ describe("the ruleset parameters (DM 3.2)", () => {
 
   it("prices.min above prices.max is refused", () => {
     const params = structuredClone(RULESET_2026);
-    params.prices = { min: 341, max: 340 };
+    params.prices = { ...params.prices, min: 341, max: 340 };
     expect(rulesetParamsSchema.safeParse(params).success).toBe(false);
   });
 });

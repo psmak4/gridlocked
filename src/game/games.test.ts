@@ -8,9 +8,11 @@ import {
   jobs,
   reviewItems,
   rulesetVersions,
+  scoringRules,
 } from "@/db/schema";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
+import { SCORING_RULES_2026 } from "@/scoring/rules";
 import { createGame, planGameEvents } from "./games";
 import { planGameJobs } from "./jobs";
 import { RULESET_2026 } from "./ruleset";
@@ -40,6 +42,7 @@ describe("the game calendar (DM 3.3)", () => {
     slug: "2026-fantasy",
     name: "2026 Fantasy",
     params: RULESET_2026,
+    rules: SCORING_RULES_2026,
     notes: "The 2026 rules.",
   });
 
@@ -92,6 +95,45 @@ describe("the game calendar (DM 3.3)", () => {
       notes: "The 2026 rules.",
     });
     expect(version!.publishedAt).toEqual(NOW);
+  });
+
+  it("createGame stores the 2026 rules with version 1", async () => {
+    const { rulesetVersionId } = await createGame(t.db, NOW, input());
+    const rows = await t.db
+      .select()
+      .from(scoringRules)
+      .orderBy(asc(scoringRules.sessionKind), asc(scoringRules.sortOrder));
+    expect(rows).toHaveLength(SCORING_RULES_2026.length);
+    expect(rows.every((r) => r.rulesetVersionId === rulesetVersionId)).toBe(
+      true,
+    );
+    const [version] = await t.db.select().from(rulesetVersions);
+    expect(version!.version).toBe(1);
+    expect(version!.id).toBe(rulesetVersionId);
+    const stored = rows.map(
+      ({ code, sessionKind, target, kind, category, params, sortOrder }) => ({
+        code,
+        sessionKind,
+        target,
+        kind,
+        category,
+        params,
+        sortOrder,
+      }),
+    );
+    const byCode = (a: { code: string }, b: { code: string }) =>
+      a.code.localeCompare(b.code);
+    expect(stored.sort(byCode)).toEqual([...SCORING_RULES_2026].sort(byCode));
+  });
+
+  it("createGame refuses a rule the schema refuses", async () => {
+    const bad = SCORING_RULES_2026.map((r) =>
+      r.code === "race.position" ? { ...r, params: { points: "x" } } : r,
+    );
+    await expect(
+      createGame(t.db, NOW, { ...input(), rules: bad as never }),
+    ).rejects.toThrow();
+    expect(await t.db.select().from(rulesetVersions)).toEqual([]);
   });
 
   it("a second game for the same season and type is refused", async () => {

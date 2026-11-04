@@ -22,6 +22,7 @@ import {
 } from "@/db/schema";
 import { createGame } from "@/game/games";
 import { RULESET_2026 } from "@/game/ruleset";
+import { SCORING_RULES_2026 } from "@/scoring/rules";
 import { simulatedClock } from "@/lib/clock";
 import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
 import { DUE_KEY } from "./due-times";
@@ -261,6 +262,7 @@ describe("the sync_calendar handler", () => {
       slug: "2026-fantasy",
       name: "2026 Fantasy",
       params: RULESET_2026,
+      rules: SCORING_RULES_2026,
       notes: "The 2026 rules.",
     });
     const gameJobs = async () =>
@@ -295,6 +297,7 @@ describe("the sync_calendar handler", () => {
       slug: "2026-fantasy",
       name: "2026 Fantasy",
       params: RULESET_2026,
+      rules: SCORING_RULES_2026,
       notes: "The 2026 rules.",
     });
     const { event } = await eventOfRound(t.db, 5);

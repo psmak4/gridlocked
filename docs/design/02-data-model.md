@@ -691,8 +691,9 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 
 - **Window:** `openCutoffHours` 24 and `recheckHours` 6. An event's transfer window opens once the previous event is complete, or this many hours before this event's lock, whichever comes first; until then the job that opens it looks again every `recheckHours`.
 - **Knockout cut-offs:** `knockout` `q2From` 16 and `q3From` 10, for qualifying and sprint qualifying (HLD §5.6).
-- **Prices:** `prices` `min` 30 and `max` 340 ($3M–$34M). The formula's constants (3.5) join them in M4.
+- **Prices:** `prices` `min` 30 and `max` 340 ($3M–$34M), and `prices.formula`, the constants of the price formula (3.5): `window` 3 events, `pointsPerMillion` for drivers and for constructors (1.0 each), `bandSplit` 185 (an asset priced at or above it is expensive), `thresholds` `poor` 0.6, `good` 1.0 and `great` 1.5 (they must rise), and `changes` for `expensive` and `cheap` assets, each four changes in $0.1M for the tiers terrible, poor, good and great (expensive -3, -1, 1, 3; cheap -6, -2, 2, 6). These 2026 values are starting values: the replay calibrates them before launch.
 - **Abandoned sessions:** `abandonedSessions` is `score_as_classified` (3.9).
+- **Autopilot:** `autopilot` `tiebreak` is `original_then_price`. When drivers tie for the highest event points, the original Boost choice stays if it is among them, otherwise the higher-priced driver gets it (4.3).
 
 The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at every level, and the 2026 values are `RULESET_2026` there.
 
@@ -709,7 +710,30 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | params | jsonb (Zod-validated per `kind`) | e.g. the points table, a cap of -10 on sprint positions lost, which classifications a penalty applies to |
 | sort_order | integer | Order on the score explanation |
 
-- **The 2026 `scoring_rules` rows come in M4** (the scoring engine). M3 has the table, its `kind` CHECK and the freeze below.
+- **The 2026 rows are `SCORING_RULES_2026`** in `src/scoring/rules.ts`, and `createGame` inserts them under the game's first ruleset version. `scoringRuleSchema` checks each rule: the params are strict for the rule's `kind`, and `knockout_stage`, `per_driver_penalty` and `aggregate_drivers` need `target` `constructor`. Only `sprint_qualifying`, `sprint`, `qualifying` and `race` score. `sort_order` runs 10, 20, 30… within a session. In the table below, *NC* is `not_classified`, `did_not_start` and `excluded` (qualifying adds `did_not_qualify`), and *DSQ* is `disqualified`:
+
+  | Code | Target | Kind | Category | Params |
+  |---|---|---|---|---|
+  | `qualifying.position` | driver | `position_table` | `qualifying_position` | 10, 9, … 1 |
+  | `qualifying.not_classified` | driver | `classification_penalty` | `qualifying_penalty` | -5 for NC and DSQ; also with no Q1 time; also for a pool driver with no result row |
+  | `qualifying.drivers` | constructor | `aggregate_drivers` | `qualifying_drivers` | The sum of its drivers' points from this session's driver rules |
+  | `qualifying.knockout` | constructor | `knockout_stage` | `qualifying_knockout` | Neither driver in Q2 -1; one in Q2 +1; both +3; one in Q3 +5; both +10. Only the highest tier scores |
+  | `qualifying.disqualified` | constructor | `per_driver_penalty` | `qualifying_penalty` | -5 per DSQ driver |
+  | `sprint.positions` | driver | `positions_delta` | `sprint_positions` | +1 per place gained, lost places capped at -10 |
+  | `sprint.fastest_lap` | driver | `flag_bonus` | `sprint_fastest_lap` | +5 |
+  | `sprint.position` | driver | `position_table` | `sprint_position` | 8, 7, … 1 |
+  | `sprint.not_classified` | driver | `classification_penalty` | `sprint_penalty` | -10 for NC and DSQ; also for a pool driver with no result row |
+  | `sprint.drivers` | constructor | `aggregate_drivers` | `sprint_drivers` | The sum of its drivers' points from this session's driver rules |
+  | `sprint.disqualified` | constructor | `per_driver_penalty` | `sprint_penalty` | -10 per DSQ driver |
+  | `race.positions` | driver | `positions_delta` | `race_positions` | +1 per place gained or lost, no cap |
+  | `race.fastest_lap` | driver | `flag_bonus` | `race_fastest_lap` | +10 |
+  | `race.position` | driver | `position_table` | `race_position` | 25, 18, 15, 12, 10, 8, 6, 4, 2, 1 |
+  | `race.not_classified` | driver | `classification_penalty` | `race_penalty` | -20 for NC and DSQ; also for a pool driver with no result row |
+  | `race.drivers` | constructor | `aggregate_drivers` | `race_drivers` | The sum of its drivers' points from this session's driver rules |
+  | `race.disqualified` | constructor | `per_driver_penalty` | `race_penalty` | -20 per DSQ driver |
+
+  - **`positions_delta`:** the starting grid against the classification; a pit-lane start counts as last on the grid (the number of result rows in the session). Classified rows only. `flag_bonus` also needs a classified row. A position table past its end scores 0, and no table is longer than 10: nothing hard-codes 22 cars.
+  - **`knockout_stage`:** a driver reached Q2 at a position of `knockout.q2From` or better, and Q3 at `q3From` or better, never by whether a time exists (HLD §5.6).- M3 added the table, its `kind` CHECK and the freeze below.
 - **A version is frozen once used.** A trigger refuses updates and deletes of a version, and every write to its rules, once any `game_events` row using it is `locked`, `scored` or `final`. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
 - **Rule changes are mostly config.** "Sprint DNF penalty reduced to -10" (an official 2026 change, per the FAQ) is a new version with a different param. Only a genuinely new `kind` of calculation needs code.
 
@@ -759,11 +783,11 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 - **A cancelled event's prices stay fixed** (`game_rules_8`): nothing is changed, removed or added there, since the next event carries them (3.9).
 - **Fixed when the window opens, by trigger** (decision 1: prices are never applied after a saved team was checked against them). Once an event's game event is `open`, no price for it can be changed or removed. A price can still be added for an asset that has none there, such as a substitute added to the pool for the open event, until it is `locked`, `scored` or `final`; from then nothing can be added either. So admin corrections and the price update go in while the event is `upcoming`, and carrying runs before it opens (the open job carries, then opens). `publishPrices` refuses an open event before writing anything.
 - **Admin prices:** a staff price for an event needs a reason and is audited. A mid-season substitute (3.4) gets its `admin` price for its first event in the same transaction, without marking the rest of the list as published.
-- **The formula is M4's.** `formula` rows come from the price job; M3 has `initial`, `admin` and `carried`.
+- **The formula's rows come from the price job** (M4); M3 has `initial`, `admin` and `carried`.
 
 **`price_update_runs`:** `id`, `game_id`, `after_event_id`, `ruleset_version_id`, `inputs` (jsonb: each asset's last-3 average and tier), `ran_at`, `ran_by` (job or admin). Our published formula can then be shown working for every change.
 
-**Formula shape (constants in ruleset params; calibrated on the 2026 replay before launch):**
+**Formula shape (constants in `prices.formula`, 3.2; calibrated on the 2026 replay before launch):**
 1. Average our fantasy points for the asset over its last 3 events. Use fewer at the season start or for a newly added asset.
 2. Compare that with the points its price "should" earn: `price_in_$M × points_per_million`. This baseline is separate for drivers and constructors.
 3. The ratio falls into a tier (e.g. terrible, poor, good, great), and each tier maps to a change scaled by price band. For example, a great week might be +$0.3M for an expensive asset and +$0.6M for a cheap one.
