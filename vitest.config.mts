@@ -8,6 +8,7 @@ const dbTests = [
   "src/audit/**/*.test.{ts,tsx}",
   "src/staff/**/*.test.{ts,tsx}",
   "src/jobs/**/*.test.{ts,tsx}",
+  "src/leagues/**/*.test.{ts,tsx}",
   "src/settings/**/*.test.{ts,tsx}",
   "src/reference/**/*.test.{ts,tsx}",
   "src/results/**/*.test.{ts,tsx}",

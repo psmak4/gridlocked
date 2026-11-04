@@ -3,6 +3,7 @@ import {
   events,
   gameEvents,
   games,
+  leagues,
   rulesetVersions,
   scoringRules,
   teamEventStates,
@@ -28,8 +29,9 @@ const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
  * Creates a `season_fantasy` game in `setup` for a season, with ruleset
  * version 1 effective from the season's first non-cancelled event (by lock
  * time), then plans its events. `params` and each of `rules` (stored with
- * version 1) are checked against their schemas first. A second game for the
- * same season and type is refused by the database.
+ * version 1) are checked against their schemas first. The game also gets its
+ * `global` league. A second game for the same season and type is refused by
+ * the database.
  */
 export async function createGame(
   db: Db,
@@ -69,6 +71,18 @@ export async function createGame(
       slug: input.slug,
       name: input.name,
       status: "setup",
+      createdAt: now,
+      updatedAt: now,
+    });
+    // The game's one global league (DM 4.5): every active team is in it by
+    // definition, so it has no membership rows.
+    await tx.insert(leagues).values({
+      id: newId(),
+      gameId,
+      kind: "global",
+      name: "Global",
+      slug: "global",
+      status: "active",
       createdAt: now,
       updatedAt: now,
     });

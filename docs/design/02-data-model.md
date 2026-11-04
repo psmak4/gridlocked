@@ -1135,6 +1135,12 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 - **Auto leagues are keyed by constructor ID, not name,** so a rebrand doesn't split a league (1.7).
 - **A mini-league range uses event sequences, not rounds,** which survive renumbering (1.3, 3.3).
 
+**Built (M4)** in `src/db/schema/leagues.ts`, with `createLeague` and `syncAutoLeagues` in `src/leagues/leagues.ts`.
+- **`createGame` makes the game's `global` league** in the same transaction (name "Global", slug `global`). A partial unique index allows one per game. It has no code, owner, limit or range of its own, and no members.
+- **`CHECK`s:** the `auto_*` kind has exactly its own key, and the other kinds have none; only `public` and `private` leagues have an owner, a code, a limit and a range other than the whole season; a user league's name is 1 to 40 characters; `start_sequence` is at least 1 and `end_sequence` is not before it; `max_members` is at least 1. `slug` is unique per game, and `owner_user_id` is a plain uuid until M5 adds `users`.
+- **`createLeague`** makes a `public` or `private` league and returns `{ leagueId, joinCode }`. **Both kinds get a code,** so a public league can be shared too; only the code joins a league (there is no browsing here). The code is 10 characters of `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I, L, O, 0 or 1) from `crypto.getRandomValues`, with bytes that would skew the pick thrown away. The slug is the name plus a random suffix, **not** part of the code, so a private league's code can't be read off its URL. A collision on the code or slug is retried (up to 5 times). A bad name is `bad_name`.
+- **`syncAutoLeagues`** takes a user, a game and the profile's constructor ID, driver ID and country code. For each key that isn't null it finds the game's league for the key or creates it ("Ferrari fans", slug `constructor-ferrari`), and moves every **active** team of the user in that game in. A team leaves the auto leagues of the same kind that don't match, and a null key means none of that kind. Memberships are `auto`, stamped with the `now` it was given. It is idempotent, and one user's syncs take turns (an advisory lock). A team created later is moved in by running it again.
+
 ### 4.6 `league_memberships`
 | Column | Type | Notes |
 |---|---|---|
@@ -1150,6 +1156,13 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 - **A league ranks its members' totals over the league's range, regardless of when they joined.** That's how the official mini-leagues work: only the selected races count.
 - **The global league has no membership rows.** Every active team is in it by definition, and its ranks are `team_event_totals.global_rank`. That saves 250k rows per game.
 
+**Built (M4)**, with `joinLeague` and `leaveLeague` in `src/leagues/leagues.ts` and the rules in the `league_rules` migration.
+- **The cap is per team, not per user:** 50 current `user` memberships for one team (this one counted), as the index on `(team_id) WHERE left_at IS NULL` suggests. A user with 3 teams can have 150 memberships in all. Auto memberships don't count. The trigger takes a lock per team, so two joins at once can't both take the 50th place. It raises **GL008**, which the game layer maps to `league_cap`.
+- **The same trigger checks** that the team belongs to the league's game, that the league isn't the `global` one, and that the source fits the kind (`user` for a public or private league, `auto` for an auto one). These are plain check violations; `joinLeague` finds a code from another game's league as `league_not_found` first.
+- **`joinLeague({ joinCode, teamId, userId })`** (the code in any case, trimmed) refuses with, in this order: `team_not_owned` (the team isn't `userId`'s, or doesn't exist), `team_retired` (a retired team holds no place in a league, so it can't join), `league_not_found` (no active public or private league has that code, or it's another game's; auto and global leagues have no code, so they can't be joined by hand), `already_member` (a current membership; the unique index says the same to anything that skips the check), `league_full` (current members whose team is active at `max_members`: a retired member holds no seat) and `league_cap`. The league row is locked while it joins, so a limit holds under concurrent joins.
+- **`leaveLeague({ leagueId, teamId, userId })`** sets `left_at`. A league that isn't public or private (auto leagues follow the profile) or one the team isn't in is `league_not_found`; a team that isn't `userId`'s is `team_not_owned`. Rejoining is a new row.
+- **Deleting a team** that never locked (`removeTeam`) deletes its memberships and standings with it (`ON DELETE CASCADE`). A retired team keeps both.
+
 ### 4.7 `league_standings` (current table for each league; replaced after each scoring run)
 | Column | Type | Notes |
 |---|---|---|
@@ -1164,6 +1177,15 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 - **Only the current table is stored.** Rank history for one team in one league is computed on demand from `team_event_totals`. That's cheap for one league, and saves storing every league's table for every event.
 - **Retired teams** (3.6) stop scoring and are dropped from league tables. Their past `team_event_totals` stay.
 - **Index:** `(league_id, rank)` for paged tables, including a 100k-team public league.
+
+**Built (M4)** as `recomputeStandings(db, now, { gameId, eventId })` (`src/leagues/standings.ts`), in set-based SQL: one statement for all the leagues, in one transaction (with a lock on the game's standings, so two rebuilds take turns). It returns `{ leagues }`: the leagues rebuilt.
+- **Which leagues:** every `active` league of the game except `global` whose range (`start_sequence` to `end_sequence`, null for no end) includes the sequence of `eventId`. Another league's table isn't touched. The table runs through the latest event in the range that has totals (`through_event_id`); a league with none is emptied.
+- **Who is in it:** current members (`left_at` null) whose team is `active`. A team that left, or retired, has no row. A team with no totals in the range has none either, until its first event is scored.
+- **`points`** is the sum of the member team's `team_event_totals.points` for the events in the range, whenever it joined: a member who joined late ranks on the whole range.
+- **`first_reached_sequence`** is the earliest sequence in the range at which the team's running total **over the range** was at least its total now, so a league starting at event 5 ignores what the team scored before it. **`rank`** is `rank()` over the league by points descending, then that, so a full tie shares a rank and the next one skips.
+- **`previous_rank`** is the team's rank in the table this one replaces, when that table ran through a different event. A rebuild through the same event (a correction, or a run again) keeps the `previous_rank` the row had, so the arrow shows the move since the last event. A team that wasn't in the old table has none.
+- **`status`** is `final` once the through event is `final`, otherwise `provisional`.
+- **Paging:** both `ORDER BY rank LIMIT n OFFSET m` and `rank > last ORDER BY rank LIMIT n` read `(league_id, rank)` with no sort (checked with `EXPLAIN`). For a deep page prefer the second.
 
 ### 4.8 What happens after results change (the scoring pipeline)
 Each step is a job (2.10) keyed by the run ID, so a re-run is safe and a superseded run stops early:
@@ -1184,7 +1206,7 @@ Each step is a job (2.10) keyed by the run ID, so a re-run is safe and a superse
 - `team_adjustment_lines (game_id, event_id)` and `(team_id, event_id)`: batch recompute and one team's explanation.
 - `team_event_totals (game_id, event_id, global_rank)` and `(team_id, event_sequence)`.
 - `league_memberships (team_id) WHERE left_at IS NULL`: "my leagues" and the 50-league cap.
-- `league_memberships (league_id) WHERE left_at IS NULL`: standings.
+- `league_memberships (league_id) WHERE left_at IS NULL`: standings. Served by the leading column of the partial unique key (4.6), so there's no separate index.
 - `league_standings (league_id, rank)`.
 - `scoring_runs (game_id, session_id) WHERE is_current`: the partial unique index of 4.1.
 
