@@ -17,6 +17,7 @@ export const CHIP_EFFECTS = [
   "limitless",
   "final_fix",
 ] as const;
+export type ChipEffect = (typeof CHIP_EFFECTS)[number];
 /** What happens to an abandoned session that has a classification (DM 3.9). */
 export const ABANDONED_SESSION_POLICIES = ["score_as_classified"] as const;
 /** How Strategist's Autopilot breaks a tie between the best-scoring picks. */
