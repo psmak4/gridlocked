@@ -26,8 +26,9 @@ import {
   scoreSession,
   type AssetLine,
   type PoolEntry,
+  type SessionInput,
 } from "@/scoring/engine";
-import { scoringRuleSchema } from "@/scoring/rules";
+import { scoringRuleSchema, type ScoringRule } from "@/scoring/rules";
 import {
   effectiveLineup,
   teamAdjustments,
@@ -106,10 +107,14 @@ type DiffSummary = z.infer<typeof diffSchema>;
  * Starts a run for a session of a game, and returns its id. It reads the
  * inputs (the session's effective results and exception, the game event's
  * ruleset version with its rules and knockout, the pool at the event, and
- * `ENGINE_VERSION`) and fingerprints them. A `live` run whose fingerprint is
- * the current run's is skipped, writing nothing, unless `force` (a re-score
- * an admin asked for). The new run is `running`; the newest started is the
- * one with the highest id.
+ * `ENGINE_VERSION`) and fingerprints them (`inputFingerprint`). A `live` run
+ * is skipped, writing nothing, when its fingerprint is the current run's, that
+ * run has `succeeded`, and no newer live run is still `running` (one that may
+ * yet write what it read); `force` (a re-score an admin asked for) never
+ * skips. The check and the insert hold the event's ledger lock, so a
+ * `writeAssetLines` in flight commits first and the check sees what it made
+ * current. The new run is `running`; the newest started is the one with the
+ * highest id.
  *
  * Throws for a session the engine doesn't score (only qualifying, sprint and
  * race do), and for one whose event the game hasn't locked.
@@ -126,28 +131,42 @@ export async function startRun(
   },
 ): Promise<{ runId: string } | { skipped: true }> {
   const { gameId, sessionId, trigger, mode } = input;
-  const session = await loadSession(db, gameId, sessionId);
-  const read = await readInputs(db, gameId, session, session.rulesetVersionId);
-  if (mode === "live" && !input.force) {
-    const current = await currentRun(db, gameId, sessionId);
-    if (current?.inputFingerprint === read.fingerprint) {
-      return { skipped: true };
+  return db.transaction(async (tx) => {
+    const session = await loadSession(tx, gameId, sessionId);
+    await lockLedger(tx, { gameId, eventId: session.eventId });
+    const read = await readInputs(
+      tx,
+      gameId,
+      session,
+      session.rulesetVersionId,
+    );
+    if (mode === "live" && !input.force) {
+      const current = await currentRun(tx, gameId, sessionId);
+      if (
+        current?.inputFingerprint === read.fingerprint &&
+        current.status === "succeeded" &&
+        !(await isSuperseded(tx, { ...current, gameId, sessionId, mode }, [
+          "running",
+        ]))
+      ) {
+        return { skipped: true };
+      }
     }
-  }
-  const runId = newId();
-  await db.insert(scoringRuns).values({
-    id: runId,
-    gameId,
-    sessionId,
-    rulesetVersionId: session.rulesetVersionId,
-    engineVersion: ENGINE_VERSION,
-    inputFingerprint: read.fingerprint,
-    trigger,
-    mode,
-    status: "running",
-    startedAt: now,
+    const runId = newId();
+    await tx.insert(scoringRuns).values({
+      id: runId,
+      gameId,
+      sessionId,
+      rulesetVersionId: session.rulesetVersionId,
+      engineVersion: ENGINE_VERSION,
+      inputFingerprint: read.fingerprint,
+      trigger,
+      mode,
+      status: "running",
+      startedAt: now,
+    });
+    return { runId };
   });
-  return { runId };
 }
 
 /**
@@ -157,8 +176,9 @@ export async function startRun(
  * session's lines and inserts the new set (none for a `skip` exception), and
  * makes the run current. The diff summary's assets part is computed here,
  * against the lines it replaces. A dry run writes its inputs and diff but no
- * lines, and never becomes current. Run again after it has written, it
- * returns `written` and changes nothing.
+ * lines, and never becomes current. Run again after it has written, while
+ * the run is still `running`, it returns `written` and changes nothing; once
+ * the run has finished it throws.
  */
 export async function writeAssetLines(
   db: Db,
@@ -396,7 +416,10 @@ export async function writeTeamAdjustments(
           ? null
           : {
               picks: picks.get(state.finalFixVersionId) ?? [],
-              fromSessionId: finalFixFrom.get(state.finalFixVersionId)!,
+              fromSessionId: lateCallFrom(
+                finalFixFrom,
+                state.finalFixVersionId,
+              ),
             };
       const input: TeamEventInput = {
         sessions: ledger.sessions,
@@ -561,12 +584,7 @@ async function loadSession(db: Db, gameId: string, sessionId: string) {
 const isScoredKind = (kind: string): kind is ScoredKind =>
   (SCORED_KINDS as readonly string[]).includes(kind);
 
-/**
- * Everything a run reads, and its fingerprint: SHA-256 of the canonical JSON
- * of the inputs, the rules, the knockout params, the pool, the ruleset
- * version and `ENGINE_VERSION`. Every list is sorted by its own key first, so
- * the order rows come back in can't change it.
- */
+/** Everything a run reads, and its fingerprint (`inputFingerprint`). */
 async function readInputs(
   db: Db,
   gameId: string,
@@ -635,26 +653,64 @@ async function readInputs(
   ).sort((a, b) => byText(a.assetId, b.assetId));
 
   const inputs: RunInputs = { results, exception: exception ?? null };
-  const fingerprint = createHash("sha256")
+  const fingerprint = inputFingerprint({
+    rulesetVersionId,
+    sessionKind: session.kind,
+    knockout,
+    rules,
+    pool,
+    inputs,
+  });
+  return { inputs, rules, knockout, pool, fingerprint };
+}
+
+/**
+ * A run's `input_fingerprint`: SHA-256 of the canonical JSON of what it read
+ * and `ENGINE_VERSION`. The results, rules and pool are sorted by driver id,
+ * code and asset id, and every object's keys at every depth, so neither the
+ * order rows come back in nor the order of their keys can change it. Every
+ * column read is in it, so a change to one the engine ignores re-scores too,
+ * with an empty diff.
+ */
+export function inputFingerprint(read: {
+  rulesetVersionId: string;
+  sessionKind: string;
+  knockout: SessionInput["knockout"];
+  rules: ScoringRule[];
+  pool: PoolEntry[];
+  inputs: RunInputs;
+}): string {
+  const { inputs } = read;
+  return createHash("sha256")
     .update(
       canonicalJson({
         engineVersion: ENGINE_VERSION,
-        rulesetVersionId,
-        sessionKind: session.kind,
-        knockout,
-        rules,
-        pool,
-        inputs,
+        ...read,
+        rules: [...read.rules].sort((a, b) => byText(a.code, b.code)),
+        pool: [...read.pool].sort((a, b) => byText(a.assetId, b.assetId)),
+        inputs: {
+          ...inputs,
+          results: [...inputs.results].sort((a, b) =>
+            byText(a.driverId, b.driverId),
+          ),
+        },
       }),
     )
     .digest("hex");
-  return {
-    inputs,
-    rules,
-    knockout,
-    pool,
-    fingerprint,
-  };
+}
+
+/** A Late Call version's race session, which a `final_fix` version must have. */
+function lateCallFrom(
+  fromSessions: Map<string, string | null>,
+  versionId: string,
+): string {
+  const from = fromSessions.get(versionId);
+  if (from === undefined || from === null) {
+    throw new Error(
+      `writeTeamAdjustments: Late Call version ${versionId} has no session it applies from`,
+    );
+  }
+  return from;
 }
 
 /** JSON with every object's keys sorted, at every depth. */
@@ -687,6 +743,7 @@ async function currentRun(db: Db, gameId: string, sessionId: string) {
     .select({
       id: scoringRuns.id,
       inputFingerprint: scoringRuns.inputFingerprint,
+      status: scoringRuns.status,
     })
     .from(scoringRuns)
     .where(
@@ -703,15 +760,22 @@ async function currentRun(db: Db, gameId: string, sessionId: string) {
  * The event's ledger lock, held to the end of the transaction: the asset
  * lines of its sessions and its team lines are written by one step at a time.
  */
-async function lockLedger(db: Db, run: LoadedRun) {
+async function lockLedger(db: Db, run: { gameId: string; eventId: string }) {
   const key = `ledger:${run.gameId}:${run.eventId}`;
   await db.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
   );
 }
 
-/** True when a newer run of the same mode has started for the session. */
-async function isSuperseded(db: Db, run: LoadedRun): Promise<boolean> {
+/**
+ * True when a newer run of the same mode has started for the session (with
+ * `statuses`, only one in those).
+ */
+async function isSuperseded(
+  db: Db,
+  run: Pick<LoadedRun, "id" | "gameId" | "sessionId" | "mode">,
+  statuses?: LoadedRun["status"][],
+): Promise<boolean> {
   const [newer] = await db
     .select({ id: scoringRuns.id })
     .from(scoringRuns)
@@ -721,6 +785,9 @@ async function isSuperseded(db: Db, run: LoadedRun): Promise<boolean> {
         eq(scoringRuns.sessionId, run.sessionId),
         eq(scoringRuns.mode, run.mode),
         gt(scoringRuns.id, run.id),
+        statuses === undefined
+          ? undefined
+          : inArray(scoringRuns.status, statuses),
       ),
     )
     .limit(1);

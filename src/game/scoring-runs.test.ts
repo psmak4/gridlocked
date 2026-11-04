@@ -34,6 +34,7 @@ import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { RULESET_2026 } from "./ruleset";
 import {
   finishRun,
+  inputFingerprint,
   startRun,
   writeAssetLines,
   writeTeamAdjustments,
@@ -366,6 +367,76 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
     await score(race1.id);
     expect(await start(race1.id)).toEqual({ skipped: true });
     expect(await t.db.select().from(scoringRuns)).toHaveLength(1);
+  });
+
+  it("a same-fingerprint start isn't skipped while a newer live run is still running", async () => {
+    await score(race1.id);
+    // Started, with the same inputs, and not yet written: it may still write
+    // what it read, so an identical trigger must not be dropped.
+    const pending = await start(race1.id, { force: true });
+    expect(pending).toHaveProperty("runId");
+    expect(await start(race1.id)).toHaveProperty("runId");
+  });
+
+  it("a same-fingerprint start isn't skipped when the current run never finished", async () => {
+    const started = await start(race1.id);
+    if (!("runId" in started)) throw new Error("skipped");
+    expect(await writeAssetLines(t.db, scoredAt, started.runId)).toBe(
+      "written",
+    );
+    expect(await runOf(started.runId)).toMatchObject({
+      status: "running",
+      isCurrent: true,
+    });
+    expect(await start(race1.id)).toHaveProperty("runId");
+  });
+
+  it("the fingerprint ignores row and key order", async () => {
+    const results = await t.db
+      .select()
+      .from(effectiveResults)
+      .where(eq(effectiveResults.sessionId, race1.id));
+    const pool = (
+      await t.db.select().from(poolAssets).where(eq(poolAssets.gameId, gameId))
+    ).map((a) => ({
+      assetId: a.id,
+      assetType: a.assetType,
+      driverId: a.driverId,
+      constructorId: a.constructorId,
+    }));
+    const of = (input: {
+      results: typeof results;
+      pool: typeof pool;
+      rules: typeof SCORING_RULES_2026;
+    }) =>
+      inputFingerprint({
+        rulesetVersionId: "v1",
+        sessionKind: "race",
+        knockout: RULESET_2026.knockout,
+        rules: input.rules,
+        pool: input.pool,
+        inputs: { results: input.results, exception: null },
+      });
+    /** The same objects with their keys in reverse order. */
+    const reversedKeys = <T extends object>(rows: T[]) =>
+      rows.map((row) => Object.fromEntries(Object.entries(row).reverse()) as T);
+    const fingerprint = of({ results, pool, rules: SCORING_RULES_2026 });
+    expect(fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      of({
+        results: reversedKeys([...results].reverse()),
+        pool: reversedKeys([...pool].reverse()),
+        rules: reversedKeys([...SCORING_RULES_2026].reverse()),
+      }),
+    ).toBe(fingerprint);
+    // A value that changes does change it.
+    expect(
+      of({
+        results: results.map((r, i) => (i === 0 ? { ...r, grid: 99 } : r)),
+        pool,
+        rules: SCORING_RULES_2026,
+      }),
+    ).not.toBe(fingerprint);
   });
 
   it("an override changes the fingerprint and re-scores", async () => {
