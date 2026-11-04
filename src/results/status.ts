@@ -15,8 +15,8 @@ export type SessionResultStatus = (typeof RESULT_STATES)[number];
 /**
  * What `advanceStatus` reports: the status before and after, whether it
  * moved, and the session's `version` after the call. This is the one hook
- * point for whatever must react to a session's results changing (M3/M4 will
- * enqueue scoring from it): `resultsVersion` goes up with every normalization
+ * point for whatever must react to a session's results changing (scoring is
+ * queued from it, `enqueueScoring`): `resultsVersion` goes up with every normalization
  * that wrote rows, every override added or revoked, and every status change,
  * so "the version I last acted on" is a complete record of what has been seen.
  */

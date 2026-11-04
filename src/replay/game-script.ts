@@ -27,12 +27,17 @@
  *   are fixed once it has);
  * - `withdraw`: an asset withdrawn from a round on;
  * - `resultsIn`: a session's results arrive (its result state goes
- *   `provisional`), standing in for the pipeline's poll;
+ *   `provisional`), standing in for the pipeline's poll. It writes no result
+ *   rows, so a later `completeEvent` scores that session from nothing: every
+ *   driver takes the penalty for not being classified, and the formula prices
+ *   the next event from those points. This rules replay accepts that, and only
+ *   this replay does it. A session with no `resultsIn` isn't scored;
  * - `cancelEvent`: the calendar marks the round cancelled, and the game is
  *   planned again, as the calendar sync does;
  * - `completeEvent`: the round's event is `completed`, standing in for the
  *   finalizer (M2's replay proved it), since the import plans no pipeline
- *   jobs.
+ *   jobs. Then it runs `finalizeGameEvent` directly, which makes the game event
+ *   `final` and queues the next open.
  */
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -48,6 +53,7 @@ import { playChip, saveFinalFix } from "@/game/chips";
 import { GameError, type GameErrorCode } from "@/game/errors";
 import { planGameEvents } from "@/game/games";
 import { planGameJobs } from "@/game/jobs";
+import { finalizeGameEvent } from "@/game/score-jobs";
 import { saveLineup } from "@/game/lineups";
 import { withdrawPoolAsset } from "@/game/pool";
 import { publishPrices } from "@/game/prices";
@@ -361,6 +367,10 @@ async function applyOther(
         .update(events)
         .set({ status: "completed", updatedAt: now })
         .where(eq(events.id, run.eventOf(action.round)));
+      await finalizeGameEvent(db, now, {
+        gameId: run.gameId,
+        eventId: run.eventOf(action.round),
+      });
       return;
     }
   }

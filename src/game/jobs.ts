@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import {
+  gameFinalizeSweepKey,
   gameLockAfterKey,
   gameLockKey,
   gameLockPayload,
@@ -18,6 +19,7 @@ import {
   gameOpenPayload,
   gameOpenRecheckKey,
   gameOpenSweepKey,
+  type GameFinalizePayload,
   type GameLockPayload,
   type GameOpenPayload,
 } from "@/jobs/kinds";
@@ -43,13 +45,9 @@ const HOUR_MS = 60 * MINUTE_MS;
 const LOCK_WAIT_MS = 5 * MINUTE_MS;
 
 /** An event in one of these has had its lock record written. */
-const LOCKED_OR_LATER: readonly GameEventStatus[] = [
-  "locked",
-  "scored",
-  "final",
-];
-const isLockedOrLater = (status: GameEventStatus) =>
-  LOCKED_OR_LATER.includes(status);
+export const LOCKED_OR_LATER = ["locked", "scored", "final"] as const;
+export const isLockedOrLater = (status: GameEventStatus) =>
+  (LOCKED_OR_LATER as readonly GameEventStatus[]).includes(status);
 
 /**
  * Writes a game's calendar-driven jobs as `pending` rows with future `run_at`
@@ -67,10 +65,17 @@ const isLockedOrLater = (status: GameEventStatus) =>
  * - `game_open:<game>:<event>:sweep:<yyyy-mm-dd>` likewise, due at `now`, for
  *   an `upcoming` event whose planned open time has passed and that has no
  *   `game_open` job pending, running or waiting to retry. It is an ordinary
- *   open job, so its order and timing checks are the same.
+ *   open job, so its order and timing checks are the same;
+ * - `game_finalize:<game>:<event>:sweep:<yyyy-mm-dd>` likewise, due at `now`,
+ *   for a `locked` or `scored` game event whose event is `completed` and that
+ *   has no `game_finalize` job pending, running or waiting to retry: its job
+ *   died, or it locked after its event completed, so it never had one. It is
+ *   an ordinary finalize job, and a retry of one that committed does nothing.
  *
- * An event that has locked, or been cancelled, gets nothing. Call it whenever
- * the calendar is synced.
+ * An event that is `final`, or cancelled, gets nothing, nor does one that has
+ * locked and whose event isn't `completed`. Call it whenever the calendar is
+ * synced, which the daily `sync_calendar` job does for every game of its
+ * season.
  */
 export async function planGameJobs(
   db: Db,
@@ -82,6 +87,7 @@ export async function planGameJobs(
       eventId: gameEvents.eventId,
       status: gameEvents.status,
       lockAt: events.lockAt,
+      eventStatus: events.status,
     })
     .from(gameEvents)
     .innerJoin(events, eq(events.id, gameEvents.eventId))
@@ -111,6 +117,40 @@ export async function planGameJobs(
 
   await db.transaction(async (tx) => {
     for (const [i, event] of calendar.entries()) {
+      // Finished with no finalize job left alive (the last one died, or it
+      // locked after its event completed): a sweep runs the finalize, once a
+      // day at most.
+      if (
+        (event.status === "locked" || event.status === "scored") &&
+        event.eventStatus === "completed"
+      ) {
+        const [alive] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.kind, "game_finalize"),
+              sql`${jobs.payload}->>'gameId' = ${gameId}`,
+              sql`${jobs.payload}->>'eventId' = ${event.eventId}`,
+              inArray(jobs.status, ["pending", "running", "failed"]),
+            ),
+          )
+          .limit(1);
+        if (!alive) {
+          const day = now.toISOString().slice(0, 10);
+          const payload: GameFinalizePayload = {
+            gameId,
+            eventId: event.eventId,
+            sweep: day,
+          };
+          await enqueue(tx, {
+            kind: "game_finalize",
+            dedupeKey: gameFinalizeSweepKey(gameId, event.eventId, day),
+            runAt: now,
+            payload,
+          });
+        }
+      }
       if (event.status !== "upcoming" && event.status !== "open") continue;
       const lock: GameLockPayload = { gameId, eventId: event.eventId };
       await enqueue(tx, {
@@ -218,7 +258,6 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
       sequence: gameEvents.sequence,
       status: gameEvents.status,
       lockAt: events.lockAt,
-      eventStatus: events.status,
       params: rulesetVersions.params,
     })
     .from(gameEvents)
@@ -252,11 +291,13 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
  *   (its open job is on the way; it looks again every `window.recheckHours`). Otherwise it runs one `lockEvent` batch and
  *   queues `…:after:<lastTeamId>` until the event is locked.
  * - **`game_open`** opens an `upcoming` event once the event before it has
- *   locked, and either that event is `completed` or the event's own lock is
- *   less than the ruleset's `window.openCutoffHours` away (24 in 2026). Prices
- *   are carried for every asset that has none (`carryPrices`), then the event
- *   is `open`, in one transaction. Until then it re-checks every `window.recheckHours` (6)
- *   under `…:<n>`.
+ *   locked, and either that game event is `final`, so its formula prices are
+ *   written, or the event's own lock is less than the ruleset's
+ *   `window.openCutoffHours` away (24 in 2026). Prices are carried for every
+ *   asset that has none (`carryPrices`), then the event is `open`, in one
+ *   transaction. Until then it re-checks every `window.recheckHours` (6) under
+ *   `…:<n>`. `finalizeGameEvent` also queues one as soon as the event before is
+ *   `final`, under `…:final`, so the window needn't wait for a re-check.
  *
  * Every job that puts itself off carries its counter on (`wait`, `attempt`),
  * so a key it enqueues is never one an earlier job of the chain used. A lock
@@ -365,15 +406,15 @@ export function createGameHandlers(
       (row) => row.status === "cancelled" || isLockedOrLater(row.status),
     );
     const due =
-      previous.eventStatus === "completed" ||
+      previous.status === "final" ||
       now.getTime() >= own.lockAt.getTime() - window.openCutoffHours * HOUR_MS;
     if (!locked || !due) return recheck();
 
     await db.transaction(async (tx) => {
       // The prices are the list the lineups are checked against: carried from
       // the last event for every asset with none, even after a full list was
-      // published (M4 publishes the formula's before this runs), since an
-      // owned asset withdrawn since still needs one.
+      // published (`finalizeGameEvent` publishes the formula's before this
+      // runs), since an owned asset withdrawn since still needs one.
       await carryPrices(tx, now, { gameId, eventId });
       await tx
         .update(gameEvents)

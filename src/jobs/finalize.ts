@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { events, reviewItems, sessionResultState, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { enqueueGameFinalize, enqueueScoring } from "@/game/score-jobs";
 import { reconcileWarnings } from "@/reference/review";
 import { advanceStatus } from "@/results/status";
 import { SCORED_KINDS } from "@/results/validate";
@@ -30,16 +31,17 @@ const HELD_WINDOW_MS = 14 * 24 * 3_600_000;
  *
  * `advanceStatus` then runs for each of those sessions that is not final or
  * cancelled, whether or not the re-fetch worked and whether or not anything
- * changed. That is what moves a session whose blocking item an admin resolved
- * (resolving it does not move the status itself) on to `provisional`, so
- * every check, not only the last one, leaves the statuses current before the
- * event is judged.
+ * changed, and each queues scoring (`enqueueScoring`; an unchanged version
+ * queues nothing). That is what moves a session whose blocking item an admin
+ * resolved (resolving it does not move the status itself) on to `provisional`,
+ * and scores it, so every check, not only the last one, leaves the statuses
+ * current before the event is judged.
  *
  * The last planned check (`final` in the payload, the +48 h one) also
  * finalizes the event, if it can: every scored session of the event has to be
  * `provisional` and no blocking review item may be open. Then each becomes
  * `final` (`finalized_at` = now) and the event `completed`, in one
- * transaction.
+ * transaction, which also queues `game_finalize` for each running game.
  *
  * If it cannot, nothing changes and a `finalize_held:<event>` warning says
  * why. The event is not left to wait for the next admin action: a follow-up
@@ -109,7 +111,13 @@ export function createFinalizeHandler(source: ResultsSource): JobHandler {
         if (!(error instanceof ProviderUnavailableError)) throw error;
         unavailable = true;
       }
-      await advanceStatus(db, ctx.clock.now(), id);
+      const now = ctx.clock.now();
+      const advance = await advanceStatus(db, now, id);
+      await enqueueScoring(db, now, {
+        sessionId: id,
+        stamp: `v${advance.resultsVersion}`,
+        trigger: "results",
+      });
     }
 
     if (!final) return;
@@ -251,6 +259,7 @@ async function finalizeEvent(
       .update(events)
       .set({ status: "completed", updatedAt: now })
       .where(eq(events.id, event.id));
+    await enqueueGameFinalize(tx, now, event.id);
     await reconcileWarnings(tx, now, heldKey, []);
     return null;
   });

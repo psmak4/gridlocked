@@ -22,7 +22,7 @@ export class SessionFinalError extends Error {
 /**
  * Locks the session's state row (creating it if the session has none yet),
  * refuses a final session, and bumps `version`: the effective results are
- * about to change, and whatever listens for that (scoring, M3/M4) sees a new
+ * about to change, and whatever listens for that (scoring) sees a new
  * version. Called inside the override's transaction, so a refusal rolls
  * everything back. The status itself is moved by `advanceStatus`, which the
  * caller must run afterwards.

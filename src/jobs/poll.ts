@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { sessionResultState } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { enqueueScoring } from "@/game/score-jobs";
 import { openReviewItem } from "@/reference/review";
 import { advanceStatus, type SessionResultStatus } from "@/results/status";
 import { validateSession } from "@/results/validate";
@@ -16,7 +17,8 @@ const HOUR_MS = 60 * MINUTE_MS;
 
 /**
  * The `poll_session` handler (HLD §4.4): fetch the session's results,
- * normalize them and advance the status. The planned start job is attempt 0.
+ * normalize them, advance the status and queue scoring (`enqueueScoring`, which
+ * only acts on results it can score). The planned start job is attempt 0.
  * While the session is still `awaiting`, the next attempt
  * `poll:<session>:<attempt + 1>` is enqueued at `poll_schedule` backoff
  * `[attempt]` minutes (the last step repeats): +5, +15, then hourly.
@@ -60,7 +62,7 @@ export function createPollHandler(source: ResultsSource): JobHandler {
         fetched.snapshotId,
         fetched.body,
       );
-      status = (await advanceStatus(db, ctx.clock.now(), sessionId)).next;
+      status = await advanceAndScore(db, ctx.clock.now(), sessionId);
     } catch (error) {
       if (!(error instanceof ProviderUnavailableError)) throw error;
       // The state row carries the attempt count and the give-up time.
@@ -107,6 +109,21 @@ export function createPollHandler(source: ResultsSource): JobHandler {
       .set({ nextPollAt: nextAt })
       .where(eq(sessionResultState.sessionId, sessionId));
   };
+}
+
+/** Moves the session's status, queues its scoring and returns the status. */
+async function advanceAndScore(
+  db: Db,
+  now: Date,
+  sessionId: string,
+): Promise<SessionResultStatus> {
+  const advance = await advanceStatus(db, now, sessionId);
+  await enqueueScoring(db, now, {
+    sessionId,
+    stamp: `v${advance.resultsVersion}`,
+    trigger: "results",
+  });
+  return advance.next;
 }
 
 /**
@@ -161,5 +178,5 @@ async function giveUp(db: Db, now: Date, session: SessionInfo): Promise<void> {
       });
     }
   });
-  await advanceStatus(db, now, session.id);
+  await advanceAndScore(db, now, session.id);
 }

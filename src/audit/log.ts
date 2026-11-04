@@ -16,13 +16,15 @@ export interface AuditEntry {
 }
 
 /**
- * Writes one audit row. Call it with the transaction that makes the change,
- * so the change and its record commit together (DM 0.4).
+ * Writes one audit row and returns its id. Call it with the transaction that
+ * makes the change, so the change and its record commit together (DM 0.4).
  */
 export async function writeAudit(
   tx: Db,
   now: Date,
   entry: AuditEntry,
-): Promise<void> {
-  await tx.insert(auditLog).values({ id: newId(), ...entry, createdAt: now });
+): Promise<string> {
+  const id = newId();
+  await tx.insert(auditLog).values({ id, ...entry, createdAt: now });
+  return id;
 }

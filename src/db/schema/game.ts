@@ -43,7 +43,7 @@ import {
 
 export const GAME_TYPES = ["season_fantasy"] as const;
 export const GAME_STATUSES = ["setup", "open", "running", "completed"] as const;
-/** `scored` and `final` are used from M4; M3 moves events through the rest. */
+/** `scored` and `final` are set by the scoring pipeline (`src/game/score-jobs.ts`). */
 export const GAME_EVENT_STATUSES = [
   "upcoming",
   "open",
@@ -210,7 +210,7 @@ export const gameEvents = pgTable(
 /**
  * DM 3.3: a session the game doesn't score as normal, such as an abandoned
  * race the admins void (DM 3.9). One per session per game; setting and
- * clearing it are audited, and trigger a re-score (M4).
+ * clearing it are audited, and queue a re-score (`enqueueScoring`).
  */
 export const gameSessionExceptions = pgTable(
   "game_session_exceptions",
