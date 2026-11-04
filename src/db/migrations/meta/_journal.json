@@ -211,6 +211,13 @@
       "when": 1793759265596,
       "tag": "0029_league_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793760814214,
+      "tag": "0030_dizzy_taskmaster",
+      "breakpoints": true
     }
   ]
 }

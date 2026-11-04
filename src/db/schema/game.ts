@@ -54,7 +54,7 @@ export const GAME_EVENT_STATUSES = [
 ] as const;
 export const POOL_ASSET_TYPES = ["driver", "constructor"] as const;
 export const POOL_ASSET_STATUSES = ["active", "withdrawn"] as const;
-/** `formula` is written by the price update (M4). */
+/** `formula` is written by the price update (`runPriceUpdate`, DM 3.5). */
 export const PRICE_SOURCES = [
   "initial",
   "formula",
@@ -287,8 +287,32 @@ export const poolAssets = pgTable(
 );
 
 /**
+ * DM 3.5: one price update (`runPriceUpdate`): the prices it wrote for the
+ * event after `after_event_id`, and why. `inputs` holds each asset's recent
+ * points, average, ratio and tier, so every change can be shown working.
+ */
+export const priceUpdateRuns = pgTable("price_update_runs", {
+  id: uuid("id").primaryKey(),
+  gameId: uuid("game_id")
+    .notNull()
+    .references(() => games.id, { onDelete: "restrict" }),
+  /** The event whose scores the update read; its prices are for the next one. */
+  afterEventId: uuid("after_event_id")
+    .notNull()
+    .references(() => events.id, { onDelete: "restrict" }),
+  /** The version in force for the event the prices are for. */
+  rulesetVersionId: uuid("ruleset_version_id")
+    .notNull()
+    .references(() => rulesetVersions.id, { onDelete: "restrict" }),
+  inputs: jsonb("inputs").notNull(),
+  ranAt: timestamp("ran_at", { withTimezone: true }).notNull(),
+  /** `system` for the job, or the staff login that ran it. */
+  ranBy: text("ran_by").notNull(),
+});
+
+/**
  * DM 3.5: one price per asset per event, frozen once the event locks (trigger).
- * `run_id` comes in M4, with `price_update_runs`.
+ * `run_id` is the update that wrote a `formula` price, null for the others.
  */
 export const assetPrices = pgTable(
   "asset_prices",
@@ -302,6 +326,9 @@ export const assetPrices = pgTable(
     /** Units of $0.1M. */
     price: integer("price").notNull(),
     source: text("source", { enum: PRICE_SOURCES }).notNull(),
+    runId: uuid("run_id").references(() => priceUpdateRuns.id, {
+      onDelete: "restrict",
+    }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -312,6 +339,11 @@ export const assetPrices = pgTable(
       sql`${t.price} between ${sql.raw(String(PRICE_MIN))} and ${sql.raw(String(PRICE_MAX))}`,
     ),
     check("asset_prices_source_check", oneOf(t.source, PRICE_SOURCES)),
+    // Only a formula price has a run.
+    check(
+      "asset_prices_run_id_check",
+      sql`(${t.source} = 'formula') = (${t.runId} is not null)`,
+    ),
     index("asset_prices_event_id_idx").on(t.eventId),
   ],
 );
