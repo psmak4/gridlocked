@@ -759,8 +759,16 @@ async function currentRun(db: Db, gameId: string, sessionId: string) {
 /**
  * The event's ledger lock, held to the end of the transaction: the asset
  * lines of its sessions and its team lines are written by one step at a time.
+ * It is taken in each step's own transaction, so it keeps two steps (and a
+ * `recomputeTotals`, which takes it too) from interleaving, but it is not held
+ * across a run: totals rebuilt between a run's steps can see its new asset
+ * lines next to the old team lines, and are right once the totals step (DM 4.8)
+ * recomputes after the last team batch.
  */
-async function lockLedger(db: Db, run: { gameId: string; eventId: string }) {
+export async function lockLedger(
+  db: Db,
+  run: { gameId: string; eventId: string },
+) {
   const key = `ledger:${run.gameId}:${run.eventId}`;
   await db.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
