@@ -176,6 +176,20 @@
       "when": 1793694907257,
       "tag": "0024_game_rules_9",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793755727651,
+      "tag": "0025_typical_sentinels",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793755733212,
+      "tag": "0026_ledger_rules",
+      "breakpoints": true
     }
   ]
 }

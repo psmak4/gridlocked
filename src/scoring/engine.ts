@@ -5,6 +5,13 @@ import type { ScoringRule } from "./rules";
 // score lines of every pool asset out. Pure: no database, no clock, and the
 // same input always gives the same lines in the same order.
 
+/**
+ * The scoring code's version, stored on every run (DM 4.1). Bump it with any
+ * change to what the engine scores: it is in every run's fingerprint, so a
+ * bump makes each session's next run re-score instead of skipping.
+ */
+export const ENGINE_VERSION = "2026.1";
+
 /** The subset of an effective result the engine reads. */
 export interface ResultFact {
   driverId: string;
