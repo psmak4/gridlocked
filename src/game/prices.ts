@@ -18,7 +18,8 @@ import { audit, requireReason, type StaffActor } from "@/staff/roster";
 // Per-event prices (DM 3.5). Reads reference data, never writes it (DM 0.5).
 // Each event has its own price list, frozen once the event locks (trigger), so
 // a price already paid can always be explained. The formula that sets prices
-// after an event is M4's; this is where they are stored and read.
+// after an event is `runPriceUpdate`'s (price-formula.ts); this is where they
+// are stored and read.
 
 type GameEventStatus = (typeof GAME_EVENT_STATUSES)[number];
 type PriceSource = (typeof PRICE_SOURCES)[number];
@@ -59,8 +60,8 @@ function checkPrice(price: MoneyUnits): void {
 
 /**
  * Writes `prices` for an event, one row per asset, and returns how many rows
- * changed. A price already stored with the same value and source is left as it
- * is. With `meta`, each change is audited in the caller's transaction.
+ * changed. A price already stored with the same value, source and run is left
+ * as it is. With `meta`, each change is audited in the caller's transaction.
  * Does not touch `prices_ready_at`.
  */
 export async function upsertPrices(
@@ -71,10 +72,16 @@ export async function upsertPrices(
     eventId: string;
     prices: PriceInput[];
     source: PriceSource;
+    /** The price update that wrote the rows: required for `formula`, else absent. */
+    runId?: string;
     meta?: ReturnType<typeof audit>;
   },
 ): Promise<number> {
   const { gameId, eventId, prices, source, meta } = input;
+  const runId = input.runId ?? null;
+  if ((source === "formula") !== (runId !== null)) {
+    throw new Error("a formula price needs a run, and no other price has one");
+  }
   const ids = prices.map((p) => p.assetId);
   if (new Set(ids).size !== ids.length) {
     throw new Error("a price list names an asset twice");
@@ -108,7 +115,14 @@ export async function upsertPrices(
   let changed = 0;
   for (const { assetId, price } of prices) {
     const before = stored.get(assetId);
-    if (before && before.price === price && before.source === source) continue;
+    if (
+      before &&
+      before.price === price &&
+      before.source === source &&
+      before.runId === runId
+    ) {
+      continue;
+    }
     await tx
       .insert(assetPrices)
       .values({
@@ -116,12 +130,13 @@ export async function upsertPrices(
         eventId,
         price,
         source,
+        runId,
         createdAt: now,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: [assetPrices.assetId, assetPrices.eventId],
-        set: { price, source, updatedAt: now },
+        set: { price, source, runId, updatedAt: now },
       });
     if (meta) {
       await writeAudit(tx, now, {
@@ -212,7 +227,8 @@ async function isComplete(
  * into it) has a price for it; a partial list, such as a single admin
  * correction, leaves `prices_ready_at` as it was. Opening the event always
  * runs `carryPrices`, which fills any gap left.
- * `initial` is the season's starting list; `admin` is a staff correction,
+ * `initial` is the season's starting list; `formula` is the price update's
+ * (`runPriceUpdate`), which names its run; `admin` is a staff correction,
  * which needs a reason and an actor and is audited in the same transaction.
  * Refuses, writing nothing: a blank reason, a price outside 30-340, an asset
  * from another game, and an event that has opened (its prices are fixed from
@@ -225,7 +241,9 @@ export async function publishPrices(
     gameId: string;
     eventId: string;
     prices: PriceInput[];
-    source: "initial" | "admin";
+    source: "initial" | "formula" | "admin";
+    /** The run that wrote a `formula` list. */
+    runId?: string;
     reason?: string;
     actor?: StaffActor;
   },

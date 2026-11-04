@@ -775,7 +775,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | event_id | uuid FK | |
 | price | integer, units of $0.1M | `CHECK` within 30–340 |
 | source | text: `initial`, `formula`, `admin`, `carried` | `carried`: no update ran before this event's lock, so the previous price stands |
-| run_id | uuid FK → price_update_runs, nullable | Added in M4 with `price_update_runs`; M3 stores only the price and its source |
+| run_id | uuid FK → price_update_runs, nullable | The update that wrote a `formula` price; null for the other sources (`CHECK`: `source = 'formula'` exactly when it is set) |
 
 - **Why one row per event** rather than "price from event X onward": a price list per event is about 33 rows, so a season is under 1,000 rows. Every lookup becomes a direct key read. Each event's prices are fixed from the moment its window opens, so what a team paid can always be explained.
 - **Publishing:** after event E is `final`, the price job writes the rows for event E+1 and sets `prices_ready_at`. Builders see the new prices from then on.
@@ -784,15 +784,15 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 - **A cancelled event's prices stay fixed** (`game_rules_8`): nothing is changed, removed or added there, since the next event carries them (3.9).
 - **Fixed when the window opens, by trigger** (decision 1: prices are never applied after a saved team was checked against them). Once an event's game event is `open`, no price for it can be changed or removed. A price can still be added for an asset that has none there, such as a substitute added to the pool for the open event, until it is `locked`, `scored` or `final`; from then nothing can be added either. So admin corrections and the price update go in while the event is `upcoming`, and carrying runs before it opens (the open job carries, then opens). `publishPrices` refuses an open event before writing anything.
 - **Admin prices:** a staff price for an event needs a reason and is audited. A mid-season substitute (3.4) gets its `admin` price for its first event in the same transaction, without marking the rest of the list as published.
-- **The formula's rows come from the price job** (M4); M3 has `initial`, `admin` and `carried`.
+- **The formula's rows come from `runPriceUpdate`** (`src/game/price-formula.ts`, M4), which the price job calls once an event is scored. It prices the game's next non-cancelled event by sequence, and only while that event is `upcoming`; otherwise it skips (`next_open`), as it does when the scored event has no current run on any session (`no_scores`) or no event follows (`no_next`). It prices every asset that has a price for the scored event, withdrawn ones included; an asset with none, such as a substitute added since, keeps whatever price it has for the next event. It then publishes through `publishPrices`, which sets `prices_ready_at`. Running it again replaces the rows with a new run.
 
-**`price_update_runs`:** `id`, `game_id`, `after_event_id`, `ruleset_version_id`, `inputs` (jsonb: each asset's last-3 average and tier), `ran_at`, `ran_by` (job or admin). Our published formula can then be shown working for every change.
+**`price_update_runs`:** `id`, `game_id`, `after_event_id` (the scored event), `ruleset_version_id` (the version in force for the event being priced, whose formula was used), `inputs` (jsonb: `{ eventId, assets: [...] }`, the event priced and, for every asset priced, its type, the price in force for the scored event, `recentPoints` (oldest first), `average`, `ratio`, `tier`, `change` and `newPrice`), `ran_at`, `ran_by` (text: `system` for the job, or the staff login). Our published formula can then be shown working for every change.
 
 **Formula shape (constants in `prices.formula`, 3.2; calibrated on the 2026 replay before launch):**
-1. Average our fantasy points for the asset over its last 3 events. Use fewer at the season start or for a newly added asset.
+1. Average our fantasy points for the asset over its last 3 events (`window`): the newest scored events up to and including the one just scored, each the sum of its `asset_session_totals` over the event's sessions, an asset with no lines in a scored event counting 0. Use fewer at the season start or for a newly added asset; with none, the price stands and there is no tier.
 2. Compare that with the points its price "should" earn: `price_in_$M × points_per_million`. This baseline is separate for drivers and constructors.
-3. The ratio falls into a tier (e.g. terrible, poor, good, great), and each tier maps to a change scaled by price band. For example, a great week might be +$0.3M for an expensive asset and +$0.6M for a cheap one.
-4. Clamp the result to $3M–$34M.
+3. The ratio falls into a tier, and each tier maps to a change scaled by price band: below `thresholds.poor` is terrible, from there to `good` is poor, from there to `great` is good, and `great` or more is great (a ratio on a threshold takes the higher tier). A price of `bandSplit` or more is expensive and uses `changes.expensive`, otherwise `changes.cheap`. For example, a great week is +$0.3M for an expensive asset and +$0.6M for a cheap one.
+4. Clamp the result to $3M–$34M. The run's `change` is the tier's change before the clamp.
 
 **Calibration target:** the spread of weekly changes over the replayed 2026 season should look like the official game's.
 
