@@ -55,9 +55,11 @@ const PRUNE_AFTER_MS = 7 * 24 * 3_600_000;
  * caller's transaction goes on.
  *
  * Refuses, writing nothing: a blank reason, params or rules their schemas
- * refuse, an empty list, and an event that isn't `locked`, `scored` or `final`
- * in the game. The game row is held, so a version number can't be taken twice
- * and planning waits its turn.
+ * refuse, no rules (the re-score would wipe the events' points), an empty list,
+ * a game that isn't `running` (`game_not_running`: nothing would re-score it),
+ * and an event that isn't `locked`, `scored` or `final` in the game. The game
+ * row is held, so a version number can't be taken twice and planning waits its
+ * turn.
  */
 export async function publishCorrectionVersion(
   db: Db,
@@ -76,6 +78,9 @@ export async function publishCorrectionVersion(
   const meta = audit(actor, requireReason(input.reason));
   const params = rulesetParamsSchema.parse(input.params);
   const rules = input.rules.map((rule) => scoringRuleSchema.parse(rule));
+  if (rules.length === 0) {
+    throw new Error(`publishCorrectionVersion: no rules for game ${gameId}`);
+  }
   const eventIds = [...new Set(input.eventIds)];
   if (eventIds.length === 0) {
     throw new Error(`publishCorrectionVersion: no events for game ${gameId}`);
@@ -83,11 +88,17 @@ export async function publishCorrectionVersion(
 
   return db.transaction(async (tx) => {
     const [game] = await tx
-      .select({ id: games.id })
+      .select({ status: games.status })
       .from(games)
       .where(eq(games.id, gameId))
       .for("update");
     if (!game) throw new Error(`publishCorrectionVersion: no game ${gameId}`);
+    if (game.status !== "running") {
+      throw new GameError(
+        "game_not_running",
+        `game ${gameId} is ${game.status}, so a correction would re-score nothing`,
+      );
+    }
 
     const listed = await tx
       .select({

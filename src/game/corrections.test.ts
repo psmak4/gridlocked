@@ -17,6 +17,7 @@ import {
   auditLog,
   drivers,
   gameEvents,
+  games,
   leagueStandings,
   lineupVersions,
   priceUpdateRuns,
@@ -28,6 +29,7 @@ import {
   teamAdjustmentLines,
   teamEventStates,
   teamEventTotals,
+  teams,
 } from "@/db/schema";
 import { gameChecksKey, scoreKey } from "@/jobs/kinds";
 import { enqueue } from "@/jobs/queue";
@@ -461,6 +463,111 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
       expect(await checkGameInvariants(t.db, gameId)).toEqual([]);
     });
 
+    it("a lock record on a correction version is flagged", async () => {
+      const { rulesetVersionId } = await publish([round1.id]);
+      await run();
+      await t.db
+        .update(teamEventStates)
+        .set({ rulesetVersionId })
+        .where(eq(teamEventStates.eventId, round1.id));
+
+      const found = await checkGameInvariants(t.db, gameId);
+
+      expect(found).toHaveLength(2);
+      for (const message of found) {
+        expect(message).toContain("correction version");
+      }
+    });
+
+    describe("the old version stays frozen after the re-point", () => {
+      const refusesEdits = async (versionId: string) => {
+        await expect(
+          t.db
+            .update(scoringRules)
+            .set({ sortOrder: 999 })
+            .where(eq(scoringRules.rulesetVersionId, versionId)),
+        ).rejects.toThrow();
+        await expect(
+          t.db
+            .update(rulesetVersions)
+            .set({ notes: "Rewritten" })
+            .where(eq(rulesetVersions.id, versionId)),
+        ).rejects.toThrow();
+      };
+
+      it("with both its lock records and its runs citing it", async () => {
+        const [old] = await versions();
+        await publish([round1.id]);
+        await run();
+        await refusesEdits(old!.id);
+      });
+
+      it("cited only by a lock record", async () => {
+        const [old] = await versions();
+        const { rulesetVersionId } = await publish([round1.id]);
+        await run();
+        await t.db.update(scoringRuns).set({ rulesetVersionId });
+        await refusesEdits(old!.id);
+      });
+
+      it("cited only by a run", async () => {
+        const [old] = await versions();
+        const { rulesetVersionId } = await publish([round1.id]);
+        await run();
+        await t.db.update(teamEventStates).set({ rulesetVersionId });
+        await refusesEdits(old!.id);
+      });
+    });
+
+    describe("a correction's teamsPerUser reaches no one", () => {
+      const withLimit = (teamsPerUser: number) =>
+        publishCorrectionVersion(t.db, clock.now(), ACTOR, {
+          gameId,
+          params: { ...RULESET_2026, teamsPerUser },
+          rules: rulesWorth(5),
+          notes: "Notes",
+          eventIds: [round1.id],
+          reason: "A reason",
+        });
+      /** A row straight into the table, past `createTeam`, for the trigger. */
+      const insertTeam = (userId: string, slot: number) =>
+        t.db.insert(teams).values({
+          id: newId(),
+          gameId,
+          userId,
+          slot,
+          name: `Slot ${slot}`,
+          status: "active",
+          createdAt: clock.now(),
+        });
+      const create = (userId: string, name: string) =>
+        createTeam(t.db, clock.now(), { gameId, userId, name });
+
+      it("a higher limit opens no slot in createTeam", async () => {
+        await withLimit(5);
+        const userId = newId();
+        for (const name of ["One", "Two", "Three"]) {
+          await create(userId, name);
+        }
+        await expect(create(userId, "Four")).rejects.toMatchObject({
+          code: "no_free_slot",
+        });
+      });
+
+      it("a higher limit opens no slot in the trigger", async () => {
+        await withLimit(5);
+        await expect(insertTeam(newId(), 4)).rejects.toThrow();
+      });
+
+      it("a lower limit closes no slot in createTeam or the trigger", async () => {
+        await withLimit(1);
+        const userId = newId();
+        await create(userId, "One");
+        await create(userId, "Two");
+        await insertTeam(userId, 3);
+      });
+    });
+
     it("the correction setting doesn't outlive its update or its transaction", async () => {
       const { rulesetVersionId } = await publish([round1.id]);
       const read = async (db: typeof t.db) =>
@@ -589,6 +696,24 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
       it("an empty list", async () => {
         await expect(publish([])).rejects.toThrow(/no events/);
         await nothingWritten();
+      });
+
+      it("empty rules, which would wipe the events' points", async () => {
+        await expect(publish([round1.id], [])).rejects.toThrow(/no rules/);
+        await nothingWritten();
+      });
+
+      it("a game that isn't running, which nothing would re-score", async () => {
+        await t.db
+          .update(games)
+          .set({ status: "completed" })
+          .where(eq(games.id, gameId));
+        const refused = await publish([round1.id]).catch((e: unknown) => e);
+        expect(refused).toBeInstanceOf(GameError);
+        expect(refused).toMatchObject({ code: "game_not_running" });
+        await nothingWritten();
+        const [first] = await versions();
+        expect((await gameEvent(round1.id)).rulesetVersionId).toBe(first!.id);
       });
 
       it("a blank reason", async () => {

@@ -51,6 +51,8 @@ interface Worked {
  *   Limitless week), purchasing power, spent, transfers, carry-over, the
  *   penalty and the chip; a team that took part has a record, and only then;
  * - no counted version was saved at or after the event's `lock_at`;
+ * - no lock record is on a correction version: it keeps the version it locked
+ *   under, which is the one an event re-pointed to a correction is checked by;
  * - carry-over is never above the ruleset's `carryOverMax`;
  * - each penalty is `transferPenalty` of the record's own counts;
  * - the bank is never below 0 outside a Limitless week;
@@ -91,13 +93,17 @@ export async function checkGameInvariants(
     .orderBy(asc(events.lockAt), asc(events.round));
   // An event re-pointed to a correction (DM 4.9) was locked under the version
   // its lock records kept, so that is the one they are checked against.
-  const allVersions = new Map(
-    (
-      await db
-        .select({ id: rulesetVersions.id, params: rulesetVersions.params })
-        .from(rulesetVersions)
-        .where(eq(rulesetVersions.gameId, gameId))
-    ).map((v) => [v.id, v.params]),
+  const allVersions = await db
+    .select({
+      id: rulesetVersions.id,
+      params: rulesetVersions.params,
+      isCorrection: rulesetVersions.isCorrection,
+    })
+    .from(rulesetVersions)
+    .where(eq(rulesetVersions.gameId, gameId));
+  const paramsOf = new Map(allVersions.map((v) => [v.id, v.params]));
+  const corrections = new Set(
+    allVersions.filter((v) => v.isCorrection).map((v) => v.id),
   );
   const lockedUnder = new Map(
     (
@@ -120,7 +126,7 @@ export async function checkGameInvariants(
         {
           ...e,
           rulesetVersionId,
-          rules: rulesetParamsSchema.parse(allVersions.get(rulesetVersionId)),
+          rules: rulesetParamsSchema.parse(paramsOf.get(rulesetVersionId)),
         },
       ];
     }),
@@ -283,6 +289,15 @@ export async function checkGameInvariants(
     .from(teamEventStates)
     .where(eq(teamEventStates.gameId, gameId));
   const stateOf = new Map(states.map((s) => [`${s.teamId}|${s.eventId}`, s]));
+
+  // A correction only ever follows a lock, so no lock record can be on one.
+  for (const { teamId, eventId, rulesetVersionId } of states) {
+    if (corrections.has(rulesetVersionId)) {
+      found.push(
+        `${where(teamId, eventId)}: the lock record is on correction version ${rulesetVersionId}`,
+      );
+    }
+  }
 
   // --- Every lock record, worked out again ---------------------------------
   for (const team of teamRows) {

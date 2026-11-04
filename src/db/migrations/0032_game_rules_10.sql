@@ -26,3 +26,52 @@ $$;
 CREATE TRIGGER "game_events_version_freeze"
   BEFORE UPDATE OF "ruleset_version_id" ON "game_events"
   FOR EACH ROW EXECUTE FUNCTION "game_events_version_freeze"();
+--> statement-breakpoint
+
+-- ruleset_version_is_frozen of game_rules, with what else cites a version. A
+-- correction moves the game event off a version, but the lock records keep it
+-- and past runs were scored under it, so it has to stay as they saw it even
+-- when no locked event uses it any more. As before, a game_events row in
+-- locked, scored or final freezes it; so now does any lock record
+-- (team_event_states) or scoring run that names it.
+CREATE OR REPLACE FUNCTION "ruleset_version_is_frozen"(version_id uuid) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM "game_events"
+    WHERE "ruleset_version_id" = version_id
+      AND "status" IN ('locked', 'scored', 'final')
+  ) OR EXISTS (
+    SELECT 1 FROM "team_event_states" WHERE "ruleset_version_id" = version_id
+  ) OR EXISTS (
+    SELECT 1 FROM "scoring_runs" WHERE "ruleset_version_id" = version_id
+  );
+$$;
+--> statement-breakpoint
+
+-- teams_slot_limit of game_rules_3, reading the game's latest version that
+-- isn't a correction: a correction applies only to the past events re-pointed
+-- to it (DM 4.9), so it never sets the limit for new teams. The rest is as it
+-- was: a slot runs from 1 to teamsPerUser, checked when a team is added and
+-- when its slot or game changes.
+CREATE OR REPLACE FUNCTION "teams_slot_limit"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  per_user integer;
+BEGIN
+  SELECT ("params" ->> 'teamsPerUser')::integer INTO per_user
+  FROM "ruleset_versions"
+  WHERE "game_id" = NEW."game_id" AND NOT "is_correction"
+  ORDER BY "version" DESC
+  LIMIT 1;
+  IF per_user IS NULL THEN
+    RAISE EXCEPTION 'teams: game % has no teamsPerUser', NEW."game_id"
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW."slot" < 1 OR NEW."slot" > per_user THEN
+    RAISE EXCEPTION 'teams: slot % is outside 1 to %', NEW."slot", per_user
+      USING ERRCODE = 'check_violation',
+            DETAIL = format('game %s allows %s teams per user', NEW."game_id", per_user);
+  END IF;
+  RETURN NEW;
+END;
+$$;
