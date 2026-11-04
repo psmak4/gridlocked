@@ -28,7 +28,8 @@ const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
  * Creates a `season_fantasy` game in `setup` for a season, with ruleset
  * version 1 effective from the season's first non-cancelled event (by lock
  * time), then plans its events. `params` and each of `rules` (stored with
- * version 1) are checked against their schemas first. A second game for the same season and type is refused by the database.
+ * version 1) are checked against their schemas first. A second game for the
+ * same season and type is refused by the database.
  */
 export async function createGame(
   db: Db,

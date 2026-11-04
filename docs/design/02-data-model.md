@@ -733,7 +733,8 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
   | `race.disqualified` | constructor | `per_driver_penalty` | `race_penalty` | -20 per DSQ driver |
 
   - **`positions_delta`:** the starting grid against the classification; a pit-lane start counts as last on the grid (the number of result rows in the session). Classified rows only. `flag_bonus` also needs a classified row. A position table past its end scores 0, and no table is longer than 10: nothing hard-codes 22 cars.
-  - **`knockout_stage`:** a driver reached Q2 at a position of `knockout.q2From` or better, and Q3 at `q3From` or better, never by whether a time exists (HLD §5.6).- M3 added the table, its `kind` CHECK and the freeze below.
+  - **`knockout_stage`:** a driver reached Q2 at a position of `knockout.q2From` or better, and Q3 at `q3From` or better, never by whether a time exists (HLD §5.6).
+- M3 added the table, its `kind` CHECK and the freeze below.
 - **A version is frozen once used.** A trigger refuses updates and deletes of a version, and every write to its rules, once any `game_events` row using it is `locked`, `scored` or `final`. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
 - **Rule changes are mostly config.** "Sprint DNF penalty reduced to -10" (an official 2026 change, per the FAQ) is a new version with a different param. Only a genuinely new `kind` of calculation needs code.
 
