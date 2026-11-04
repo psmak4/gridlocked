@@ -7,6 +7,20 @@ import tseslint from "typescript-eslint";
 const providerBoundaryMessage =
   "Only adapters know providers exist (HLD §3.3 rule 2).";
 
+const providerBoundaryPatterns = [
+  {
+    group: ["@/providers", "@/providers/*"],
+    message: providerBoundaryMessage,
+  },
+  {
+    // Relative paths into src/providers, from elsewhere in src or
+    // from outside it (`../../src/providers/...`). Static imports
+    // only: dynamic import() and require() are not covered.
+    regex: "^((\\.\\./)+|\\./)providers(/|$)|(^|/)src/providers(/|$)",
+    message: providerBoundaryMessage,
+  },
+];
+
 const eslintConfig = defineConfig([
   ...tseslint.configs.recommended,
   react.configs.flat.recommended,
@@ -56,19 +70,7 @@ const eslintConfig = defineConfig([
       "no-restricted-imports": [
         "error",
         {
-          patterns: [
-            {
-              group: ["@/providers", "@/providers/*"],
-              message: providerBoundaryMessage,
-            },
-            {
-              // Relative paths into src/providers, from elsewhere in src or
-              // from outside it (`../../src/providers/...`). Static imports
-              // only: dynamic import() and require() are not covered.
-              regex: "^((\\.\\./)+|\\./)providers(/|$)|(^|/)src/providers(/|$)",
-              message: providerBoundaryMessage,
-            },
-          ],
+          patterns: providerBoundaryPatterns,
         },
       ],
     },
@@ -89,6 +91,29 @@ const eslintConfig = defineConfig([
     // may import src/providers.
     files: ["src/jobs/functions/tick.ts"],
     rules: { "no-restricted-imports": "off" },
+  },
+  {
+    // The scoring engine is pure (HLD §5.6): rules and results in, lines out.
+    // It never reads the database, the clock or the filesystem.
+    files: ["src/scoring/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            ...providerBoundaryPatterns,
+            {
+              group: ["@/db", "@/db/*", "drizzle-orm", "drizzle-orm/*"],
+              message: "src/scoring is pure: it must not touch the database.",
+            },
+            {
+              group: ["node:*"],
+              message: "src/scoring is pure: it must not use Node built-ins.",
+            },
+          ],
+        },
+      ],
+    },
   },
   {
     // The adapters' own home, and tests of it.

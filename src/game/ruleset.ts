@@ -19,6 +19,8 @@ export const CHIP_EFFECTS = [
 ] as const;
 /** What happens to an abandoned session that has a classification (DM 3.9). */
 export const ABANDONED_SESSION_POLICIES = ["score_as_classified"] as const;
+/** How Strategist's Autopilot breaks a tie between the best-scoring picks. */
+export const AUTOPILOT_TIEBREAKS = ["original_then_price"] as const;
 
 const count = z.number().int().nonnegative();
 const positive = z.number().int().positive();
@@ -29,6 +31,41 @@ const chipSchema = z.strictObject({
   name: z.string().min(1),
   unlock: z.enum(CHIP_UNLOCKS),
   effect: z.enum(CHIP_EFFECTS),
+});
+
+/** Terrible, poor, good, great: a change in $0.1M for each price tier. */
+const tierChanges = z.tuple([
+  z.number().int(),
+  z.number().int(),
+  z.number().int(),
+  z.number().int(),
+]);
+
+/**
+ * The price formula's constants (DM 3.5): the last `window` events' average
+ * points of an asset, against `pointsPerMillion` times its price, give a ratio
+ * that falls into a tier. The tier's change depends on the price band: an
+ * asset at `bandSplit` or above is expensive. Each change list is in tier
+ * order: terrible, poor, good, great, in units of $0.1M.
+ */
+const priceFormulaSchema = z.strictObject({
+  window: positive,
+  pointsPerMillion: z.strictObject({
+    driver: z.number().positive(),
+    constructor: z.number().positive(),
+  }),
+  bandSplit: positive,
+  /** Ratios below `poor` are terrible and from `great` upwards are great. */
+  thresholds: z
+    .strictObject({
+      poor: z.number().positive(),
+      good: z.number().positive(),
+      great: z.number().positive(),
+    })
+    .refine((t) => t.poor < t.good && t.good < t.great, {
+      message: "thresholds must rise: poor < good < great",
+    }),
+  changes: z.strictObject({ expensive: tierChanges, cheap: tierChanges }),
 });
 
 export const rulesetParamsSchema = z.strictObject({
@@ -51,7 +88,7 @@ export const rulesetParamsSchema = z.strictObject({
   /** Qualifying and sprint qualifying: Q2 from P16 and Q3 from P10. */
   knockout: z.strictObject({ q2From: positive, q3From: positive }),
   prices: z
-    .strictObject({ min: positive, max: positive })
+    .strictObject({ min: positive, max: positive, formula: priceFormulaSchema })
     .refine((p) => p.min <= p.max, {
       message: "prices.min must not be above prices.max",
     }),
@@ -61,6 +98,8 @@ export const rulesetParamsSchema = z.strictObject({
     recheckHours: positive,
   }),
   abandonedSessions: z.enum(ABANDONED_SESSION_POLICIES),
+  /** What Autopilot does when it has to choose between equal picks. */
+  autopilot: z.strictObject({ tiebreak: z.enum(AUTOPILOT_TIEBREAKS) }),
   chips: z
     .array(chipSchema)
     .refine(
@@ -124,8 +163,20 @@ export const RULESET_2026: RulesetParams = {
     carryOverOutInUnlimitedWeek: 0,
   },
   knockout: { q2From: 16, q3From: 10 },
-  prices: { min: 30, max: 340 },
+  // The formula's values are a first guess; the replay calibrates them.
+  prices: {
+    min: 30,
+    max: 340,
+    formula: {
+      window: 3,
+      pointsPerMillion: { driver: 1.0, constructor: 1.0 },
+      bandSplit: 185,
+      thresholds: { poor: 0.6, good: 1.0, great: 1.5 },
+      changes: { expensive: [-3, -1, 1, 3], cheap: [-6, -2, 2, 6] },
+    },
+  },
   window: { openCutoffHours: 24, recheckHours: 6 },
   abandonedSessions: "score_as_classified",
+  autopilot: { tiebreak: "original_then_price" },
   chips: CHIPS_2026,
 };

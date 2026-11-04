@@ -11,6 +11,7 @@ import { lockEvent } from "@/game/lock";
 import { seedPool } from "@/game/pool";
 import { carryPrices, publishPrices } from "@/game/prices";
 import { RULESET_2026 } from "@/game/ruleset";
+import { SCORING_RULES_2026 } from "@/scoring/rules";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { readFixture } from "./fixtures";
 import { importReferenceFixtures2026 } from "./pipeline-2026";
@@ -37,6 +38,7 @@ export async function seedGame2026(db: Db, now: Date) {
     slug: "2026-fantasy",
     name: "2026 Fantasy",
     params: RULESET_2026,
+    rules: SCORING_RULES_2026,
     notes: "The 2026 rules.",
   });
   const [round1] = await db

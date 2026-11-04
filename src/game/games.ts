@@ -4,6 +4,7 @@ import {
   gameEvents,
   games,
   rulesetVersions,
+  scoringRules,
   teamEventStates,
   type GAME_EVENT_STATUSES,
 } from "@/db/schema";
@@ -12,6 +13,7 @@ import { newId } from "@/lib/ids";
 import { openReviewItem } from "@/reference/review";
 import { refundChips } from "./chips";
 import { carryPrices } from "./prices";
+import { scoringRuleSchema, type ScoringRule } from "@/scoring/rules";
 import { rulesetParamsSchema, type RulesetParams } from "./ruleset";
 
 // Games and their calendar (DM 3.1, 3.3). Reads reference data, never writes
@@ -25,8 +27,9 @@ const FROZEN: readonly GameEventStatus[] = ["locked", "scored", "final"];
 /**
  * Creates a `season_fantasy` game in `setup` for a season, with ruleset
  * version 1 effective from the season's first non-cancelled event (by lock
- * time), then plans its events. `params` is checked against the schema first.
- * A second game for the same season and type is refused by the database.
+ * time), then plans its events. `params` and each of `rules` (stored with
+ * version 1) are checked against their schemas first. A second game for the
+ * same season and type is refused by the database.
  */
 export async function createGame(
   db: Db,
@@ -36,10 +39,12 @@ export async function createGame(
     slug: string;
     name: string;
     params: RulesetParams;
+    rules: ScoringRule[];
     notes: string;
   },
 ): Promise<{ gameId: string; rulesetVersionId: string }> {
   const params = rulesetParamsSchema.parse(input.params);
+  const rules = input.rules.map((rule) => scoringRuleSchema.parse(rule));
   return db.transaction(async (tx) => {
     const [first] = await tx
       .select({ id: events.id })
@@ -79,6 +84,17 @@ export async function createGame(
       createdAt: now,
       updatedAt: now,
     });
+    if (rules.length > 0) {
+      await tx.insert(scoringRules).values(
+        rules.map((rule) => ({
+          id: newId(),
+          rulesetVersionId,
+          ...rule,
+          createdAt: now,
+          updatedAt: now,
+        })),
+      );
+    }
     await planGameEvents(tx, now, gameId);
     return { gameId, rulesetVersionId };
   });
