@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import {
+  gameFinalizeSweepKey,
   gameLockAfterKey,
   gameLockKey,
   gameLockPayload,
@@ -18,6 +19,7 @@ import {
   gameOpenPayload,
   gameOpenRecheckKey,
   gameOpenSweepKey,
+  type GameFinalizePayload,
   type GameLockPayload,
   type GameOpenPayload,
 } from "@/jobs/kinds";
@@ -63,10 +65,17 @@ export const isLockedOrLater = (status: GameEventStatus) =>
  * - `game_open:<game>:<event>:sweep:<yyyy-mm-dd>` likewise, due at `now`, for
  *   an `upcoming` event whose planned open time has passed and that has no
  *   `game_open` job pending, running or waiting to retry. It is an ordinary
- *   open job, so its order and timing checks are the same.
+ *   open job, so its order and timing checks are the same;
+ * - `game_finalize:<game>:<event>:sweep:<yyyy-mm-dd>` likewise, due at `now`,
+ *   for a `locked` or `scored` game event whose event is `completed` and that
+ *   has no `game_finalize` job pending, running or waiting to retry: its job
+ *   died, or it locked after its event completed, so it never had one. It is
+ *   an ordinary finalize job, and a retry of one that committed does nothing.
  *
- * An event that has locked, or been cancelled, gets nothing. Call it whenever
- * the calendar is synced.
+ * An event that is `final`, or cancelled, gets nothing, nor does one that has
+ * locked and whose event isn't `completed`. Call it whenever the calendar is
+ * synced, which the daily `sync_calendar` job does for every game of its
+ * season.
  */
 export async function planGameJobs(
   db: Db,
@@ -78,6 +87,7 @@ export async function planGameJobs(
       eventId: gameEvents.eventId,
       status: gameEvents.status,
       lockAt: events.lockAt,
+      eventStatus: events.status,
     })
     .from(gameEvents)
     .innerJoin(events, eq(events.id, gameEvents.eventId))
@@ -107,6 +117,40 @@ export async function planGameJobs(
 
   await db.transaction(async (tx) => {
     for (const [i, event] of calendar.entries()) {
+      // Finished with no finalize job left alive (the last one died, or it
+      // locked after its event completed): a sweep runs the finalize, once a
+      // day at most.
+      if (
+        (event.status === "locked" || event.status === "scored") &&
+        event.eventStatus === "completed"
+      ) {
+        const [alive] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.kind, "game_finalize"),
+              sql`${jobs.payload}->>'gameId' = ${gameId}`,
+              sql`${jobs.payload}->>'eventId' = ${event.eventId}`,
+              inArray(jobs.status, ["pending", "running", "failed"]),
+            ),
+          )
+          .limit(1);
+        if (!alive) {
+          const day = now.toISOString().slice(0, 10);
+          const payload: GameFinalizePayload = {
+            gameId,
+            eventId: event.eventId,
+            sweep: day,
+          };
+          await enqueue(tx, {
+            kind: "game_finalize",
+            dedupeKey: gameFinalizeSweepKey(gameId, event.eventId, day),
+            runAt: now,
+            payload,
+          });
+        }
+      }
       if (event.status !== "upcoming" && event.status !== "open") continue;
       const lock: GameLockPayload = { gameId, eventId: event.eventId };
       await enqueue(tx, {

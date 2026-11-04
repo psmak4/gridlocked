@@ -50,6 +50,11 @@ const SCORABLE_RESULTS = ["provisional", "final"] as const;
 const hasScorableResults = (status: string | null | undefined) =>
   (SCORABLE_RESULTS as readonly (string | null | undefined)[]).includes(status);
 
+/** A game event in one of these can become `final`. */
+const FINALIZABLE: ("locked" | "scored")[] = ["locked", "scored"];
+const isFinalizable = (status: string) =>
+  (FINALIZABLE as readonly string[]).includes(status);
+
 /**
  * Queues scoring of a session, one job per `running` game whose game event for
  * the session's event is `locked`, `scored` or `final` (or only for `gameId`,
@@ -144,7 +149,7 @@ export async function enqueueGameFinalize(
       and(
         eq(gameEvents.eventId, eventId),
         eq(games.status, "running"),
-        inArray(gameEvents.status, ["locked", "scored"]),
+        inArray(gameEvents.status, FINALIZABLE),
       ),
     )
     .orderBy(asc(gameEvents.gameId));
@@ -179,8 +184,8 @@ async function runInline(
 }
 
 /**
- * Closes an event for a game, once its results are final (DM 4.8). Returns
- * quietly unless the game event is `locked` or `scored`: `final` is a retry of
+ * Closes an event for a game, once its results are final (DM 4.8). A dead job
+ * is picked up by `planGameJobs`' daily sweep. Returns quietly unless the game event is `locked` or `scored`: `final` is a retry of
  * one that committed, `cancelled` has no totals, and `upcoming` or `open`
  * means the game never played this event.
  *
@@ -192,7 +197,10 @@ async function runInline(
  * chain, so it just stops.
  *
  * Then, in one transaction, the ledger lock first (the standings step's order,
- * ledger then `game_events` row, so the two can't deadlock):
+ * ledger then `game_events` row, so the two can't deadlock). The status is read
+ * again under that lock, holding the row, and unless it is still `locked` or
+ * `scored` the transaction commits nothing: a handler past its lease can run
+ * twice, and a cancel can land after the first look.
  * - `runPriceUpdate` prices the next event as the game event still stands;
  * - the game event becomes `final`;
  * - totals and standings are rebuilt, in that order: both take their `final`
@@ -221,7 +229,7 @@ export async function finalizeGameEvent(
     .from(gameEvents)
     .innerJoin(events, eq(events.id, gameEvents.eventId))
     .where(thisGameEvent);
-  if (!row || (row.status !== "locked" && row.status !== "scored")) return;
+  if (!row || !isFinalizable(row.status)) return;
   const { sequence, seasonId } = row;
   if (sequence === null) {
     throw new Error(`finalizeGameEvent: event ${eventId} has no sequence`);
@@ -257,6 +265,13 @@ export async function finalizeGameEvent(
 
   await db.transaction(async (tx) => {
     await lockLedger(tx, { gameId, eventId });
+    // Looked at again: a second pass, or a cancel, may have landed since.
+    const [current] = await tx
+      .select({ status: gameEvents.status })
+      .from(gameEvents)
+      .where(thisGameEvent)
+      .for("update");
+    if (!current || !isFinalizable(current.status)) return;
     const update = await runPriceUpdate(tx, now, {
       gameId,
       afterEventId: eventId,
@@ -265,7 +280,7 @@ export async function finalizeGameEvent(
     await tx
       .update(gameEvents)
       .set({ status: "final", updatedAt: now })
-      .where(thisGameEvent);
+      .where(and(thisGameEvent, inArray(gameEvents.status, FINALIZABLE)));
     await recomputeTotals(tx, now, { gameId, fromEventId: eventId });
     await recomputeStandings(tx, now, { gameId, eventId });
     if ("skipped" in update && update.skipped === "next_open") {

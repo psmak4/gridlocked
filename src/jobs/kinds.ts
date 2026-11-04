@@ -147,9 +147,17 @@ export const scoreSessionPayload = z.object({
 });
 export type ScoreSessionPayload = z.infer<typeof scoreSessionPayload>;
 
+/**
+ * `sweep` is the UTC day (YYYY-MM-DD) of the planning sweep that queued it, for
+ * a game event finished with no finalize job left alive.
+ */
 export const gameFinalizePayload = z.object({
   gameId: z.string().min(1),
   eventId: z.string().min(1),
+  sweep: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 export type GameFinalizePayload = z.infer<typeof gameFinalizePayload>;
 
@@ -167,6 +175,16 @@ export const scoreStepKey = (
 ) => `score:${runId}:${step}:${afterTeamId ?? "start"}`;
 export const gameFinalizeKey = (gameId: string, eventId: string) =>
   `game_finalize:${gameId}:${eventId}`;
+/**
+ * A finalize sweep for the UTC day `day` (YYYY-MM-DD): queued by planning for
+ * a `locked` or `scored` game event whose event is `completed` and that has no
+ * finalize job left alive.
+ */
+export const gameFinalizeSweepKey = (
+  gameId: string,
+  eventId: string,
+  day: string,
+) => `${gameFinalizeKey(gameId, eventId)}:sweep:${day}`;
 
 export const gameLockKey = (gameId: string, eventId: string) =>
   `game_lock:${gameId}:${eventId}`;

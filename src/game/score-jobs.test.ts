@@ -17,6 +17,7 @@ import {
   drivers,
   events,
   gameEvents,
+  jobs,
   leagueStandings,
   priceUpdateRuns,
   reviewItems,
@@ -61,8 +62,15 @@ import type { StaffActor } from "@/staff/roster";
 // only scored session. The second part runs the jobs directly, to reach what a
 // weekend doesn't: retries, failures, batches and leagues.
 
-/** The writeAssetLines failure of the last-attempt test. */
-const breaking = vi.hoisted(() => ({ assets: false }));
+/**
+ * `assets`: the writeAssetLines failure of the last-attempt test. `afterFinish`
+ * runs once, after an inline run finishes: what lands between `finalizeGameEvent`'s
+ * inline runs and its transaction.
+ */
+const breaking = vi.hoisted(() => ({
+  assets: false,
+  afterFinish: null as null | (() => Promise<void>),
+}));
 vi.mock("./scoring-runs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./scoring-runs")>();
   return {
@@ -71,6 +79,13 @@ vi.mock("./scoring-runs", async (importOriginal) => {
       breaking.assets
         ? Promise.reject(new Error("the engine broke"))
         : actual.writeAssetLines(...args),
+    finishRun: async (...args: Parameters<typeof actual.finishRun>) => {
+      const finished = await actual.finishRun(...args);
+      const hook = breaking.afterFinish;
+      breaking.afterFinish = null;
+      await hook?.();
+      return finished;
+    },
   };
 });
 
@@ -101,6 +116,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
   beforeEach(async () => {
     t = await createTestDb();
     breaking.assets = false;
+    breaking.afterFinish = null;
     users.clear();
   });
   afterEach(async () => {
@@ -441,6 +457,43 @@ describe("the scoring pipeline (DM 4.8)", () => {
       ]);
     });
 
+    it("the daily calendar sync sweeps a dead game_finalize, and the event goes final", async () => {
+      await replay({
+        actions: [
+          {
+            // Dead under its own key, so finalizing can't queue it again.
+            at: iso(47),
+            run: async (now) => {
+              const { id } = await enqueue(t.db, {
+                kind: "game_finalize",
+                dedupeKey: gameFinalizeKey(gameId, round1.id),
+                runAt: now,
+                payload: { gameId, eventId: round1.id },
+              });
+              await t.db
+                .update(jobs)
+                .set({ status: "dead", finishedAt: now })
+                .where(eq(jobs.id, id));
+            },
+          },
+        ],
+        // The sync after the +48 h check is at 06:00Z the next day at the latest.
+        until: iso(73),
+      });
+
+      const sweeps = (await allJobs(t.db)).filter(
+        (j) =>
+          j.dedupeKey.includes("game_finalize") &&
+          j.dedupeKey.includes(":sweep:"),
+      );
+      expect(sweeps).toMatchObject([{ status: "succeeded" }]);
+      expect(await statusOf(round1.id)).toBe("final");
+      expect(new Set((await totals(round1.id)).map((r) => r.status))).toEqual(
+        new Set(["final"]),
+      );
+      expect(await t.db.select().from(priceUpdateRuns)).toHaveLength(1);
+    });
+
     it("the same results twice queue one run", async () => {
       await replay({
         actions: [
@@ -579,6 +632,129 @@ describe("the scoring pipeline (DM 4.8)", () => {
       scoredAt = new Date(race.scheduledEnd.getTime() + HOUR);
       await at(lockAt);
       await at(scoredAt);
+    });
+
+    describe("the game_finalize sweep", () => {
+      const all = () => ({ ...createGameHandlers(), ...createScoreHandlers() });
+      const dayOf = (at: Date) => at.toISOString().slice(0, 10);
+      const sweepKey = (at: Date) =>
+        `${gameFinalizeKey(gameId, round1.id)}:sweep:${dayOf(at)}`;
+      const finalizeJobs = async () =>
+        (await allJobs(t.db)).filter((j) => j.kind === "game_finalize");
+      const completeEvent = () =>
+        t.db
+          .update(events)
+          .set({ status: "completed" })
+          .where(eq(events.id, round1.id));
+      /** Round 1 scored, its event completed and its finalize job queued. */
+      async function scoredAndCompleted() {
+        await queueResults();
+        await run();
+        await completeEvent();
+        return enqueue(t.db, {
+          kind: "game_finalize",
+          dedupeKey: gameFinalizeKey(gameId, round1.id),
+          runAt: scoredAt,
+          payload: {
+            gameId,
+            eventId: round1.id,
+          } satisfies GameFinalizePayload,
+          maxAttempts: 1,
+        });
+      }
+      const later = () => new Date(scoredAt.getTime() + 24 * HOUR);
+
+      it("a dead game_finalize is swept, and the event goes final", async () => {
+        await scoredAndCompleted();
+        const broken = {
+          ...all(),
+          game_finalize: () => Promise.reject(new Error("the database went")),
+        };
+        expect(await run(broken)).toMatchObject({ failed: 1 });
+        expect(await finalizeJobs()).toMatchObject([{ status: "dead" }]);
+        expect(await statusOf(round1.id)).toBe("scored");
+
+        await at(later());
+        await planGameJobs(t.db, later(), gameId);
+
+        expect(
+          (await finalizeJobs()).find((j) => j.dedupeKey === sweepKey(later())),
+        ).toMatchObject({
+          status: "pending",
+          runAt: later(),
+          payload: {
+            gameId,
+            eventId: round1.id,
+            sweep: dayOf(later()),
+          },
+        });
+        expect(await run(all())).toMatchObject({ failed: 0 });
+        expect(await statusOf(round1.id)).toBe("final");
+        expect(new Set((await totals(round1.id)).map((r) => r.status))).toEqual(
+          new Set(["final"]),
+        );
+        expect(await t.db.select().from(priceUpdateRuns)).toHaveLength(1);
+      });
+
+      it("a game event that locked after its event completed, so never had a job, is swept", async () => {
+        await queueResults();
+        await run();
+        await completeEvent();
+        expect(await finalizeJobs()).toEqual([]);
+
+        await at(later());
+        await planGameJobs(t.db, later(), gameId);
+        await run(all());
+
+        expect(await statusOf(round1.id)).toBe("final");
+      });
+
+      it("a pending game_finalize isn't doubled", async () => {
+        await scoredAndCompleted();
+        await at(later());
+        await planGameJobs(t.db, later(), gameId);
+        expect(await finalizeJobs()).toHaveLength(1);
+      });
+
+      it("one waiting to retry isn't doubled", async () => {
+        const { id } = await scoredAndCompleted();
+        await t.db
+          .update(jobs)
+          .set({ status: "failed" })
+          .where(eq(jobs.id, id));
+        await at(later());
+        await planGameJobs(t.db, later(), gameId);
+        expect(await finalizeJobs()).toHaveLength(1);
+      });
+
+      it("planning again the same day queues nothing more", async () => {
+        await queueResults();
+        await run();
+        await completeEvent();
+        await planGameJobs(t.db, scoredAt, gameId);
+        await planGameJobs(t.db, scoredAt, gameId);
+        expect(await finalizeJobs()).toHaveLength(1);
+      });
+
+      it("a game event that's already final isn't swept", async () => {
+        await queueResults();
+        await run();
+        await completeEvent();
+        await finalizeGameEvent(t.db, scoredAt, { gameId, eventId: round1.id });
+
+        await at(later());
+        await planGameJobs(t.db, later(), gameId);
+
+        expect(await finalizeJobs()).toEqual([]);
+      });
+
+      it("an event still to complete isn't swept", async () => {
+        await queueResults();
+        await run();
+        await at(later());
+        await planGameJobs(t.db, later(), gameId);
+        expect(await finalizeJobs()).toEqual([]);
+      });
     });
 
     describe("enqueueScoring", () => {
@@ -1061,6 +1237,43 @@ describe("the scoring pipeline (DM 4.8)", () => {
           before.map((r) => r.points),
         );
         expect(new Set(rows.map((r) => r.status))).toEqual(new Set(["final"]));
+      });
+
+      it("a cancel landing after the inline runs leaves the event cancelled, and publishes no prices", async () => {
+        await resultsIn();
+        breaking.afterFinish = async () => {
+          await cancelGameEvent();
+        };
+
+        await finalize();
+
+        expect(await runs(race.id)).toHaveLength(1);
+        expect(await statusOf(round1.id)).toBe("cancelled");
+        expect(await pricesFor(round2.id)).toEqual([]);
+        expect(await t.db.select().from(priceUpdateRuns)).toEqual([]);
+        expect(
+          (await allJobs(t.db)).filter((j) => j.kind === "game_open"),
+        ).toEqual([]);
+      });
+
+      it("a second pass after the next window opened raises no prices_carried", async () => {
+        await resultsIn();
+        // Past its lease, a second worker finishes the job, and round 2 opens.
+        breaking.afterFinish = async () => {
+          await finalize();
+          await run({ ...createGameHandlers(), ...createScoreHandlers() });
+        };
+
+        await finalize();
+
+        expect(await statusOf(round2.id)).toBe("open");
+        expect(await t.db.select().from(priceUpdateRuns)).toHaveLength(1);
+        expect(
+          await t.db
+            .select()
+            .from(reviewItems)
+            .where(eq(reviewItems.kind, "prices_carried")),
+        ).toEqual([]);
       });
 
       it("the formula's prices are written before the open job runs, and it is due now", async () => {
