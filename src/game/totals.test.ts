@@ -365,35 +365,108 @@ describe("event totals (DM 4.4)", () => {
   });
 
   it("a correction to an early event moves later running totals and ranks, but not later points", async () => {
+    await lockThrough(3);
+    await awardAll([
+      [50, 20, 0],
+      [-10, 30, 0],
+      [20, 25, 0],
+    ]);
+    await recomputeThrough(3);
+    // Before: A is on 50, 40, 60 and B on 20, 50, 75.
+    const shape = (rows: (typeof teamEventTotals.$inferSelect)[]) =>
+      rows.map((r) => [
+        r.points,
+        r.cumulativePoints,
+        r.firstReachedSequence,
+        r.globalRank,
+      ]);
+    expect(shape(await rowsOf(teamA))).toEqual([
+      [50, 50, 1, 1],
+      [-10, 40, 1, 2],
+      [20, 60, 3, 2],
+    ]);
+    expect(shape(await rowsOf(teamB))).toEqual([
+      [20, 20, 1, 2],
+      [30, 50, 2, 1],
+      [25, 75, 3, 1],
+    ]);
+
+    // Event 1 is corrected after event 3 is totalled: A was owed 30 more. The
+    // later events keep their points; their running totals and ranks move. A
+    // shift of every total leaves what was reached first alone.
+    await award(teamA, rounds[0]!, 30);
+    const corrected = new Date(LATER.getTime() + HOUR_MS);
+    expect(await recompute(rounds[0]!, corrected)).toEqual({
+      events: 3,
+      teams: 3,
+    });
+    expect(shape(await rowsOf(teamA))).toEqual([
+      [80, 80, 1, 1],
+      [-10, 70, 1, 1],
+      [20, 90, 3, 1],
+    ]);
+    expect(shape(await rowsOf(teamB))).toEqual([
+      [20, 20, 1, 2],
+      [30, 50, 2, 2],
+      [25, 75, 3, 2],
+    ]);
+    expect((await rowsOf(teamC)).map((r) => r.globalRank)).toEqual([3, 3, 3]);
+
+    // Then event 2 is: A lost 40 more there, which drops its total at event 3
+    // back below event 1's, so event 3 was first reached at event 1. Event 1's
+    // row is left alone.
+    await award(teamA, rounds[1]!, -40);
+    const again = new Date(corrected.getTime() + HOUR_MS);
+    expect(await recompute(rounds[1]!, again)).toEqual({ events: 2, teams: 3 });
+    const a = await rowsOf(teamA);
+    expect(shape(a)).toEqual([
+      [80, 80, 1, 1],
+      [-50, 30, 1, 2],
+      [20, 50, 1, 2],
+    ]);
+    expect(a[0]!.computedAt).toEqual(corrected);
+    expect(a[2]!.computedAt).toEqual(again);
+    expect(shape(await rowsOf(teamB))).toEqual([
+      [20, 20, 1, 2],
+      [30, 50, 2, 1],
+      [25, 75, 3, 1],
+    ]);
+  });
+
+  it("a rebuild leaves unchanged later rows alone", async () => {
     await lockThrough(2);
     await awardAll([
       [10, 5, 0],
       [10, 20, 0],
     ]);
     await recomputeThrough(2);
-    expect((await rowsOf(teamB))[1]!.globalRank).toBe(1);
 
-    // Recomputing the later event leaves the earlier one's rows alone.
-    await recompute(rounds[1]!, LATER);
-    expect((await rowsOf(teamA))[0]!.computedAt).toEqual(NOW);
-
-    // Event 1 is corrected: A was owed 20 more.
-    await award(teamA, rounds[0]!, 20);
-    const later = new Date(LATER.getTime() + HOUR_MS);
-    expect(await recompute(rounds[0]!, later)).toEqual({ events: 2, teams: 3 });
-
-    const a = await rowsOf(teamA);
-    expect(a.map((r) => [r.points, r.cumulativePoints, r.globalRank])).toEqual([
-      [30, 30, 1],
-      [10, 40, 1],
+    // Nothing moved: the later event's rows keep their time.
+    expect(await recompute(rounds[0]!, LATER)).toEqual({ events: 2, teams: 3 });
+    expect((await rowsOf(teamA)).map((r) => r.computedAt)).toEqual([
+      LATER,
+      NOW,
     ]);
-    expect(a[0]!.computedAt).toEqual(later);
-    const b = await rowsOf(teamB);
-    expect(b.map((r) => [r.points, r.cumulativePoints, r.globalRank])).toEqual([
-      [5, 5, 2],
-      [20, 25, 2],
+    expect((await rowsOf(teamC)).map((r) => r.computedAt)).toEqual([
+      LATER,
+      NOW,
     ]);
-    expect((await rowsOf(teamC)).map((r) => r.globalRank)).toEqual([3, 3]);
+  });
+
+  it("a rebuild brings later rows' status along", async () => {
+    await lockThrough(2);
+    await awardAll([[10], [10]]);
+    await recomputeThrough(2);
+    await t.db
+      .update(gameEvents)
+      .set({ status: "final" })
+      .where(eq(gameEvents.eventId, rounds[1]!.id));
+
+    await recompute(rounds[0]!, LATER);
+    expect((await rowsOf(teamA)).map((r) => [r.status, r.computedAt])).toEqual([
+      ["provisional", LATER],
+      ["final", LATER],
+    ]);
   });
 
   it("a team that joined late has no rows for earlier events", async () => {
@@ -566,9 +639,11 @@ describe("event totals (DM 4.4)", () => {
      * What B should score in the session by hand: its lineup's assets, and
      * the Boost's extra on top. The race counts the Late Call lineup.
      */
-    const expected = async (sessionId: string) => {
+    const expected = async (
+      sessionId: string,
+      picks = sessionId === race.id ? lateCall : locked,
+    ) => {
       const totals = await sessionPoints(sessionId);
-      const picks = sessionId === race.id ? lateCall : locked;
       const of = (assetId: string) => totals.get(assetId) ?? 0;
       const boosted = picks.find((p) => p.isBoost)!.assetId;
       return picks.reduce((sum, p) => sum + of(p.assetId), 0) + of(boosted);
@@ -608,13 +683,18 @@ describe("event totals (DM 4.4)", () => {
     expect(await boostLines(sprint.id)).toEqual([hadjar]);
     expect(await boostLines(race.id)).toEqual([lawson]);
 
-    const [before] = await rowsOf(teamB);
+    const atRound2 = async () =>
+      (await rowsOf(teamB)).find((r) => r.eventId === round2.id)!;
+    const before = await atRound2();
     for (const session of [qualifying, sprint, race]) {
-      expect(before!.pointsBySession[session.id]).toBe(
+      expect(before.pointsBySession[session.id]).toBe(
         await expected(session.id),
       );
     }
-    expect(before!.points).toBe(
+    expect(before.pointsBySession[qualifying.id]).not.toBe(
+      await expected(qualifying.id, lateCall),
+    );
+    expect(before.points).toBe(
       (await expected(qualifying.id)) +
         (await expected(sprint.id)) +
         (await expected(race.id)) +
@@ -642,26 +722,28 @@ describe("event totals (DM 4.4)", () => {
     // Hadjar's pole is 10 in qualifying, and his Boost doubles it; Lawson's
     // qualifying never reached B, who had swapped him in for the race only.
     expect((await sessionPoints(qualifying.id)).get(hadjar)).toBe(10);
-    const [row] = await rowsOf(teamB);
-    expect(row!.pointsBySession[qualifying.id]).toBe(
+    const row = await atRound2();
+    expect(row.pointsBySession[qualifying.id]).toBe(
       await expected(qualifying.id),
     );
-    expect(row!.pointsBySession[qualifying.id]).not.toBe(
-      before!.pointsBySession[qualifying.id],
+    // Not what the Late Call lineup would have scored there.
+    expect(row.pointsBySession[qualifying.id]).not.toBe(
+      await expected(qualifying.id, lateCall),
     );
-    expect(row!.pointsBySession[sprint.id]).toBe(
-      before!.pointsBySession[sprint.id],
+    expect(row.pointsBySession[qualifying.id]).not.toBe(
+      before.pointsBySession[qualifying.id],
     );
-    expect(row!.pointsBySession[race.id]).toBe(
-      before!.pointsBySession[race.id],
+    expect(row.pointsBySession[sprint.id]).toBe(
+      before.pointsBySession[sprint.id],
     );
-    expect(row!.points).toBe(
+    expect(row.pointsBySession[race.id]).toBe(before.pointsBySession[race.id]);
+    expect(row.points).toBe(
       (await expected(qualifying.id)) +
         (await expected(sprint.id)) +
         (await expected(race.id)) +
         (await eventLevel()),
     );
-    expect(row!.cumulativePoints).toBe(row!.points);
+    expect(row.cumulativePoints).toBe(row.points);
     expect(await boostLines(qualifying.id)).toEqual([hadjar]);
     expect(await boostLines(race.id)).toEqual([lawson]);
   });

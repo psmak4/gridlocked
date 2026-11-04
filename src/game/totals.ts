@@ -16,10 +16,16 @@ const resultSchema = z.object({ events: z.number(), teams: z.number() });
  * it, in one transaction, and returns how many events had their running
  * totals recomputed and how many teams' rows for `fromEventId` were written.
  *
- * Under the event's ledger lock, so it never runs between the steps of a
- * scoring run for the event, and a lock of its own on the game's totals: it
- * rewrites the rows of later events too, so two rebuilds of one game take
- * turns whichever event they start from.
+ * Takes the event's ledger lock, then a lock on the game's totals (in that
+ * order). The ledger lock is the one each scoring step takes in its own
+ * transaction, so a rebuild never interleaves with a single step; it does not
+ * span a run, so a rebuild between a run's steps can read new base lines next
+ * to old adjustment lines. A run's totals are right once its totals step
+ * (DM 4.8, step 3) recomputes after the last team batch. The totals lock is
+ * there because a rebuild writes the rows of later events too, so two rebuilds of
+ * one game take turns whichever event they start from. Call it for one
+ * `fromEventId` per transaction: two events in one transaction can deadlock
+ * against a scoring step, which takes the ledger lock of its own event.
  *
  * One statement does the work:
  * - **The event's rows** are one per team with a lock record for it
@@ -40,7 +46,9 @@ const resultSchema = z.object({ events: z.number(), teams: z.number() });
  * later event by sequence that has rows; those events' `points` are not
  * touched, so a correction to an early event moves the standings after it and
  * leaves what each later event scored. The rows' `status` is `final` once the
- * game event is `final`, otherwise `provisional`. Run again with nothing
+ * game event is `final`, otherwise `provisional`, later events' included. A
+ * later row is only updated when its total, first, rank or status changed,
+ * so its `computed_at` is when it last changed. Run again with nothing
  * changed, it writes the same rows.
  *
  * Throws for an event that is not in the game or has no sequence (cancelled).
@@ -165,10 +173,18 @@ export async function recomputeTotals(
           cumulative_points = k.cumulative,
           first_reached_sequence = k.first_reached,
           global_rank = k.global_rank,
+          status = k.status,
           computed_at = ${now.toISOString()}::timestamptz
-        from ranked k
+        from (
+          select r.team_id, r.event_id, r.cumulative, r.first_reached, r.global_rank,
+                 case when g.status = 'final' then 'final' else 'provisional' end as status
+          from ranked r
+          join game_events g on g.game_id = ${game} and g.event_id = r.event_id
+          where r.event_id <> ${from}
+        ) k
         where t.team_id = k.team_id and t.event_id = k.event_id
-          and k.event_id <> ${from}
+          and (t.cumulative_points, t.first_reached_sequence, t.global_rank, t.status)
+              is distinct from (k.cumulative, k.first_reached, k.global_rank, k.status)
         returning t.team_id
       )
       select (select count(distinct event_id) from ranked)::integer as events,
