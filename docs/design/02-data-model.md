@@ -1022,17 +1022,24 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 | game_id | uuid FK | |
 | session_id | uuid FK | Scoring is per session (delete and replace; decided, HLD §5.6) |
 | ruleset_version_id | uuid FK | |
-| engine_version | text | The scoring code's version. A bug fix bumps it |
-| input_fingerprint | text | Hash of everything read: the effective results, session exceptions, ruleset version and engine version. **If it matches the current run's fingerprint, the run is skipped**, which makes re-triggering free |
+| engine_version | text | The scoring code's version, `ENGINE_VERSION` in `src/scoring/engine.ts` (`2026.1`). A bug fix bumps it |
+| input_fingerprint | text | SHA-256 of everything read: the effective results, the session exception, the ruleset version with its rules and knockout params, the pool at the event and the engine version. **If it matches the current run's fingerprint, a live run is skipped**, which makes re-triggering free |
 | trigger | text: `results`, `override`, `exception`, `ruleset_correction`, `engine_change`, `admin`, `replay` | |
 | mode | text: `live`, `dry_run` | `dry_run` computes and reports differences without writing (4.9) |
 | status | text: `running`, `succeeded`, `failed`, `superseded` | |
-| is_current | boolean | **Partial unique index: at most one current run per `(game_id, session_id)`** |
-| inputs | jsonb | The effective results rows exactly as read, about 22 rows. That's what the score explanation cites, even if results change later |
-| diff_summary | jsonb, nullable | Counts of assets and teams whose points changed versus the previous current run, with the biggest changes. This feeds admin review and correction notices |
-| started_at, finished_at | timestamptz | |
+| is_current | boolean, default false | **Partial unique index: at most one current run per `(game_id, session_id)`**. Only a `live` run can be current (`CHECK`) |
+| inputs | jsonb, nullable | `{ results, exception }`: the effective results rows exactly as read (every column, by driver id), about 22 rows, and the session exception (`policy`, `reason`) or null. That's what the score explanation cites, even if results change later. Null until the run writes its lines |
+| diff_summary | jsonb, nullable | `{ previousRunId, assetsChanged, teamsChanged, biggest, assets }`: counts of assets and teams whose points changed versus the previous current run, the 10 biggest changes (`{ kind: "asset" \| "team", id, before, after, change }`, by size), and every changed asset's session points before and after. This feeds admin review and correction notices |
+| started_at, finished_at | timestamptz | From the caller's `now`. `finished_at` is set when the run succeeds or is superseded |
 
 **Concurrency:** if a second run starts while one is in flight for the same session (two corrections a minute apart), the later run wins. Each write step checks that its run is still the newest started one and stops if not, marking itself `superseded`. Two runs never interleave their writes.
+
+**As built** (`src/game/scoring-runs.ts`; each step is one transaction, so a job can run them one at a time, 4.8):
+- **`startRun`** reads the inputs and fingerprints them: the canonical JSON (object keys sorted at every depth, and the results, rules and pool sorted by driver, code and asset ID, so row order can't change it), hashed with SHA-256. A `live` run whose fingerprint equals the current run's is skipped and writes nothing; `force` skips the check, for a re-score an admin asks for. The new run is `running`. Only `qualifying`, `sprint` and `race` sessions score (the engine's kinds), and only in a game event that is `locked`, `scored` or `final`.
+- **`writeAssetLines`** reads the inputs again and scores them, so `inputs`, the fingerprint and the lines always agree. It replaces the session's lines and makes the run current (4.2), and computes the assets part of `diff_summary` against the lines it replaces. A `dry_run` stores its inputs and diff, but writes no lines and never becomes current.
+- **`writeTeamAdjustments`** writes the team lines in batches (4.3) and adds each team whose event points changed to `diff_summary`: its base points over the scored session's changed assets, plus its new adjustments against its old ones. A batch run again (a retried job) writes the same lines and counts no team twice.
+- **`finishRun`** marks the run `succeeded`, with `finished_at` and the final `diff_summary`.
+- **The newest started run** is the one with the highest ID (UUIDv7) of the **same mode** for the game and session, so a dry run never supersedes a live one. Every write step first takes the event's ledger lock (`pg_advisory_xact_lock` on the game and event) and then checks for a newer run. The asset lines of an event's sessions and its team lines are therefore written by one step at a time, and a batch never mixes two runs' asset lines.
 
 ### 4.2 `asset_score_lines` (tier 1: shared by every team)
 | Column | Type | Notes |
@@ -1047,13 +1054,14 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 | points | integer | |
 | detail | jsonb | For the explanation only, e.g. `{ "from": 7, "to": 3 }` or `{ "position": 2 }` |
 
-- **Unique `(game_id, session_id, asset_id, rule_code, coalesce(subject_driver_id, nil))`.**
+- **Unique `(game_id, session_id, asset_id, rule_code, coalesce(subject_driver_id, nil))`** (`asset_score_lines_line_unique`).
 - **How a constructor's aggregate is built:** the engine scores **every driver in the results**, not only pool drivers. A constructor's aggregate lines then sum the drivers whose result rows name that constructor in that session (1.9).
 - **Only pool assets get rows.** A non-pool driver's points exist only inside the constructor aggregate that used them.
 - **Inactive pool drivers get their penalty lines** even with no result row. The engine iterates the pool, not the results (HLD §6).
-- **Re-scoring a session** deletes its lines and inserts the new set in one transaction, tagged with the new `run_id` (HLD §5.6).
+- **Re-scoring a session** deletes its lines and inserts the new set in one transaction, tagged with the new `run_id` (HLD §5.6). A session with a `skip` exception (3.3) gets no lines.
+- **The pool at the event** is every asset added from that event or an earlier one, placed by sequence as the lineup check places it (`game_event_sequence_from`), withdrawn ones included (3.4).
 
-**`asset_session_totals`** is a view: points per asset per session, with per-category subtotals. Team math and the price formula read it.
+**`asset_session_totals`** is a view (`ledger_rules` migration): `(game_id, session_id, asset_id, points, by_category)`, the points per asset per session, with `by_category` the per-category subtotals as a JSON object. A category's subtotal is every line of that category, so a constructor's adds both its drivers' copied lines together, and No Negative floors that combined subtotal. An asset with no lines has no row. Team math and the price formula read it.
 
 ### 4.3 `team_adjustment_lines` (tier 2: what's specific to a team)
 | Column | Type | Notes |
@@ -1067,7 +1075,9 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 | points | integer | e.g. Boost = +1× the asset's session points, x3 = +2×, No Negative = the amount added back |
 | run_id | uuid FK | The scoring run that last wrote it |
 
-**`team_base_lines`** is a view, and needs no storage. For each team, scored session and asset in that session's effective lineup, it gives the asset's session points. The **effective lineup** is the locked version, or for the race session the Final Fix version where one exists (3.7). It's a straight join, so base lines can't disagree with asset scores.
+**`team_base_lines`** is a view (`ledger_rules` migration), and needs no storage: `(game_id, team_id, event_id, session_id, asset_id, points)`. For each lock record (`team_event_states`), session of its event and asset in that session's effective lineup with a row in `asset_session_totals`, it gives the asset's session points. The **effective lineup** is the locked version (`locked_version_id`), or the Final Fix version (`final_fix_version_id`) from the session it applies from, the race, onward, by `(scheduled_start, id)`: the order `effectiveLineup` uses (3.7). It's a straight join, so base lines can't disagree with asset scores, and an asset that scored 0 has no row.
+
+**Writing the lines** (`writeTeamAdjustments`): the teams with a lock record for the event, in ID order, about 1,000 per transaction. For each, `teamAdjustments` (`src/game/adjustments.ts`) runs over every scored session of the event (those with a current run), from `asset_session_totals`, the lock record (the locked and Final Fix versions, the chip played and `transfer_penalty`) and the event's prices. The team's lines for the **whole event** are deleted and the new set inserted, tagged with the run. A lock record whose `chip_play_id` doesn't match the team's played chip fails the batch.
 
 **A team's score explanation** is `team_base_lines` plus `team_adjustment_lines` for that team and event, and the two always add up to the stored total (4.4). A nightly check compares them for a sample of teams, and any mismatch alerts admins and triggers a rebuild.
 
@@ -1159,13 +1169,13 @@ Each step is a job (2.10) keyed by the run ID, so a re-run is safe and a superse
 - **A bug in the scoring code:** the fix bumps `engine_version`, which changes every fingerprint. An admin first runs a **dry run** across the season. The diff summary shows how many teams' points would change, and by how much. The live re-score runs only after the admin approves. Players then get a correction notice that names the reason.
 
 ### 4.10 Indexes beyond keys
-- `asset_score_lines (game_id, session_id)`: the per-session replace and the team view join.
+- `asset_score_lines (game_id, session_id)`: the per-session replace and the team view join. Served by the leading columns of its unique key (4.2), so there's no separate index.
 - `team_adjustment_lines (game_id, event_id)` and `(team_id, event_id)`: batch recompute and one team's explanation.
 - `team_event_totals (game_id, event_id, global_rank)` and `(team_id, event_sequence)`.
 - `league_memberships (team_id) WHERE left_at IS NULL`: "my leagues" and the 50-league cap.
 - `league_memberships (league_id) WHERE left_at IS NULL`: standings.
 - `league_standings (league_id, rank)`.
-- `scoring_runs (game_id, session_id) WHERE is_current`.
+- `scoring_runs (game_id, session_id) WHERE is_current`: the partial unique index of 4.1.
 
 ### 4.11 Scenario check
 | Scenario | Real example or source | How it's handled |
