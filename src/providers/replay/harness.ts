@@ -14,6 +14,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { events, seasons, sessions } from "@/db/schema";
+import { createGameHandlers } from "@/game/jobs";
 import { publishDueTimes, type DueStore } from "@/jobs/due-times";
 import { planEventJobs } from "@/jobs/plan-event";
 import type { TickDb, TickDeps } from "@/jobs/tick";
@@ -50,6 +51,16 @@ export interface ReplayOptions {
   inject?: Injection[];
   /** What an admin does while it runs (a held session, then its resolution). */
   admin?: AdminAction[];
+  /**
+   * Runs once, right after the reference data is imported: a test seeds its
+   * game here, with the clock at `at` (the start of the weekend).
+   */
+  setup?: (db: TickDb, at: Date) => Promise<void>;
+  /**
+   * Anything else done to the database at a given instant (a staff action).
+   * The due-times file is published after each, since one may queue a job.
+   */
+  actions?: Array<{ at: string; run: (now: Date) => Promise<void> }>;
   /** Results appear this long after a session's scheduled end. Default 30. */
   publishDelayMinutes?: number;
   /** `jump` (default) skips minutes with nothing due; `minute` visits every one. */
@@ -143,6 +154,7 @@ export async function replayWeekend(
   // --- Setup ---------------------------------------------------------------
   await setSimulatedClock(db, weekendStart);
   await importReference2026(db, fixedClock(weekendStart), fixturesDir);
+  await opts.setup?.(db, weekendStart);
 
   const [event] = await db
     .select({ id: events.id, seasonId: events.seasonId })
@@ -224,14 +236,18 @@ export async function replayWeekend(
     // which moves forward without waiting.
     handlers: async (tickDb, clock) => {
       tickClock = clock;
-      return createPipelineHandlers(
-        await createPipelineClients({
-          db: tickDb,
-          clock,
-          timer: virtualTimer(clock),
-          fetch: replayFetch,
-        }),
-      );
+      return {
+        ...createPipelineHandlers(
+          await createPipelineClients({
+            db: tickDb,
+            clock,
+            timer: virtualTimer(clock),
+            fetch: replayFetch,
+          }),
+        ),
+        // A game seeded by `setup` locks and opens as in production.
+        ...createGameHandlers(),
+      };
     },
     mode: "replay",
   };
@@ -241,26 +257,35 @@ export async function replayWeekend(
     from,
     until,
     step: opts.step ?? "jump",
-    actions: (opts.admin ?? []).map((action) => {
-      const session = eventSessions.find((s) => s.kind === action.session);
-      if (!session) {
-        throw new Error(`replay: the event has no ${action.session} session`);
-      }
-      return {
+    actions: [
+      ...(opts.admin ?? []).map((action) => {
+        const session = eventSessions.find((s) => s.kind === action.session);
+        if (!session) {
+          throw new Error(`replay: the event has no ${action.session} session`);
+        }
+        return {
+          at: new Date(action.at),
+          run: (now: Date) =>
+            applyAdminAction(
+              db,
+              now,
+              {
+                seasonId: seasonRow.id,
+                eventId: event.id,
+                sessionId: session.id,
+              },
+              action,
+            ),
+        };
+      }),
+      ...(opts.actions ?? []).map((action) => ({
         at: new Date(action.at),
-        run: (now: Date) =>
-          applyAdminAction(
-            db,
-            now,
-            {
-              seasonId: seasonRow.id,
-              eventId: event.id,
-              sessionId: session.id,
-            },
-            action,
-          ),
-      };
-    }),
+        run: async (now: Date) => {
+          await action.run(now);
+          await publishDueTimes(db, store, now);
+        },
+      })),
+    ],
   });
 
   return buildReport(db, event.id, {

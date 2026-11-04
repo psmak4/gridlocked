@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { sessionResultState, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { enqueueScoring } from "@/game/score-jobs";
 import { rosterCheck } from "@/reference/roster-check";
 import { advanceStatus } from "@/results/status";
 import { SCORED_KINDS } from "@/results/validate";
@@ -27,7 +28,9 @@ export interface StaffDeps {
  * FP3's participants are matched again against the new entries (when
  * `deps.rematchParticipants` is given), then the roster check, then
  * `advanceStatus` for every scored session that has results (a
- * `session_result_state` row). A `final` session is left as it is.
+ * `session_result_state` row), which also queues its scoring when its version
+ * is new (`enqueueScoring`). A `final` session keeps its status, and is
+ * re-scored only if its effective results changed.
  */
 export async function revalidateEvent(
   db: Db,
@@ -65,6 +68,11 @@ export async function revalidateEvent(
   const moves: SessionMove[] = [];
   for (const s of scored) {
     const advance = await advanceStatus(db, now, s.id);
+    await enqueueScoring(db, now, {
+      sessionId: s.id,
+      stamp: `v${advance.resultsVersion}`,
+      trigger: "override",
+    });
     moves.push({
       sessionId: s.id,
       kind: s.kind,

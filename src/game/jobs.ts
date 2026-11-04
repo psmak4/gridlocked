@@ -43,13 +43,9 @@ const HOUR_MS = 60 * MINUTE_MS;
 const LOCK_WAIT_MS = 5 * MINUTE_MS;
 
 /** An event in one of these has had its lock record written. */
-const LOCKED_OR_LATER: readonly GameEventStatus[] = [
-  "locked",
-  "scored",
-  "final",
-];
-const isLockedOrLater = (status: GameEventStatus) =>
-  LOCKED_OR_LATER.includes(status);
+export const LOCKED_OR_LATER = ["locked", "scored", "final"] as const;
+export const isLockedOrLater = (status: GameEventStatus) =>
+  (LOCKED_OR_LATER as readonly GameEventStatus[]).includes(status);
 
 /**
  * Writes a game's calendar-driven jobs as `pending` rows with future `run_at`
@@ -218,7 +214,6 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
       sequence: gameEvents.sequence,
       status: gameEvents.status,
       lockAt: events.lockAt,
-      eventStatus: events.status,
       params: rulesetVersions.params,
     })
     .from(gameEvents)
@@ -252,11 +247,13 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
  *   (its open job is on the way; it looks again every `window.recheckHours`). Otherwise it runs one `lockEvent` batch and
  *   queues `…:after:<lastTeamId>` until the event is locked.
  * - **`game_open`** opens an `upcoming` event once the event before it has
- *   locked, and either that event is `completed` or the event's own lock is
- *   less than the ruleset's `window.openCutoffHours` away (24 in 2026). Prices
- *   are carried for every asset that has none (`carryPrices`), then the event
- *   is `open`, in one transaction. Until then it re-checks every `window.recheckHours` (6)
- *   under `…:<n>`.
+ *   locked, and either that game event is `final`, so its formula prices are
+ *   written, or the event's own lock is less than the ruleset's
+ *   `window.openCutoffHours` away (24 in 2026). Prices are carried for every
+ *   asset that has none (`carryPrices`), then the event is `open`, in one
+ *   transaction. Until then it re-checks every `window.recheckHours` (6) under
+ *   `…:<n>`. `finalizeGameEvent` also queues one as soon as the event before is
+ *   `final`, under `…:final`, so the window needn't wait for a re-check.
  *
  * Every job that puts itself off carries its counter on (`wait`, `attempt`),
  * so a key it enqueues is never one an earlier job of the chain used. A lock
@@ -365,15 +362,15 @@ export function createGameHandlers(
       (row) => row.status === "cancelled" || isLockedOrLater(row.status),
     );
     const due =
-      previous.eventStatus === "completed" ||
+      previous.status === "final" ||
       now.getTime() >= own.lockAt.getTime() - window.openCutoffHours * HOUR_MS;
     if (!locked || !due) return recheck();
 
     await db.transaction(async (tx) => {
       // The prices are the list the lineups are checked against: carried from
       // the last event for every asset with none, even after a full list was
-      // published (M4 publishes the formula's before this runs), since an
-      // owned asset withdrawn since still needs one.
+      // published (`finalizeGameEvent` publishes the formula's before this
+      // runs), since an owned asset withdrawn since still needs one.
       await carryPrices(tx, now, { gameId, eventId });
       await tx
         .update(gameEvents)

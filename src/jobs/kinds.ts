@@ -1,10 +1,13 @@
 import { z } from "zod";
+import { SCORING_RUN_TRIGGERS } from "@/db/schema";
 
 /**
- * The job kinds of the ingestion pipeline. Scoring and threads add theirs in
- * M4 and M7. `game_lock` and `game_open` are the game layer's (handlers in
- * `src/game/jobs.ts`). `normalize` and `validate` are reserved: the poll and finalize
- * jobs run both steps inline, so nothing enqueues them yet.
+ * The job kinds of the ingestion pipeline. Threads add theirs in M7.
+ * `game_lock` and `game_open` are the game layer's (handlers in
+ * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
+ * pipeline's (handlers in `src/game/score-jobs.ts`). `normalize` and `validate`
+ * are reserved: the poll and finalize jobs run both steps inline, so nothing
+ * enqueues them yet.
  *
  * `queue.ts` keeps `JobKind = string` so the generic queue and its tests stay
  * free of this list; handler maps for this union are `Record<JobKind,
@@ -19,6 +22,8 @@ export const JOB_KINDS = [
   "roster_check",
   "game_lock",
   "game_open",
+  "score_session",
+  "game_finalize",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -127,6 +132,42 @@ export const gameOpenPayload = z.object({
 });
 export type GameOpenPayload = z.infer<typeof gameOpenPayload>;
 
+/**
+ * One step of a scoring run (DM 4.8). The first job is `assets`, with no
+ * `runId`: it starts the run. `teams` then runs a batch after `afterTeamId`,
+ * and `standings` closes the run. `trigger` says why the run started.
+ */
+export const scoreSessionPayload = z.object({
+  gameId: z.string().min(1),
+  sessionId: z.string().min(1),
+  trigger: z.enum(SCORING_RUN_TRIGGERS),
+  runId: z.string().min(1).optional(),
+  step: z.enum(["assets", "teams", "standings"]),
+  afterTeamId: z.string().min(1).optional(),
+});
+export type ScoreSessionPayload = z.infer<typeof scoreSessionPayload>;
+
+export const gameFinalizePayload = z.object({
+  gameId: z.string().min(1),
+  eventId: z.string().min(1),
+});
+export type GameFinalizePayload = z.infer<typeof gameFinalizePayload>;
+
+/**
+ * The first job of a run. `stamp` says what changed: `v<resultsVersion>` for
+ * the results hooks, `x:<auditId>` for an exception change.
+ */
+export const scoreKey = (gameId: string, sessionId: string, stamp: string) =>
+  `score:${gameId}:${sessionId}:${stamp}`;
+/** A later step of a run: `teams` after a team, or from the `start`. */
+export const scoreStepKey = (
+  runId: string,
+  step: "teams" | "standings",
+  afterTeamId?: string,
+) => `score:${runId}:${step}:${afterTeamId ?? "start"}`;
+export const gameFinalizeKey = (gameId: string, eventId: string) =>
+  `game_finalize:${gameId}:${eventId}`;
+
 export const gameLockKey = (gameId: string, eventId: string) =>
   `game_lock:${gameId}:${eventId}`;
 /**
@@ -159,6 +200,9 @@ export const gameLockWaitKey = (
 ) => `${lockChainKey(gameId, eventId, sweep)}:wait:${n}`;
 export const gameOpenKey = (gameId: string, eventId: string) =>
   `game_open:${gameId}:${eventId}`;
+/** The open `finalizeGameEvent` queues: the planned key is already taken. */
+export const gameOpenFinalKey = (gameId: string, eventId: string) =>
+  `${gameOpenKey(gameId, eventId)}:final`;
 /** The `n`th re-check of an open job that was not yet time. */
 /**
  * An open sweep for the UTC day `day` (YYYY-MM-DD): queued by planning for an

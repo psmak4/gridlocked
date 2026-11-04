@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { and, asc, eq, getTableColumns, gt, inArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  getTableColumns,
+  gt,
+  inArray,
+  lt,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import {
   assetScoreLines,
@@ -114,7 +123,10 @@ type DiffSummary = z.infer<typeof diffSchema>;
  * skips. The check and the insert hold the event's ledger lock, so a
  * `writeAssetLines` in flight commits first and the check sees what it made
  * current. The new run is `running`; the newest started is the one with the
- * highest id.
+ * highest id. A new live run also marks every earlier `running` live run of the
+ * session `superseded`, in the same transaction, so a retried first step
+ * doesn't leave its first run `running` for ever; a chain still in flight sees
+ * the newer run and stops, as it would have anyway.
  *
  * Throws for a session the engine doesn't score (only qualifying, sprint and
  * race do), and for one whose event the game hasn't locked.
@@ -165,6 +177,20 @@ export async function startRun(
       status: "running",
       startedAt: now,
     });
+    if (mode === "live") {
+      await tx
+        .update(scoringRuns)
+        .set({ status: "superseded", finishedAt: now })
+        .where(
+          and(
+            eq(scoringRuns.gameId, gameId),
+            eq(scoringRuns.sessionId, sessionId),
+            eq(scoringRuns.mode, "live"),
+            eq(scoringRuns.status, "running"),
+            lt(scoringRuns.id, runId),
+          ),
+        );
+    }
     return { runId };
   });
 }
@@ -540,6 +566,19 @@ export async function finishRun(
       .where(eq(scoringRuns.id, run.id));
     return "succeeded";
   });
+}
+
+/**
+ * Marks a run `failed`, with its `finished_at`, when the job running it has no
+ * attempts left. Only a `running` run: one that went on or was superseded
+ * keeps its status. Its lines stay until the next run replaces them, and a
+ * failed current run is never skipped against, so that run always goes ahead.
+ */
+export async function failRun(db: Db, now: Date, runId: string): Promise<void> {
+  await db
+    .update(scoringRuns)
+    .set({ status: "failed", finishedAt: now })
+    .where(and(eq(scoringRuns.id, runId), eq(scoringRuns.status, "running")));
 }
 
 /** The session, with its game event's ruleset version and pool sequence. */

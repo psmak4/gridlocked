@@ -92,11 +92,12 @@ describe("the game jobs (HLD §3.3)", () => {
         ).map((s) => s.end.getTime()),
       ),
     );
-  const complete = (eventId: string) =>
+  /** The game event is `final`, as `finalizeGameEvent` leaves it. */
+  const finalize = (eventId: string) =>
     t.db
-      .update(events)
-      .set({ status: "completed" })
-      .where(eq(events.id, eventId));
+      .update(gameEvents)
+      .set({ status: "final" })
+      .where(eq(gameEvents.eventId, eventId));
   /** Queues the open job of round 2 alone, as planning would. */
   const queueOpen = (runAt: Date) => {
     const payload: GameOpenPayload = { gameId, eventId: round2.id };
@@ -443,9 +444,9 @@ describe("the game jobs (HLD §3.3)", () => {
     });
   });
 
-  it("round 2 opens with carried prices once round 1 is completed", async () => {
+  it("round 2 opens with carried prices once round 1 is final", async () => {
     await lockRound(t.db, gameId, round1.id);
-    await complete(round1.id);
+    await finalize(round1.id);
     await planGameJobs(t.db, clock.now(), gameId);
     const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
     await at(planned);
@@ -480,7 +481,7 @@ describe("the game jobs (HLD §3.3)", () => {
     ).toEqual([]);
   });
 
-  it("round 2 stays closed while round 1 is not completed, re-checking every 6 hours", async () => {
+  it("round 2 stays closed while round 1 is not final, re-checking every 6 hours", async () => {
     await lockRound(t.db, gameId, round1.id);
     const first = new Date((await raceEnd(round1.id)).getTime() + 48 * HOUR);
     await queueOpen(first);
@@ -502,8 +503,8 @@ describe("the game jobs (HLD §3.3)", () => {
       runAt: new Date(first.getTime() + 12 * HOUR),
     });
 
-    // Round 1 completes: the next re-check opens round 2.
-    await complete(round1.id);
+    // Round 1 is final: the next re-check opens round 2.
+    await finalize(round1.id);
     await at(new Date(first.getTime() + 12 * HOUR));
     expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
     expect(await statusOf(round2.id)).toBe("open");
@@ -533,9 +534,27 @@ describe("the game jobs (HLD §3.3)", () => {
     expect(new Set(prices.map((p) => p.source))).toEqual(new Set(["carried"]));
   });
 
+  it("round 2 doesn't open on round 1's event being completed, only on its game event being final", async () => {
+    await lockRound(t.db, gameId, round1.id);
+    await t.db
+      .update(events)
+      .set({ status: "completed" })
+      .where(eq(events.id, round1.id));
+    const first = new Date((await raceEnd(round1.id)).getTime() + 48 * HOUR);
+    await queueOpen(first);
+
+    await at(first);
+    expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
+    expect(await statusOf(round2.id)).toBe("upcoming");
+  });
+
   it("round 2 never opens before round 1 is locked", async () => {
-    // Round 1 is completed but still open: its lock has not run.
-    await complete(round1.id);
+    // Its event is completed, but the game event is still open: its lock has
+    // not run.
+    await t.db
+      .update(events)
+      .set({ status: "completed" })
+      .where(eq(events.id, round1.id));
     const first = new Date((await raceEnd(round1.id)).getTime() + 48 * HOUR);
     await queueOpen(first);
 
@@ -554,8 +573,9 @@ describe("the game jobs (HLD §3.3)", () => {
       .where(eq(assetPrices.eventId, round2.id));
     expect(prices).toEqual([]);
 
-    // Once round 1 locks, the next check opens round 2.
+    // Once round 1 has locked and is final, the next check opens round 2.
     await lockRound(t.db, gameId, round1.id);
+    await finalize(round1.id);
     await at(new Date(first.getTime() + 6 * HOUR));
     expect(await run()).toEqual({ ran: 1, failed: 0, lost: 0 });
     expect(await statusOf(round2.id)).toBe("open");
@@ -586,9 +606,9 @@ describe("the game jobs (HLD §3.3)", () => {
         .map(([assetId, price]) => ({ assetId, price })),
     });
   }
-  /** Round 1 is completed, and round 2's planned open job runs. */
+  /** Round 1 is final, and round 2's planned open job runs. */
   async function openRound2() {
-    await complete(round1.id);
+    await finalize(round1.id);
     await planGameJobs(t.db, clock.now(), gameId);
     const planned = (await jobByKey(`game_open:${gameId}:${round2.id}`))!.runAt;
     await at(planned);
@@ -804,7 +824,7 @@ describe("the game jobs (HLD §3.3)", () => {
     expect(await jobByKey(key)).toMatchObject({ status: "dead", attempts: 5 });
     expect(await statusOf(round2.id)).toBe("upcoming");
 
-    await complete(round1.id);
+    await finalize(round1.id);
     const later = new Date((await jobByKey(key))!.runAt.getTime() + HOUR);
     await at(later);
     await planGameJobs(t.db, later, gameId);
@@ -838,7 +858,7 @@ describe("the game jobs (HLD §3.3)", () => {
     await at(clock.now());
     await planGameJobs(t.db, clock.now(), gameId);
     const key = gameOpenKey(gameId, round2.id);
-    // The planned job re-checks once (round 1 isn't completed), and the
+    // The planned job re-checks once (round 1 isn't final), and the
     // re-check dies.
     await at((await jobByKey(key))!.runAt);
     expect(await run(1)).toMatchObject({ failed: 0 });
@@ -853,13 +873,13 @@ describe("the game jobs (HLD §3.3)", () => {
     }
     expect(await jobByKey(recheck)).toMatchObject({ status: "dead" });
 
-    // Still not completed: the sweep re-checks, then opens once it is.
+    // Still not final: the sweep re-checks, then opens once it is.
     const later = new Date((await jobByKey(recheck))!.runAt.getTime() + HOUR);
     await at(later);
     await planGameJobs(t.db, later, gameId);
     expect(await run(1)).toMatchObject({ failed: 0 });
     expect(await statusOf(round2.id)).toBe("upcoming");
-    await complete(round1.id);
+    await finalize(round1.id);
     const [next] = (await gameJobs()).filter(
       (j) =>
         j.status === "pending" &&

@@ -10,12 +10,14 @@ import {
 import type { Db } from "@/db/types";
 import { STAFF_PLACEHOLDER_USER_ID } from "@/staff/results";
 import { audit, requireReason, type StaffActor } from "@/staff/roster";
+import { enqueueScoring } from "./score-jobs";
 
 // Abandoned sessions (DM 3.3, 3.9): a session the game doesn't score as
 // normal, such as a race abandoned with a classification that the admins
 // decide to void. By default the game scores it as classified (the ruleset's
 // `abandonedSessions`). Setting and clearing an exception are staff actions,
-// audited in the same transaction; the re-score they trigger arrives in M4.
+// audited in the same transaction, which also queues the session's re-score
+// (`enqueueScoring`, keyed by the audit row) for a session already scored.
 // Cancelled events are the calendar's, and `planGameEvents` handles them.
 // Reads reference data, never writes it (DM 0.5).
 
@@ -47,7 +49,7 @@ async function checkGameSession(
 
 /**
  * Sets a session's exception for a game: with `skip`, the game doesn't score
- * the session. Refuses, writing nothing: a blank reason, a session that isn't
+ * the session, and the session is re-scored if it had results. Refuses, writing nothing: a blank reason, a session that isn't
  * one of the game's, and a session that already has an exception (one per
  * session per game; clear it first).
  */
@@ -92,7 +94,7 @@ export async function setSessionException(
       createdAt: now,
       updatedAt: now,
     });
-    await writeAudit(tx, now, {
+    const auditId = await writeAudit(tx, now, {
       ...meta,
       action: "game_session_exception.set",
       entityType: "game_session_exception",
@@ -100,12 +102,18 @@ export async function setSessionException(
       before: null,
       after: { gameId, policy },
     });
+    await enqueueScoring(tx, now, {
+      sessionId,
+      stamp: `x:${auditId}`,
+      trigger: "exception",
+      gameId,
+    });
   });
 }
 
 /**
  * Clears a session's exception for a game, so the game scores the session as
- * normal again. The row goes; the audit keeps what it said. Refuses, writing
+ * normal again, re-scoring it if it had results. The row goes; the audit keeps what it said. Refuses, writing
  * nothing: a blank reason, and a session with no exception.
  */
 export async function clearSessionException(
@@ -136,13 +144,19 @@ export async function clearSessionException(
         `session ${sessionId} has no exception in game ${gameId}`,
       );
     }
-    await writeAudit(tx, now, {
+    const auditId = await writeAudit(tx, now, {
       ...meta,
       action: "game_session_exception.clear",
       entityType: "game_session_exception",
       entityId: sessionId,
       before: { gameId, policy: removed.policy, reason: removed.reason },
       after: null,
+    });
+    await enqueueScoring(tx, now, {
+      sessionId,
+      stamp: `x:${auditId}`,
+      trigger: "exception",
+      gameId,
     });
   });
 }

@@ -45,7 +45,9 @@ describe("the 2026 season replay", () => {
       .select({ status: gameEvents.status })
       .from(gameEvents)
       .where(ne(gameEvents.status, "cancelled"));
-    expect(new Set(game.map((e) => e.status))).toEqual(new Set(["locked"]));
+    expect(new Set(game.map((e) => e.status))).toEqual(
+      new Set(["final", "locked"]),
+    );
   });
 
   it("refused equals the script's expectRefused count", () => {
@@ -69,7 +71,7 @@ describe("the 2026 season replay", () => {
       })
       .from(gameEvents)
       .innerJoin(events, eq(events.id, gameEvents.eventId))
-      .where(eq(gameEvents.status, "locked"))
+      .where(ne(gameEvents.status, "cancelled"))
       .orderBy(asc(gameEvents.sequence));
 
     let rows = 0;

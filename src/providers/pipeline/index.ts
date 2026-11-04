@@ -1,3 +1,4 @@
+import { createScoreHandlers } from "@/game/score-jobs";
 import { createFinalizeHandler } from "@/jobs/finalize";
 import { createPollHandler } from "@/jobs/poll";
 import { createRosterHandler } from "@/jobs/roster";
@@ -16,10 +17,17 @@ export interface PipelineDeps {
    */
   jolpica: ProviderClient;
   openf1: ProviderClient;
+  /** Teams per `teams` job of a scoring run; about 1,000 when absent. */
+  scoreBatchSize?: number;
 }
 
 export type PipelineHandlers = Record<
-  "sync_calendar" | "poll_session" | "finalize_check" | "roster_check",
+  | "sync_calendar"
+  | "poll_session"
+  | "finalize_check"
+  | "roster_check"
+  | "score_session"
+  | "game_finalize",
   JobHandler
 >;
 
@@ -39,5 +47,6 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
     roster_check: createRosterHandler(
       createOpenF1ParticipantsSource(deps.openf1),
     ),
+    ...createScoreHandlers({ batchSize: deps.scoreBatchSize }),
   };
 }
