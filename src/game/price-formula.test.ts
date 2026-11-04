@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
   lockRound,
@@ -21,7 +21,7 @@ import { setSimulatedClock } from "@/replay/clock-loop";
 import { planGameEvents } from "./games";
 import { openGame } from "./lineups";
 import { priceChange, runPriceUpdate } from "./price-formula";
-import { priceList } from "./prices";
+import { priceList, publishPrices } from "./prices";
 import { withdrawPoolAsset } from "./pool";
 import { RULESET_2026 } from "./ruleset";
 
@@ -31,13 +31,21 @@ import { RULESET_2026 } from "./ruleset";
 const NOW = new Date("2026-02-01T09:00:00.000Z");
 const { formula } = RULESET_2026.prices;
 const { min, max } = RULESET_2026.prices;
+const bounds = { min, max };
 
 /** A price, the points that tier it, and what the band does with them. */
 const change = (
   price: number,
   average: number,
   assetType: "driver" | "constructor" = "driver",
-) => priceChange({ price, assetType, recentPoints: [average], formula });
+) =>
+  priceChange({
+    price,
+    assetType,
+    recentPoints: [average],
+    formula,
+    bounds,
+  });
 
 describe("priceChange (pure)", () => {
   it("each tier maps to its change in each band", () => {
@@ -79,7 +87,7 @@ describe("priceChange (pure)", () => {
       pointsPerMillion: { driver: 1, constructor: 2 },
     };
     // 20 points on $10M: a driver's baseline is 10, a constructor's 20.
-    const base = { price: 100, recentPoints: [20], formula: own };
+    const base = { price: 100, recentPoints: [20], formula: own, bounds };
     expect(priceChange({ ...base, assetType: "driver" }).tier).toBe("great");
     expect(priceChange({ ...base, assetType: "constructor" }).tier).toBe(
       "good",
@@ -101,9 +109,32 @@ describe("priceChange (pure)", () => {
     expect(change(32, 0).newPrice).toBe(min);
   });
 
+  it("a version's own bounds clamp the price", () => {
+    const bounds = { min: 50, max: 300 };
+    const run = (price: number, average: number) =>
+      priceChange({
+        price,
+        assetType: "driver",
+        recentPoints: [average],
+        formula,
+        bounds,
+      });
+    // Cheap and terrible: 52 - 6 would be 46. Expensive and great: 298 + 3.
+    expect(run(52, 0)).toEqual({ tier: "terrible", change: -6, newPrice: 50 });
+    expect(run(298, 1000)).toEqual({ tier: "great", change: 3, newPrice: 300 });
+    // Inside the bounds nothing is clamped.
+    expect(run(100, 20).newPrice).toBe(106);
+  });
+
   it("fewer than three events average what there is", () => {
     const run = (recentPoints: number[]) =>
-      priceChange({ price: 100, assetType: "driver", recentPoints, formula });
+      priceChange({
+        price: 100,
+        assetType: "driver",
+        recentPoints,
+        formula,
+        bounds,
+      });
     // Averages of 12 in each case: ratio 1.2, good.
     expect(run([12])).toEqual(run([12, 12, 12]));
     expect(run([10, 14])).toEqual(run([12, 12, 12]));
@@ -112,7 +143,13 @@ describe("priceChange (pure)", () => {
 
   it("only the newest three events count, the last ones in the list", () => {
     const run = (recentPoints: number[]) =>
-      priceChange({ price: 100, assetType: "driver", recentPoints, formula });
+      priceChange({
+        price: 100,
+        assetType: "driver",
+        recentPoints,
+        formula,
+        bounds,
+      });
     // 100 is the oldest and is outside the window: the average is 3.
     expect(run([100, 3, 3, 3]).tier).toBe("terrible");
     expect(run([3, 3, 3, 100]).tier).toBe("great");
@@ -130,6 +167,7 @@ describe("priceChange (pure)", () => {
         assetType: "constructor",
         recentPoints: [-20, 10],
         formula,
+        bounds,
       }).tier,
     ).toBe("terrible");
   });
@@ -141,6 +179,7 @@ describe("priceChange (pure)", () => {
         assetType: "driver",
         recentPoints: [],
         formula,
+        bounds,
       }),
     ).toEqual({ tier: null, change: 0, newPrice: 123 });
   });
@@ -403,6 +442,48 @@ describe("runPriceUpdate (DM 3.5)", () => {
     expect(result).toHaveProperty("runId");
     // $3.6M expects 3.6 points: 30 is ratio 8.3, great, cheap +6.
     expect((await pricesOf(rounds[1]!.id)).get(bottas)).toBe(42);
+  });
+
+  it("a formula run keeps an admin price", async () => {
+    const norris = await game.assetId("norris");
+    await publishPrices(t.db, NOW, {
+      gameId,
+      eventId: rounds[1]!.id,
+      source: "admin",
+      reason: "Hand-set",
+      actor: { kind: "admin", label: "staff" },
+      prices: [{ assetId: norris, price: 300 }],
+    });
+    await score(rounds[0]!.id, { norris: 40, piastri: 20 });
+    const { runId } = (await update(rounds[0]!.id)) as { runId: string };
+
+    const [row] = await t.db
+      .select()
+      .from(assetPrices)
+      .where(
+        and(
+          eq(assetPrices.eventId, rounds[1]!.id),
+          eq(assetPrices.assetId, norris),
+        ),
+      );
+    expect(row).toMatchObject({ price: 300, source: "admin", runId: null });
+    // The rest of the list is the formula's, and the list is complete.
+    const prices = await pricesOf(rounds[1]!.id);
+    expect(prices.size).toBe(33);
+    expect(prices.get(await game.assetId("piastri"))).toBe(249);
+
+    const [run] = await t.db
+      .select()
+      .from(priceUpdateRuns)
+      .where(eq(priceUpdateRuns.id, runId));
+    const assets = (run!.inputs as { assets: Record<string, unknown>[] })
+      .assets;
+    expect(assets.find((a) => a.assetId === norris)).toMatchObject({
+      kept: "admin",
+      recentPoints: [40],
+      tier: "good",
+    });
+    expect(assets.filter((a) => a.kept !== undefined)).toHaveLength(1);
   });
 
   it("running again replaces the run's prices without a second price", async () => {

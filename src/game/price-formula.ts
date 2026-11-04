@@ -4,8 +4,6 @@ import {
   assetSessionTotals,
   gameEvents,
   poolAssets,
-  PRICE_MAX,
-  PRICE_MIN,
   priceUpdateRuns,
   rulesetVersions,
   scoringRuns,
@@ -59,7 +57,7 @@ export function priceRatio(input: {
 
 /**
  * The formula for one asset: its tier, the change in $0.1M that tier means in
- * its price band, and the new price, clamped to $3M-$34M. `change`
+ * its price band, and the new price, clamped to the version's bounds. `change`
  * is the tier's change before the clamp. `recentPoints` is the asset's points
  * in its recent events, oldest first; only the newest `formula.window` count,
  * and with none the price stands and the tier is null.
@@ -69,6 +67,8 @@ export function priceChange(input: {
   assetType: PoolAssetType;
   recentPoints: number[];
   formula: PriceFormula;
+  /** The version's `prices.min` and `prices.max`. */
+  bounds: { min: MoneyUnits; max: MoneyUnits };
 }): { tier: PriceTier | null; change: number; newPrice: MoneyUnits } {
   const { price, formula } = input;
   const average = recentAverage(input.recentPoints, formula.window);
@@ -82,7 +82,10 @@ export function priceChange(input: {
   return {
     tier: TIERS[index]!,
     change,
-    newPrice: Math.min(PRICE_MAX, Math.max(PRICE_MIN, price + change)),
+    newPrice: Math.min(
+      input.bounds.max,
+      Math.max(input.bounds.min, price + change),
+    ),
   };
 }
 
@@ -99,6 +102,8 @@ interface AssetInput {
   tier: PriceTier | null;
   change: number;
   newPrice: MoneyUnits;
+  /** Set when the next event already has this asset's price from staff: it stays. */
+  kept?: "admin";
 }
 
 /**
@@ -107,7 +112,8 @@ interface AssetInput {
  * sequence, priced by the ruleset version in force for it. Every asset with a
  * price for `afterEventId` is priced, withdrawn ones included, since owners
  * keep them; an asset with none (one added since) keeps any price it already
- * has for the next event. An asset with no lines in a scored event scored 0
+ * has for the next event, as does one whose price for the next event is
+ * already an `admin` one (recorded in `inputs` as `kept`). An asset with no lines in a scored event scored 0
  * there. Then `publishPrices` completes the list. Running it again replaces
  * the rows with a new run.
  *
@@ -150,7 +156,9 @@ export async function runPriceUpdate(
       .from(rulesetVersions)
       .where(eq(rulesetVersions.id, (next ?? after).rulesetVersionId));
     if (!version) throw new Error("price update: the event has no ruleset");
-    const { formula } = rulesetParamsSchema.parse(version.params).prices;
+    const { formula, min, max } = rulesetParamsSchema.parse(
+      version.params,
+    ).prices;
 
     // Scored events up to this one, newest first: those with a session whose
     // lines are a current run's. Only as many as the formula averages.
@@ -220,11 +228,26 @@ export async function runPriceUpdate(
         ),
       )
       .orderBy(asc(assetPrices.assetId));
+    // A price staff set for the next event stays (DM 3.5).
+    const admin = new Map(
+      (
+        await tx
+          .select({ assetId: assetPrices.assetId, price: assetPrices.price })
+          .from(assetPrices)
+          .where(
+            and(
+              eq(assetPrices.eventId, next.eventId),
+              eq(assetPrices.source, "admin"),
+            ),
+          )
+      ).map((row) => [row.assetId, row.price]),
+    );
     const assets: AssetInput[] = priced.map(({ assetId, assetType, price }) => {
       const recentPoints = eventIds.map(
         (eventId) => totals.get(`${eventId}/${assetId}`) ?? 0,
       );
       const average = recentAverage(recentPoints, formula.window);
+      const kept = admin.get(assetId);
       return {
         assetId,
         assetType,
@@ -235,7 +258,16 @@ export async function runPriceUpdate(
           average === null
             ? null
             : priceRatio({ price, assetType, average, formula }),
-        ...priceChange({ price, assetType, recentPoints, formula }),
+        ...priceChange({
+          price,
+          assetType,
+          recentPoints,
+          formula,
+          bounds: { min, max },
+        }),
+        ...(kept === undefined
+          ? {}
+          : { kept: "admin" as const, change: 0, newPrice: kept }),
       };
     });
 
@@ -254,7 +286,9 @@ export async function runPriceUpdate(
       eventId: next.eventId,
       source: "formula",
       runId,
-      prices: assets.map((a) => ({ assetId: a.assetId, price: a.newPrice })),
+      prices: assets
+        .filter((a) => a.kept === undefined)
+        .map((a) => ({ assetId: a.assetId, price: a.newPrice })),
     });
     return { runId };
   });
