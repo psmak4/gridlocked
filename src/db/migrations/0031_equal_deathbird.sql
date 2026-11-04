@@ -1,0 +1,1 @@
+ALTER TABLE "ruleset_versions" ADD COLUMN "is_correction" boolean DEFAULT false NOT NULL;

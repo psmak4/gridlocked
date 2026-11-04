@@ -23,7 +23,8 @@ function cleanName(name: string): string {
 
 /**
  * Creates an `active` team for a user and returns its ID. It takes `slot`, or
- * the lowest free one. A retired team still holds its slot. Refused unless the
+ * the lowest free one, up to the `teamsPerUser` of the game's latest version
+ * that isn't a correction. A retired team still holds its slot. Refused unless the
  * game is `open` or `running` (`game_not_open`), when every slot is taken or
  * `slot` is taken or out of range (`no_free_slot`), and when the trimmed name
  * is not 1 to 30 characters (`bad_name`). The database also enforces the slot
@@ -49,7 +50,12 @@ export async function createTeam(
     const [version] = await tx
       .select({ params: rulesetVersions.params })
       .from(rulesetVersions)
-      .where(eq(rulesetVersions.gameId, input.gameId))
+      .where(
+        and(
+          eq(rulesetVersions.gameId, input.gameId),
+          eq(rulesetVersions.isCorrection, false),
+        ),
+      )
       .orderBy(desc(rulesetVersions.version))
       .limit(1);
     if (!version) {

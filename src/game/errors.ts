@@ -18,7 +18,9 @@ export type GameErrorCode =
   | "league_cap"
   | "team_not_owned"
   | "team_retired"
-  | "already_member";
+  | "already_member"
+  | "dry_run_required"
+  | "game_not_running";
 
 export class GameError extends Error {
   readonly code: GameErrorCode;

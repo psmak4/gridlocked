@@ -86,32 +86,58 @@ export async function createGame(
       createdAt: now,
       updatedAt: now,
     });
-    const rulesetVersionId = newId();
-    await tx.insert(rulesetVersions).values({
-      id: rulesetVersionId,
+    const rulesetVersionId = await insertRulesetVersion(tx, now, {
       gameId,
       version: 1,
       effectiveFromEventId: first.id,
       params,
+      rules,
       notes: input.notes,
-      publishedAt: now,
-      createdAt: now,
-      updatedAt: now,
     });
-    if (rules.length > 0) {
-      await tx.insert(scoringRules).values(
-        rules.map((rule) => ({
-          id: newId(),
-          rulesetVersionId,
-          ...rule,
-          createdAt: now,
-          updatedAt: now,
-        })),
-      );
-    }
     await planGameEvents(tx, now, gameId);
     return { gameId, rulesetVersionId };
   });
+}
+
+/**
+ * Inserts a ruleset version and its rules, already checked against their
+ * schemas, and returns its id. The rules go in with the version, before any
+ * game event uses it: once one that has locked does, it is frozen.
+ */
+export async function insertRulesetVersion(
+  tx: Db,
+  now: Date,
+  input: {
+    gameId: string;
+    version: number;
+    effectiveFromEventId: string;
+    isCorrection?: boolean;
+    params: RulesetParams;
+    rules: ScoringRule[];
+    notes: string;
+  },
+): Promise<string> {
+  const { rules, ...version } = input;
+  const rulesetVersionId = newId();
+  await tx.insert(rulesetVersions).values({
+    id: rulesetVersionId,
+    ...version,
+    publishedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (rules.length > 0) {
+    await tx.insert(scoringRules).values(
+      rules.map((rule) => ({
+        id: newId(),
+        rulesetVersionId,
+        ...rule,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    );
+  }
+  return rulesetVersionId;
 }
 
 /**
@@ -127,7 +153,8 @@ export async function createGame(
  *   is dropped for the run (the rows keep their versions, and the rest is
  *   planned as normal), and a warning review item `ruleset_version_refused`
  *   (dedupe key `ruleset_version_refused:<game>:<version>`) asks an admin to
- *   look;
+ *   look. A correction version (DM 4.9) is never chosen: it applies only to
+ *   the past events re-pointed to it, and those rows are frozen;
  * - a row whose lock has started is never changed: one that is `locked` or
  *   later, whose `lock_at` is at or before `now`, or that has a lock record
  *   row already (the lock job writes in batches), whatever its status. Its
@@ -191,7 +218,12 @@ export async function planGameEvents(
         })
         .from(rulesetVersions)
         .innerJoin(events, eq(events.id, rulesetVersions.effectiveFromEventId))
-        .where(eq(rulesetVersions.gameId, gameId))
+        .where(
+          and(
+            eq(rulesetVersions.gameId, gameId),
+            eq(rulesetVersions.isCorrection, false),
+          ),
+        )
     ).sort(
       (a, b) => a.from.getTime() - b.from.getTime() || a.version - b.version,
     );

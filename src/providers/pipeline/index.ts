@@ -1,3 +1,4 @@
+import { createGameChecksHandler } from "@/game/corrections";
 import { createScoreHandlers } from "@/game/score-jobs";
 import { createFinalizeHandler } from "@/jobs/finalize";
 import { createPollHandler } from "@/jobs/poll";
@@ -27,7 +28,8 @@ export type PipelineHandlers = Record<
   | "finalize_check"
   | "roster_check"
   | "score_session"
-  | "game_finalize",
+  | "game_finalize"
+  | "game_checks",
   JobHandler
 >;
 
@@ -48,5 +50,6 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
       createOpenF1ParticipantsSource(deps.openf1),
     ),
     ...createScoreHandlers({ batchSize: deps.scoreBatchSize }),
+    game_checks: createGameChecksHandler(),
   };
 }

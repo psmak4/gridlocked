@@ -218,6 +218,20 @@
       "when": 1793760814214,
       "tag": "0030_dizzy_taskmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793775049478,
+      "tag": "0031_equal_deathbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793775051502,
+      "tag": "0032_game_rules_10",
+      "breakpoints": true
     }
   ]
 }

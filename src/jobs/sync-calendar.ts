@@ -7,7 +7,12 @@ import { getSetting } from "@/settings";
 import { syncEventEntries } from "@/reference/sync-event-entries";
 import { republishIfEarlier, type DueStore } from "./due-times";
 import { planEventJobs } from "./plan-event";
-import { syncCalendarKey, syncCalendarPayload } from "./kinds";
+import {
+  gameChecksKey,
+  syncCalendarKey,
+  syncCalendarPayload,
+  type GameChecksPayload,
+} from "./kinds";
 import type { CalendarSyncSource } from "./ports";
 import type { ClockDb } from "@/lib/resolve-clock";
 import { enqueue, type JobsDb } from "./queue";
@@ -99,10 +104,15 @@ export async function ensureCalendarSync(
  * nothing, so its rounds stay `provisional`) does not queue a backlog of
  * polls and finalize checks for weekends that are over.
  *
- * The last thing it does is enqueue the next day's sync at 06:00 UTC, which is
- * what makes the sync recur. A run that fails enqueues nothing: the runner's
+ * Then it enqueues the next day's sync at 06:00 UTC, which is what makes the
+ * sync recur. A run that fails before that enqueues nothing: the runner's
  * retry does, and the safety tick (`ensureCalendarSync`) restarts a chain
  * that has been lost.
+ *
+ * Last, each of the season's `running` games gets its `game_checks` job for the
+ * day, due now. They come after the next day's sync so that nothing about them
+ * can stop the chain, and they are jobs of their own so that a check that
+ * fails is retried on its own.
  */
 export function createSyncCalendarHandler(
   source: CalendarSyncSource,
@@ -153,5 +163,20 @@ export function createSyncCalendarHandler(
       runAt: next,
       payload: { season },
     });
+
+    for (const { id: gameId } of await db
+      .select({ id: games.id })
+      .from(games)
+      .innerJoin(seasons, eq(seasons.id, games.seasonId))
+      .where(and(eq(seasons.year, season), eq(games.status, "running")))
+      .orderBy(asc(games.id))) {
+      const payload: GameChecksPayload = { gameId };
+      await enqueue(db, {
+        kind: "game_checks",
+        dedupeKey: gameChecksKey(gameId, now.toISOString().slice(0, 10)),
+        runAt: now,
+        payload,
+      });
+    }
   };
 }

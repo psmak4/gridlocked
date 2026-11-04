@@ -503,7 +503,7 @@ This is kept apart from `results`, because practice isn't scored and its data co
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| kind | text | e.g. `validation_failed`, `unknown_driver`, `team_change`, `missing_driver`, `event_missing_from_provider`, `uncertain_event_match`, `provider_after_manual`, `unknown_classification`, `provider_mismatch` |
+| kind | text | e.g. `validation_failed`, `unknown_driver`, `team_change`, `missing_driver`, `event_missing_from_provider`, `uncertain_event_match`, `provider_after_manual`, `unknown_classification`, `provider_mismatch`, `score_mismatch` |
 | severity | text: `blocking`, `warning` | `blocking` holds scoring for the linked session; `warning` doesn't |
 | season_id, event_id, session_id, driver_id | uuid FKs, nullable | What it's about. Spoiler-scoped by `session_id` |
 | details | jsonb | What was found, shaped per `kind` |
@@ -670,7 +670,8 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 | id | uuid PK | |
 | game_id | uuid FK | |
 | version | integer | Unique with `game_id` |
-| effective_from_event_id | uuid FK → events | Applies from this event's lock onwards, until a later version takes over |
+| effective_from_event_id | uuid FK → events | Applies from this event's lock onwards, until a later version takes over. For a correction, the first event it was published for |
+| is_correction | boolean, default false | A correction (4.9): it applies only to the past events re-pointed to it, so planning never gives it to another event |
 | params | jsonb (Zod-validated) | Everything about the game that isn't a scoring rule (below) |
 | notes | text | What changed and why. Shown on the public rules page |
 | published_at | timestamptz | |
@@ -735,7 +736,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
   - **`positions_delta`:** the starting grid against the classification; a pit-lane start counts as last on the grid (the number of result rows in the session). Classified rows only. `flag_bonus` also needs a classified row. A position table past its end scores 0, and no table is longer than 10: nothing hard-codes 22 cars.
   - **`knockout_stage`:** a driver reached Q2 at a position of `knockout.q2From` or better, and Q3 at `q3From` or better, never by whether a time exists (HLD §5.6).
 - M3 added the table, its `kind` CHECK and the freeze below.
-- **A version is frozen once used.** A trigger refuses updates and deletes of a version, and every write to its rules, once any `game_events` row using it is `locked`, `scored` or `final`. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
+- **A version is frozen once used.** A trigger refuses updates and deletes of a version, and every write to its rules, once any `game_events` row using it is `locked`, `scored` or `final`, or any lock record (`team_event_states`) or scoring run names it, so a version stays frozen after a correction moves its last locked event off it. The version a locked event uses is frozen too: `game_events_version_freeze` (`game_rules_10`) refuses a change to `game_events.ruleset_version_id` on a `locked`, `scored` or `final` row. A rule change means a new version from a later event, so past scores can always be reproduced exactly. The one exception is a deliberate, audited **correction** that re-points past events to a fixed version (4.9).
 - **Rule changes are mostly config.** "Sprint DNF penalty reduced to -10" (an official 2026 change, per the FAQ) is a new version with a different param. Only a genuinely new `kind` of calculation needs code.
 
 ### 3.3 `game_events` (an event as the game sees it)
@@ -804,7 +805,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 | id | uuid PK | |
 | game_id | uuid FK | |
 | user_id | uuid FK → users | A plain uuid until `users` arrives in M5, which adds the foreign key |
-| slot | smallint | **Unique `(game_id, user_id, slot)`.** On insert (and when the slot changes), a trigger checks `1 ≤ slot ≤` the `teamsPerUser` of the game's latest ruleset version (3). A retired team keeps its slot. Two simultaneous creates can't both take slot 3, because the unique key serialises them |
+| slot | smallint | **Unique `(game_id, user_id, slot)`.** On insert (and when the slot changes), a trigger checks `1 ≤ slot ≤` the `teamsPerUser` of the game's latest non-correction ruleset version (3). A retired team keeps its slot. Two simultaneous creates can't both take slot 3, because the unique key serialises them |
 | name | text | User content: filtered and reportable (Part 5) |
 | first_event_id | uuid FK, nullable | The team's first **locked** event. Set by the first lock it takes part in, which drives unlimited transfers and chip unlocks (HLD §5.2) |
 | status | text: `active`, `retired` | Before its first lock, a team can be deleted outright. After that, deleting a team **retires** it, so league history stays correct |
@@ -842,6 +843,8 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 **The locked lineup for event E** is the latest `regular` or `limitless` version for E with `saved_at < lock_at`. If there's none, it's the team's base lineup carried forward. It's deterministic, so it can be recomputed at any time with the same answer (HLD §3.3 rule 3).
 
 **Pruning:** versions that never became a locked lineup are deleted 7 days after the event is final, keeping the last one before lock. Locked versions are kept forever.
+
+**As built** (`pruneLineupVersions`, `src/game/corrections.ts`, run by the daily `game_checks` job, 4.8): a version goes when its `for_event_id` has a game event that is `final` with `updated_at` 7 days ago or more (a later update, such as a correction, only delays it). It stays if any lock record points to it as `base_version_id`, `locked_version_id` or `final_fix_version_id`, or if it is the team's newest for the event by `(saved_at, id)`: the last one before lock for a team with no lock record, and what `saveLineup` compares against as the team's latest. A kept version based on a deleted one has its `based_on_version_id` nulled.
 
 ### 3.8 Transfers, team value and the per-event lock record
 **`team_event_states`:** one row per team per event it took part in, written by the lock job.
@@ -1041,6 +1044,7 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 - **`finishRun`** marks the run `succeeded`, with `finished_at` and the final `diff_summary`.
 - **A step that throws leaves its run `running`:** its transaction rolls back, and the queue retries the job. Each step is safe to run again. If it throws on the job's last attempt, the handler marks the run `failed` (`failRun`, only while it is still `running`) and the job goes `dead`, which alerts admins. A failed run's lines stay until the next run replaces them, and a failed current run is never skipped against.
 - **A new live run supersedes the earlier ones:** `startRun` marks every earlier `running` live run of the session `superseded` in the transaction that inserts the new run, so a retried first step can't leave its first run `running` for ever. A dry run doesn't, and isn't touched by one.
+- **A dry run** (`dryRunGame`, 4.9) is started with `startRun` and scores through `writeAssetLines`' own step. `writeTeamAdjustments` refuses one: `dryRunEvent` works out its teams in memory, through the code a live run uses.
 - **The newest started run** is the one with the highest ID (UUIDv7) of the **same mode** for the game and session, so a dry run never supersedes a live one. Every write step first takes the event's ledger lock (`pg_advisory_xact_lock` on the game and event) and then checks for a newer run. The asset lines of an event's sessions and its team lines are therefore written by one step at a time, and a batch never mixes two runs' asset lines.
 
 ### 4.2 `asset_score_lines` (tier 1: shared by every team)
@@ -1201,6 +1205,7 @@ Each step is a job (2.10) keyed by the run ID, so a re-run is safe and a superse
 **What queues a run.** `enqueueScoring(db, now, { sessionId, stamp, trigger, gameId? })` queues one `score_session` job per `running` game whose game event for the session's event is `locked`, `scored` or `final`, and returns how many it queued. It queues nothing for a cancelled session, a kind the engine doesn't score, or a session whose result status isn't `provisional` or `final`.
 - **The results hooks** call it after every `advanceStatus`, with the stamp `v<resultsVersion>`: the poll and finalize jobs with the trigger `results`, and `revalidateEvent` (so overrides too) with `override`. The key is `score:<gameId>:<sessionId>:v<resultsVersion>`, so the same version queues one job however many checks see it. The season import doesn't call it: a backfill scores nothing.
 - **A session exception** set or cleared calls it in the audit's transaction, for that game only, with the trigger `exception` and the key `score:<gameId>:<sessionId>:x:<auditId>`.
+- **A correction** (4.9) calls it the same way, with the trigger `ruleset_correction` and the stamp `c:<auditId>`, and an **approved re-score** with `engine_change`, the stamp `r:<auditId>` and `force`, which the `assets` step passes to `startRun`.
 - **A session under review queues nothing.** Resolving its item doesn't move the status; the next `finalize_check` or revalidate does, its version goes up, and that call queues the run.
 
 **`score_session`** runs one step per job, and queues the next under `score:<runId>:<step>:<afterTeamId|start>`:
@@ -1222,11 +1227,35 @@ Totals and standings follow the status change because both take `final` from the
 
 **After `final`,** a correction still re-scores through the same jobs. The game event stays `final`, its totals and standings stay `final`, and prices don't move (3.5).
 
+**`game_checks`, the daily checks.** `sync_calendar`, after its planning and after queueing the next day's sync, queues `game_checks:<gameId>:<yyyy-mm-dd>`, due now, with the payload `{ gameId }`, for each of the season's `running` games. It's a job of its own, so a check that fails is retried alone and can't stop the calendar chain. The handler (`src/game/corrections.ts`) runs both checks, and either can run twice:
+- **`checkScoreExplanations(db, now, { gameId, sample = 200 })`:** for a random sample of the game's teams with a lock record, each event's `team_base_lines` plus `team_adjustment_lines` must equal its `team_event_totals.points` (0 with no row, so a lost row shows). Only events that are `locked`, `scored` or `final`, and not one with a live run `running`: totals disagree mid-run by design, and one statement reads the runs and the ledger, so they're of one moment. Each event found wrong, earliest first, in its own transaction, opens the blocking review item `score_mismatch` and rebuilds inline: `recomputeTotals` from that event, then `recomputeStandings`. Every wrong event is rebuilt, since a rebuild rewrites later events' running totals but not their points. The item's key, `score_mismatch:<gameId>:<eventId>`, is unique only while open, so a new mismatch opens a new item once the old one is resolved. It has no session, so it moves no session status, but it holds an unfinished event's finalization until an admin resolves it.
+- **`pruneLineupVersions`:** see 3.7.
+
 **Cost at 250k teams:** steps 2–4 are a few set-based queries over about 1.75M lineup rows and about 1.25M memberships. That's seconds to a minute of database time per run, and it doesn't grow with how many people are browsing.
 
 ### 4.9 Corrections to the rules or the code
 - **A misconfigured rule** (a wrong points value discovered mid-season): ruleset versions are frozen once used (3.2), so nothing can be silently edited. An admin publishes a **correction version** and explicitly re-points the affected past events to it. That's audited, and it re-scores those events. *This adds one admin action to Part 3's freeze rule. It stops silent edits, not deliberate, visible corrections.*
 - **A bug in the scoring code:** the fix bumps `engine_version`, which changes every fingerprint. An admin first runs a **dry run** across the season. The diff summary shows how many teams' points would change, and by how much. The live re-score runs only after the admin approves. Players then get a correction notice that names the reason.
+
+**As built** (`src/game/corrections.ts`). All three are staff actions: each takes a reason that isn't blank and is audited in its transaction.
+
+**`publishCorrectionVersion(db, now, actor, { gameId, params, rules, notes, eventIds, reason })`** returns `{ rulesetVersionId }`. One transaction, holding the game row and the listed game events:
+- It refuses, writing nothing, no rules (the re-score would wipe the events' points), an empty list, a game that isn't `running` (`game_not_running`: nothing would re-score it), or any event that isn't `locked`, `scored` or `final` in the game.
+- It adds a version with `is_correction` set, numbered after the game's latest and effective from the first listed event by sequence, with its rules.
+- It re-points the listed game events. `game_rules_10` lets this past the freeze (3.2) only while the transaction has `gridlocked.ruleset_correction = 'on'`: `set_config(..., true)` makes that die with the transaction, and it's turned off again straight after the update, so it covers that one statement even inside a caller's transaction.
+- It audits (`ruleset_version.correct`, with each event's previous version in `before`), then queues a re-score of every scored session of those events (4.8).
+
+Only the listed events move. Later events stay on their version: `planGameEvents` leaves out correction versions, which would otherwise look like a version starting from an event that has locked (a `ruleset_version_refused` warning), and frozen rows are never replanned. Lock records keep the version they locked under (`team_event_states.ruleset_version_id`), and the game's invariant checks read an event's lock rules from there, and flag any lock record on a correction version. A correction also never sets `teamsPerUser` for new teams (3.6). Points change and prices don't (3.5): nothing here runs the price formula.
+
+**`dryRunGame(db, now, actor, { gameId, reason })`** returns `{ runIds, sessions, assetsChanged, teamsChanged, biggest }`. One transaction starts a `dry_run` run (trigger `admin`) for every scored session and audits (`game.dry_run`). Then, an event at a time and outside that transaction, `dryRunEvent` scores each session with the current engine and the event's rules, keeping the lines in memory, and works out every team with a lock record, in batches, through the code a live run uses. It writes each run's `diff_summary` and no lines, adjustment lines or totals.
+- **Assets** compare against the current lines (`asset_session_totals`), as a live run's do.
+- **Teams** compare against the stored `team_event_totals.points`, session by session in order: the sessions before as re-scored and those after as they stand, which is what the live re-score writes at each step. So a run's `teamsChanged` and `biggest` are what its session changes, and a team's changes over an event add up to the event's whole change.
+- **What it returns:** `assetsChanged` and `teamsChanged` are different assets and teams, and `biggest` is the 10 biggest changes of any session.
+- A dry run never supersedes a live run, nor a live run a dry one. A newer dry run takes over from one still going, which throws; an error marks the run's `running` rows `failed`.
+
+**`approveRescore(db, now, actor, { gameId, reason })`** returns `{ queued }`. It refuses (`dry_run_required`), writing nothing, unless a `dry_run` run of the game has `succeeded` at the current `ENGINE_VERSION`. It audits (`game.rescore_approved`) and queues a forced re-score of every scored session (4.8).
+
+"Every scored session" is `scoredSessions`: what `enqueueScoring` accepts, in a `running` game.
 
 ### 4.10 Indexes beyond keys
 - `asset_score_lines (game_id, session_id)`: the per-session replace and the team view join. Served by the leading columns of its unique key (4.2), so there's no separate index.

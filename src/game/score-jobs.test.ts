@@ -528,6 +528,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
     });
   });
 
+  // The whole season: about 30 s on CI, past the project default.
   it("the M3 season replay still passes", async () => {
     const script = gameScriptSchema.parse(readFixture("game-2026-script.json"));
     const report = await replaySeasonGame(t.db, script, {
@@ -540,7 +541,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
     expect(report.eventsLocked).toBe(
       (await t.db.select().from(events)).length - report.eventsCancelled,
     );
-  });
+  }, 120_000);
 
   describe("the jobs, run directly", () => {
     const clock = simulatedClock(NOW);
