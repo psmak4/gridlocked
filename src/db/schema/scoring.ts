@@ -7,6 +7,7 @@ import {
   jsonb,
   pgTable,
   pgView,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -44,6 +45,8 @@ export const SCORING_RUN_STATUSES = [
   "failed",
   "superseded",
 ] as const;
+/** `final` once the game event is (DM 4.4). */
+export const TEAM_TOTAL_STATUSES = ["provisional", "final"] as const;
 /** Each is its own visible line on a team's explanation (DM 4.3). */
 export const ADJUSTMENT_LINE_TYPES = [
   "boost",
@@ -200,6 +203,71 @@ export const teamAdjustmentLines = pgTable(
     ),
     index("team_adjustment_lines_game_id_event_id_idx").on(t.gameId, t.eventId),
     index("team_adjustment_lines_team_id_event_id_idx").on(t.teamId, t.eventId),
+  ],
+);
+
+/**
+ * DM 4.4: a team's points for an event and its running total through it, with
+ * the rank in the game. Derived, and rebuilt by `recomputeTotals` from the
+ * base view and the adjustment lines, never edited. A team has a row for each
+ * event it has a lock record for; a cancelled event has none.
+ */
+export const teamEventTotals = pgTable(
+  "team_event_totals",
+  {
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    /** `game_events.sequence`, copied. */
+    eventSequence: integer("event_sequence").notNull(),
+    /** This event: base lines plus adjustment lines. */
+    points: integer("points").notNull(),
+    /**
+     * `{ sessionId: points }` for the event's scored sessions, base plus that
+     * session's adjustments. Event-level lines (the transfer penalty) are in
+     * `points` only, so the parts can fall short of the whole.
+     */
+    pointsBySession: jsonb("points_by_session")
+      .$type<Record<string, number>>()
+      .notNull(),
+    /** The season running total through this event. */
+    cumulativePoints: integer("cumulative_points").notNull(),
+    /**
+     * The earliest event sequence at which the running total was at least
+     * `cumulative_points`: the tiebreak, earliest to reach.
+     */
+    firstReachedSequence: integer("first_reached_sequence").notNull(),
+    /** Ranks the game's rows at the event; ties share a rank. */
+    globalRank: integer("global_rank").notNull(),
+    status: text("status", { enum: TEAM_TOTAL_STATUSES }).notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.eventId] }),
+    check(
+      "team_event_totals_status_check",
+      oneOf(t.status, TEAM_TOTAL_STATUSES),
+    ),
+    check(
+      "team_event_totals_first_reached_check",
+      sql`${t.firstReachedSequence} between 1 and ${t.eventSequence}`,
+    ),
+    check("team_event_totals_global_rank_check", sql`${t.globalRank} >= 1`),
+    index("team_event_totals_game_id_event_id_global_rank_idx").on(
+      t.gameId,
+      t.eventId,
+      t.globalRank,
+    ),
+    index("team_event_totals_team_id_event_sequence_idx").on(
+      t.teamId,
+      t.eventSequence,
+    ),
   ],
 );
 

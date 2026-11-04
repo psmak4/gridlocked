@@ -1106,6 +1106,16 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 - **`first_reached_sequence`** is computed with a window over the team's running totals. The running total can go down (negative weeks), so it's "first time at or above", not "first time equal".
 - **Indexes:** `(game_id, event_id, global_rank)` for the leaderboard, and `(team_id, event_sequence)` for a team's history.
 
+**Built (M4)** as `recomputeTotals(db, now, { gameId, fromEventId })` (`src/game/totals.ts`), in set-based SQL: one statement per call, in one transaction, however many teams there are. It returns `{ events, teams }`: the events whose running totals were recomputed and the teams written for `fromEventId`.
+- **The event's rows** are one per team with a lock record (`team_event_states`) for `fromEventId`. `points` is the sum of the team's `team_base_lines` for the event plus the sum of its `team_adjustment_lines` for it, event-level lines included (the transfer penalty). `points_by_session` has an entry for each scored session (one with a current run), base plus that session's adjustments, so an event-level line is in `points` and in no session, and the sessions can add up to less than the total. A row whose lock record is gone is deleted.
+- **The running total** at an event is the team's `points` summed over its rows at that sequence or earlier. A cancelled event has no sequence and no rows, so nothing is skipped over.
+- **`first_reached_sequence`** is the smallest sequence among the team's rows, up to and including this one, whose running total is at or above this one's (so a total of 50, 40, 50 has 1, 1, 1).
+- **`global_rank`** is `rank()` over all the game's rows at the event, ordered by `cumulative_points desc, first_reached_sequence asc`, so ties share a rank and the next rank skips.
+- **A rebuild reaches forward.** Running totals, firsts and ranks are rewritten for `fromEventId` and every later event with rows, but only `fromEventId`'s `points` are recomputed. A correction to an early event moves the standings after it and leaves what each later event scored. Each event's own scoring recomputes from it, so a later event's `points` are always as of its last run.
+- **`status`** is `final` once the game event is `final`, and `provisional` before.
+- **Locking:** the event's ledger lock (the one the scoring steps take) and a lock on the game's totals, since a rebuild writes later events' rows and two rebuilds of one game take turns whichever event they start from.
+- **Checks:** `first_reached_sequence` is between 1 and `event_sequence`, and `global_rank` is at least 1.
+
 ### 4.5 `leagues`
 | Column | Type | Notes |
 |---|---|---|
