@@ -28,9 +28,10 @@
  * - `withdraw`: an asset withdrawn from a round on;
  * - `resultsIn`: a session's results arrive (its result state goes
  *   `provisional`), standing in for the pipeline's poll. It writes no result
- *   rows, so a later `completeEvent` scores that session from nothing and the
- *   formula prices the next event from those zeros. This rules replay accepts
- *   that, and only this replay does it;
+ *   rows, so a later `completeEvent` scores that session from nothing: every
+ *   driver takes the penalty for not being classified, and the formula prices
+ *   the next event from those points. This rules replay accepts that, and only
+ *   this replay does it. A session with no `resultsIn` isn't scored;
  * - `cancelEvent`: the calendar marks the round cancelled, and the game is
  *   planned again, as the calendar sync does;
  * - `completeEvent`: the round's event is `completed`, standing in for the
