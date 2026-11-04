@@ -124,6 +124,10 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a live 2026 weekend (Qatar, 29 Nov, or Abu Dhabi, 6 Dec) is ingested end to end in staging, with no admin action needed on a clean weekend.
 - **Approval needed:** a Neon API key for `gridlocked-staging` and its database URL, stored as GitHub Actions secrets, so CI can run migrations and deploy the staging jobs (Task 12 of the plan). The Vercel project moved again, to M5, the first milestone with pages to preview (2026-10-28).
 - **Plan:** [plans/M2-reference-and-results.md](../plans/M2-reference-and-results.md).
+- **Mexico City on staging (2026-11-03), not the exit:** ingested live and final at +48 hours (3 Nov 22:00 UTC), with both scored sessions final and no open review items. It needed two staff actions, so it doesn't meet the exit's clean-weekend test:
+  - the substitution of Hirakawa for Ocon from FP3, on 2 Nov (two audit rows);
+  - an override for Jolpica's qualifying data with two P8s (`positions_not_contiguous`), on 2 Nov.
+  Both ran through the Staff action workflow, with no hand-written SQL. The driver-swap work (PRs #85, #86, #87, #89, #90, #91, #92, #93) is done. The exit still waits for a clean weekend: Qatar or Abu Dhabi.
 
 ### M2.5 — Move to TanStack Start (before M3; added 2026-10-31)
 - **Goal:** the app runs on TanStack Start with every M0–M2 guard rail intact, before M3 adds screens that would make the move bigger (HLD decision 3, §11.5).
@@ -137,6 +141,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Exit:** CI green on the converted app, with the full test suite and e2e passing, and the staging scheduler deploy unchanged.
 - **Approval needed:** no cloud resources; one manual staging deploy after the Mexico City weekend, to check the scheduler still deploys.
 - **Plan:** [plans/M2.5-tanstack-start.md](../plans/M2.5-tanstack-start.md).
+- **Result (2026-11-04): met.** The app runs on TanStack Start, and CI was green on the converted app: 843 tests and 11 e2e at the final review. The staging scheduler deploy is unchanged. Deploy runs 41380935878 (2 Nov 03:03 UTC) and 41537436469 (2 Nov 22:27 UTC), both from `main`, completed the `tick` deployment, and both triggers stayed enabled. Every job since has succeeded, including Mexico's finalize at +48 hours. PRs: Task 1 #73, Task 2 #74, Task 3 #75.
 
 ### M3 — Fantasy core (target 11 Dec)
 - **Goal:** teams can be built, locked and changed exactly by the rules.
