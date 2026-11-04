@@ -25,22 +25,22 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1159.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@fontsource/anton": "5.3.0",
     "@fontsource/barlow": "5.3.0",
     "@fontsource/barlow-semi-condensed": "5.3.0",
     "@neondatabase/serverless": "1.2.0",
-    "@tanstack/react-router": "1.170.45",
-    "@tanstack/react-start": "1.169.3",
+    "@tanstack/react-router": "1.170.46",
+    "@tanstack/react-start": "1.169.4",
     "drizzle-orm": "^0.45.4",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "uuidv7": "^1.2.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.12",
-    "@neon/config": "1.9.5",
+    "@electric-sql/pglite": "^0.5.14",
+    "@neon/config": "1.10.0",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "^24.19.2",
@@ -57,8 +57,8 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
-    "typescript-eslint": "8.71.2",
-    "vite": "8.3.4",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.5",
     "vitest": "^5.0.5"
   },
   "type": "module"
