@@ -116,21 +116,25 @@ export async function createLeague(
     const joinCode = newJoinCode();
     const slug = `${slugify(name) || "league"}-${randomText(SLUG_SUFFIX_LENGTH, CODE_ALPHABET.toLowerCase())}`;
     try {
-      await db.insert(leagues).values({
-        id: leagueId,
-        gameId: input.gameId,
-        kind: input.kind,
-        name,
-        slug,
-        ownerUserId: input.ownerUserId,
-        joinCode,
-        startSequence,
-        endSequence,
-        maxMembers,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      });
+      // Each try is its own transaction (a savepoint inside the caller's):
+      // a failed insert aborts the one it ran in, so a retry needs a fresh one.
+      await db.transaction((tx) =>
+        tx.insert(leagues).values({
+          id: leagueId,
+          gameId: input.gameId,
+          kind: input.kind,
+          name,
+          slug,
+          ownerUserId: input.ownerUserId,
+          joinCode,
+          startSequence,
+          endSequence,
+          maxMembers,
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
       return { leagueId, joinCode };
     } catch (error) {
       if (!isUniqueViolation(error) || attempt >= CODE_ATTEMPTS) throw error;
@@ -143,10 +147,12 @@ export async function createLeague(
  * case), as a `user` membership, and returns the league and the membership.
  * Refused:
  * - `team_not_owned`: the team is not `userId`'s;
+ * - `team_retired`: the team is retired, and a retired team holds no place;
  * - `league_not_found`: no active public or private league has the code, or it
  *   is another game's. An auto league has no code and is not joined by hand;
  * - `already_member`: the team is in the league now;
- * - `league_full`: the league has `max_members` current members;
+ * - `league_full`: the league has `max_members` current members whose team is
+ *   active (a retired member holds no seat);
  * - `league_cap`: the team is in 50 `user` leagues (the database, GL008).
  * The league row is held, so joins to one league take turns and a limit holds.
  */
@@ -158,6 +164,12 @@ export async function joinLeague(
   try {
     return await db.transaction(async (tx) => {
       const team = await ownedTeam(tx, input);
+      if (team.status === "retired") {
+        throw new GameError(
+          "team_retired",
+          "a retired team can't join a league",
+        );
+      }
       const [league] = await tx
         .select()
         .from(leagues)
@@ -194,10 +206,12 @@ export async function joinLeague(
         const [counted] = await tx
           .select({ members: count() })
           .from(leagueMemberships)
+          .innerJoin(teams, eq(teams.id, leagueMemberships.teamId))
           .where(
             and(
               eq(leagueMemberships.leagueId, league.id),
               isNull(leagueMemberships.leftAt),
+              eq(teams.status, "active"),
             ),
           );
         if ((counted?.members ?? 0) >= league.maxMembers) {

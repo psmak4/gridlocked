@@ -7,6 +7,7 @@ import {
   leagueMemberships,
   leagues,
   LEAGUE_CAP,
+  teams,
 } from "@/db/schema";
 import { GameError } from "@/game/errors";
 import { createTeam, removeTeam } from "@/game/teams";
@@ -65,6 +66,14 @@ describe("leagues (DM 4.5, 4.6)", () => {
       .from(leagueMemberships)
       .where(eq(leagueMemberships.teamId, teamId))
       .orderBy(asc(leagueMemberships.joinedAt), asc(leagueMemberships.id));
+  /** A team that has locked is retired, not deleted. */
+  const retire = async (teamId: string) => {
+    await t.db
+      .update(teams)
+      .set({ firstEventId: seeded.eventIds[0]! })
+      .where(eq(teams.id, teamId));
+    expect(await removeTeam(t.db, LATER, teamId)).toBe("retired");
+  };
   /** The leagues a team is in now, by name. */
   const currentLeagues = async (teamId: string) =>
     (
@@ -178,6 +187,32 @@ describe("leagues (DM 4.5, 4.6)", () => {
     expect(first.joinCode).toBe("AAAAAAAAAA");
     expect(second.joinCode).not.toBe(first.joinCode);
     expect(second.joinCode).toMatch(/^[A-Z2-9]{10}$/);
+    const rows = await t.db
+      .select()
+      .from(leagues)
+      .where(eq(leagues.kind, "private"));
+    expect(rows).toHaveLength(2);
+  });
+
+  it("a collision inside the caller's transaction is retried in it", async () => {
+    const spy = vi.spyOn(crypto, "getRandomValues");
+    for (let i = 0; i < 4; i++) {
+      spy.mockImplementationOnce(((bytes: Uint8Array) =>
+        bytes.fill(0)) as never);
+    }
+    const first = await privateLeague("Friends");
+    // The failed insert would abort the outer transaction (25P02) without a
+    // savepoint around each attempt.
+    const second = await t.db.transaction((tx) =>
+      createLeague(tx, NOW, {
+        gameId,
+        ownerUserId: userA,
+        kind: "private",
+        name: "Friends",
+      }),
+    );
+    expect(first.joinCode).toBe("AAAAAAAAAA");
+    expect(second.joinCode).not.toBe(first.joinCode);
     const rows = await t.db
       .select()
       .from(leagues)
@@ -313,6 +348,42 @@ describe("leagues (DM 4.5, 4.6)", () => {
     await leaveLeague(t.db, LATEST, { leagueId, teamId: teamA, userId: userA });
     await joinLeague(t.db, LATEST, { joinCode, teamId: teamB, userId: userB });
     expect(await currentLeagues(teamB)).toEqual(["Small"]);
+  });
+
+  it("a retired team doesn't take a seat in a full league", async () => {
+    const { leagueId, joinCode } = await createLeague(t.db, NOW, {
+      gameId,
+      ownerUserId: userA,
+      kind: "private",
+      name: "Small",
+      maxMembers: 1,
+    });
+    await joinLeague(t.db, LATER, { joinCode, teamId: teamA, userId: userA });
+    await retire(teamA);
+    // The retired team is still a member, but holds no seat.
+    await joinLeague(t.db, LATER, { joinCode, teamId: teamB, userId: userB });
+    expect(await currentLeagues(teamB)).toEqual(["Small"]);
+    // With teamB seated, the league is full for an active team.
+    const userC = newId();
+    const teamC = await team(userC);
+    await expectGameError(
+      joinLeague(t.db, LATEST, { joinCode, teamId: teamC, userId: userC }),
+      "league_full",
+    );
+    expect((await memberships(teamA))[0]).toMatchObject({
+      leagueId,
+      leftAt: null,
+    });
+  });
+
+  it("a retired team can't join", async () => {
+    const { joinCode } = await privateLeague();
+    await retire(teamB);
+    await expectGameError(
+      joinLeague(t.db, LATER, { joinCode, teamId: teamB, userId: userB }),
+      "team_retired",
+    );
+    expect(await memberships(teamB)).toHaveLength(0);
   });
 
   it("the 51st user league is refused, and auto leagues don't count", async () => {

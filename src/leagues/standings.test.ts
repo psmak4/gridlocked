@@ -192,6 +192,67 @@ describe("league standings (DM 4.7)", () => {
     expect(await table(season)).toHaveLength(4);
   });
 
+  it("a correction to an early event moves later league tables", async () => {
+    const season = await league([teamIds.a, teamIds.b, teamIds.c]);
+    const fromTwo = await league([teamIds.a, teamIds.b, teamIds.c], {
+      startSequence: 2,
+    });
+    await score(teamIds.a, [10, 0]);
+    await score(teamIds.b, [5, 6]);
+    await score(teamIds.c, [0, 0]);
+    await recompute(2);
+    await score(teamIds.a, [0], 3);
+    await score(teamIds.b, [0], 3);
+    await score(teamIds.c, [20], 3);
+    await recompute(3);
+    expect(await shape(season)).toEqual([
+      ["c", 20, 3, 1, 3],
+      ["b", 11, 2, 2, 1],
+      ["a", 10, 1, 3, 2],
+    ]);
+    const untouched = await table(fromTwo);
+
+    // Event 1 is re-totalled (a stewards' decision a week later).
+    await rescore(teamIds.a, 1, 0);
+    await rescore(teamIds.b, 1, 30);
+    expect(await recompute(1)).toEqual({ leagues: 1 });
+
+    // The table still runs through event 3; ranks move, and the arrows still
+    // show the move from the table before event 3.
+    expect(await shape(season)).toEqual([
+      ["b", 36, 2, 1, 1],
+      ["c", 20, 3, 2, 3],
+      ["a", 0, 1, 3, 2],
+    ]);
+    for (const row of await table(season)) {
+      expect(row.throughEventId).toBe(eventIds[2]);
+    }
+    // A league that starts at event 2 doesn't include event 1: not rebuilt.
+    expect(await table(fromTwo)).toEqual(untouched);
+  });
+
+  it("the tiebreak is the first time the in-range total was reached, through a dip", async () => {
+    // X [10, -10, 5]: season total 5, reached at event 1. Y [0, -5, 0]: -5,
+    // reached at event 1 over the season.
+    // Over events 2 and 3, both end on -5: Y was there at event 2, X only at 3.
+    await score(teamIds.a, [10, -10, 5]);
+    await score(teamIds.b, [0, -5, 0]);
+    const season = await league([teamIds.a, teamIds.b]);
+    const range = await league([teamIds.a, teamIds.b], {
+      startSequence: 2,
+      endSequence: 3,
+    });
+    await recompute(3);
+    expect(await shape(season)).toEqual([
+      ["a", 5, 1, 1, null],
+      ["b", -5, 1, 2, null],
+    ]);
+    expect(await shape(range)).toEqual([
+      ["b", -5, 2, 1, null],
+      ["a", -5, 3, 2, null],
+    ]);
+  });
+
   it("a range ends at the latest event that has totals", async () => {
     await score(teamIds.a, [3, 4]);
     await score(teamIds.b, [5, 1]);
