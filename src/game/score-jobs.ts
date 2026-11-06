@@ -233,8 +233,9 @@ async function runInline(
 }
 
 /**
- * Closes an event for a game, once its results are final (DM 4.8). A dead job
- * is picked up by `planGameJobs`' daily sweep. Returns quietly unless the game event is `locked` or `scored`: `final` is a retry of
+ * Closes an event for a game, once its results are final (DM 4.8), or once it
+ * was cancelled after its lock (DM 3.9). A dead job, and a cancelled event,
+ * which has no job, are picked up by `planGameJobs`' daily sweep. Returns quietly unless the game event is `locked` or `scored`: `final` is a retry of
  * one that committed, `cancelled` has no totals, and `upcoming` or `open`
  * means the game never played this event.
  *
@@ -250,7 +251,8 @@ async function runInline(
  * again under that lock, holding the row, and unless it is still `locked` or
  * `scored` the transaction commits nothing: a handler past its lease can run
  * twice, and a cancel can land after the first look.
- * - `runPriceUpdate` prices the next event as the game event still stands;
+ * - `runPriceUpdate` prices the next event as the game event still stands. With
+ *   nothing scored it skips (`no_scores`), and the open job carries the prices;
  * - the game event becomes `final`;
  * - totals and standings are rebuilt, in that order: both take their `final`
  *   status from the game event, which is why they follow it;

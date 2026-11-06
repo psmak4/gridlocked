@@ -33,6 +33,7 @@ import {
 } from "@/db/schema";
 import { createTeam } from "./teams";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
+import { planGameEvents } from "./games";
 import { createGameHandlers, planGameJobs } from "./jobs";
 import { clearSessionException, setSessionException } from "./cancellations";
 import { startRun, writeAssetLines } from "./scoring-runs";
@@ -788,6 +789,116 @@ describe("the scoring pipeline (DM 4.8)", () => {
         await at(later());
         await planGameJobs(t.db, later(), gameId);
         expect(await finalizeJobs()).toEqual([]);
+      });
+
+      describe("an event cancelled after its lock (DM 3.9)", () => {
+        const cancelEvent = () =>
+          t.db
+            .update(events)
+            .set({ status: "cancelled" })
+            .where(eq(events.id, round1.id));
+        /** The daily sync: the game follows the calendar, then plans. */
+        const sync = async () => {
+          await at(later());
+          await planGameEvents(t.db, later(), gameId);
+          await planGameJobs(t.db, later(), gameId);
+        };
+
+        it("what was scored reaches final, and prices the next event by the formula", async () => {
+          await queueResults();
+          await run();
+          await cancelEvent();
+          await sync();
+
+          expect(await run(all())).toMatchObject({ failed: 0 });
+
+          expect(await statusOf(round1.id)).toBe("final");
+          expect(
+            new Set((await totals(round1.id)).map((r) => r.status)),
+          ).toEqual(new Set(["final"]));
+          expect(
+            new Set((await pricesFor(round2.id)).map((p) => p.source)),
+          ).toEqual(new Set(["formula"]));
+          expect(await t.db.select().from(priceUpdateRuns)).toHaveLength(1);
+          expect(await statusOf(round2.id)).toBe("open");
+        });
+
+        it("with nothing scored it reaches final, and the next window opens at once", async () => {
+          await cancelEvent();
+          await sync();
+          // Days short of the 24-hour cutoff, which is the only other way in.
+          expect(later().getTime()).toBeLessThan(
+            round2.lockAt.getTime() - 24 * HOUR,
+          );
+
+          expect(await run(all())).toMatchObject({ failed: 0 });
+
+          expect(await statusOf(round1.id)).toBe("final");
+          expect(await t.db.select().from(priceUpdateRuns)).toEqual([]);
+          expect(await runs()).toEqual([]);
+          expect(await statusOf(round2.id)).toBe("open");
+          expect(
+            new Set((await pricesFor(round2.id)).map((p) => p.source)),
+          ).toEqual(new Set(["carried"]));
+          expect(
+            (await totals(round1.id)).map((r) => [r.status, r.points]),
+          ).toEqual([
+            ["final", 0],
+            ["final", 0],
+          ]);
+        });
+
+        it("every session cancelled with it changes neither", async () => {
+          await queueResults();
+          await run();
+          await cancelEvent();
+          await t.db
+            .update(sessions)
+            .set({ status: "cancelled" })
+            .where(eq(sessions.eventId, round1.id));
+          await sync();
+
+          expect(await run(all())).toMatchObject({ failed: 0 });
+
+          expect(await statusOf(round1.id)).toBe("final");
+          expect(
+            new Set((await pricesFor(round2.id)).map((p) => p.source)),
+          ).toEqual(new Set(["formula"]));
+        });
+
+        it("planning again the same day queues nothing more", async () => {
+          await cancelEvent();
+          await sync();
+          await sync();
+          expect(await finalizeJobs()).toMatchObject([
+            { dedupeKey: sweepKey(later()) },
+          ]);
+        });
+
+        it("a pending game_finalize isn't doubled", async () => {
+          await enqueue(t.db, {
+            kind: "game_finalize",
+            dedupeKey: gameFinalizeKey(gameId, round1.id),
+            runAt: later(),
+            payload: {
+              gameId,
+              eventId: round1.id,
+            } satisfies GameFinalizePayload,
+          });
+          await cancelEvent();
+          await sync();
+          expect(await finalizeJobs()).toHaveLength(1);
+        });
+
+        it("an event cancelled before its lock isn't swept", async () => {
+          await t.db
+            .update(events)
+            .set({ status: "cancelled" })
+            .where(eq(events.id, round2.id));
+          await sync();
+          expect(await statusOf(round2.id)).toBe("cancelled");
+          expect(await finalizeJobs()).toEqual([]);
+        });
       });
     });
 
