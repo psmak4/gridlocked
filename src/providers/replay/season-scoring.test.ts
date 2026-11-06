@@ -54,6 +54,27 @@ const LEAGUES: Record<string, [number, number?]> = {
   "From round 6": [5],
 };
 
+/**
+ * The official game's shares of terrible, poor, good and great moves, in %,
+ * rounds 1 to 19 (DM 3.5). The calibration's target, summary numbers only.
+ */
+const OFFICIAL_TIER_SHARES = {
+  cheap: [42, 11, 11, 36],
+  expensive: [16, 14, 16, 55],
+};
+
+/** What this file reads of `price_update_runs.inputs`. */
+interface PriceInputs {
+  assets: {
+    assetId: string;
+    price: number;
+    newPrice: number;
+    tier: "terrible" | "poor" | "good" | "great" | null;
+    kept?: "admin";
+    absent?: true;
+  }[];
+}
+
 const EXPECTED_PATH = fileURLToPath(
   new URL("../../../tests/fixtures/scores-2026-expected.json", import.meta.url),
 );
@@ -250,6 +271,59 @@ describe("the 2026 season scored", () => {
     // Round 2's list comes from one update; each update has its own.
     const updates = await t.db.select().from(priceUpdateRuns);
     expect(updates).toHaveLength(report.priceUpdates);
+  });
+
+  it("the weekly price moves spread like the official game's", async () => {
+    const counts = {
+      cheap: { terrible: 0, poor: 0, good: 0, great: 0 },
+      expensive: { terrible: 0, poor: 0, good: 0, great: 0 },
+    };
+    const runs = await t.db.select().from(priceUpdateRuns);
+    for (const run of runs) {
+      for (const asset of (run.inputs as PriceInputs).assets) {
+        if (asset.kept || !asset.tier) continue;
+        counts[asset.price >= 185 ? "expensive" : "cheap"][asset.tier]++;
+        expect(Math.abs(asset.newPrice - asset.price)).toBeLessThanOrEqual(6);
+      }
+    }
+    for (const band of ["cheap", "expensive"] as const) {
+      const tiers = Object.values(counts[band]);
+      const total = tiers.reduce((sum, n) => sum + n, 0);
+      tiers.forEach((n, tier) => {
+        const share = (n / total) * 100;
+        expect(
+          Math.abs(share - OFFICIAL_TIER_SHARES[band][tier]!),
+        ).toBeLessThan(7);
+      });
+    }
+  });
+
+  it("an absent driver's price stands, rounds 12–14", async () => {
+    const [hadjar] = await t.db
+      .select({ id: poolAssets.id })
+      .from(poolAssets)
+      .where(eq(poolAssets.driverId, await idFor(t.db, "driver", "hadjar")));
+    const rounds = await t.db
+      .select({ id: events.id, round: events.round })
+      .from(events)
+      .where(inArray(events.round, [12, 13, 14]));
+    const runs = await t.db
+      .select()
+      .from(priceUpdateRuns)
+      .where(
+        inArray(
+          priceUpdateRuns.afterEventId,
+          rounds.map((round) => round.id),
+        ),
+      );
+    expect(runs).toHaveLength(3);
+    for (const run of runs) {
+      const entry = (run.inputs as PriceInputs).assets.find(
+        (asset) => asset.assetId === hadjar!.id,
+      );
+      expect(entry).toMatchObject({ absent: true, tier: null, change: 0 });
+      expect(entry!.newPrice).toBe(entry!.price);
+    }
   });
 
   it("rounds 12–14 score the substitution", async () => {

@@ -43,17 +43,23 @@ const tierChanges = z.tuple([
 ]);
 
 /**
- * The price formula's constants (DM 3.5): the last `window` events' average
- * points of an asset, against `pointsPerMillion` times its price, give a ratio
- * that falls into a tier. The tier's change depends on the price band: an
- * asset at `bandSplit` or above is expensive. Each change list is in tier
- * order: terrible, poor, good, great, in units of $0.1M.
+ * The price formula's constants (DM 3.5): an asset's average points over its
+ * last `window` events, plus the `unscoredPoints` of its type, against
+ * `pointsPerMillion` times its price, give a ratio that falls into a tier. The
+ * tier's change depends on the price band: an asset at `bandSplit` or above is
+ * expensive. Each change list is in tier order: terrible, poor, good, great,
+ * in units of $0.1M.
  */
 const priceFormulaSchema = z.strictObject({
   window: positive,
   pointsPerMillion: z.strictObject({
     driver: z.number().positive(),
     constructor: z.number().positive(),
+  }),
+  /** What the prices expect per event from categories this game doesn't score. */
+  unscoredPoints: z.strictObject({
+    driver: z.number().nonnegative(),
+    constructor: z.number().nonnegative(),
   }),
   bandSplit: positive,
   /** Ratios below `poor` are terrible and from `great` upwards are great. */
@@ -164,15 +170,18 @@ export const RULESET_2026: RulesetParams = {
     carryOverOutInUnlimitedWeek: 0,
   },
   knockout: { q2From: 16, q3From: 10 },
-  // The formula's values are a first guess; the replay calibrates them.
+  // Calibrated on the 2026 season (DM 3.5). The thresholds are the official
+  // game's. `unscoredPoints` is what overtakes, Driver of the Day and pit stops
+  // earned per asset per event there, which this game doesn't score.
   prices: {
     min: 30,
     max: 340,
     formula: {
       window: 3,
       pointsPerMillion: { driver: 1.0, constructor: 1.0 },
+      unscoredPoints: { driver: 6, constructor: 15 },
       bandSplit: 185,
-      thresholds: { poor: 0.6, good: 1.0, great: 1.5 },
+      thresholds: { poor: 0.6, good: 0.9, great: 1.2 },
       changes: { expensive: [-3, -1, 1, 3], cheap: [-6, -2, 2, 6] },
     },
   },
