@@ -364,6 +364,9 @@ const mismatchSchema = z.object({
  * admin resolves the old one.
  *
  * Returns how many team-events disagreed and which events were rebuilt.
+ *
+ * `base` and `adjustments` are materialized so each runs once: inlined, a
+ * nested loop reads the whole aggregate again for every lock record.
  */
 export async function checkScoreExplanations(
   db: Db,
@@ -383,13 +386,13 @@ export async function checkScoreExplanations(
       from (select distinct team_id from team_event_states where game_id = ${game}) t
       order by random()
       limit ${sample}
-    ), base as (
+    ), base as materialized (
       select b.team_id, b.event_id, sum(b.points)::integer as points
       from team_base_lines b
       join sampled x on x.team_id = b.team_id
       where b.game_id = ${game}
       group by b.team_id, b.event_id
-    ), adjustments as (
+    ), adjustments as materialized (
       select a.team_id, a.event_id, sum(a.points)::integer as points
       from team_adjustment_lines a
       join sampled x on x.team_id = a.team_id

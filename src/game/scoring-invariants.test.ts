@@ -17,6 +17,7 @@ import {
   poolAssets,
   results,
   scoringRuns,
+  sessionResultState,
   sessions,
   teamAdjustmentLines,
   teamEventStates,
@@ -536,6 +537,46 @@ describe("checkScoringInvariants", () => {
       expectFound(found, /a forced re-score changes asset_score_lines/);
       expectFound(found, /a forced re-score changes team_event_totals/);
       expectFound(found, /a forced re-score changes league_standings/);
+    });
+
+    it("catches a session with a current run that the re-score can't reach", async () => {
+      let found: string[] = [];
+      await t.db
+        .transaction(async (tx) => {
+          await tx
+            .update(sessionResultState)
+            .set({ status: "under_review" })
+            .where(eq(sessionResultState.sessionId, raceOf2));
+          found = await checkScoringInvariants(tx, gameId, { now: NOW });
+          tx.rollback();
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof TransactionRollbackError)) throw error;
+        });
+      expectFound(
+        found,
+        /a forced re-score reached 4 of the 5 sessions with a current run/,
+      );
+    });
+
+    it("catches a game the re-score reaches nothing in", async () => {
+      let found: string[] = [];
+      await t.db
+        .transaction(async (tx) => {
+          await tx
+            .update(games)
+            .set({ status: "completed" })
+            .where(eq(games.id, gameId));
+          found = await checkScoringInvariants(tx, gameId, { now: NOW });
+          tx.rollback();
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof TransactionRollbackError)) throw error;
+        });
+      expectFound(
+        found,
+        /a forced re-score reached 0 of the 5 sessions with a current run/,
+      );
     });
 
     it("leaves the game as it was", async () => {

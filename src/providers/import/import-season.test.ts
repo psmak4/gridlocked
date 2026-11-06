@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../../tests/helpers/test-db";
+import { RECORDED_THROUGH_ROUND } from "../../../tests/helpers/recorded-2026";
 import { loadSeats2026 } from "../../../tests/helpers/seats-2026";
 import {
   events,
@@ -38,20 +39,24 @@ const HELD: Record<string, string> = {
 
 /** Every recorded scored session: round, kind, and where it should end up. */
 const RECORDED: Array<[number, string, string]> = [
-  ...Array.from({ length: 19 }, (_, i) => i + 1).flatMap((round) =>
-    [
-      "qualifying",
-      ...(SPRINT_ROUNDS.includes(round) ? ["sprint"] : []),
-      "race",
-    ].map((kind): [number, string, string] => [
-      round,
-      kind,
-      HELD[`${round} ${kind}`] ?? "provisional",
-    ]),
+  ...Array.from({ length: RECORDED_THROUGH_ROUND }, (_, i) => i + 1).flatMap(
+    (round) =>
+      [
+        "qualifying",
+        ...(SPRINT_ROUNDS.includes(round) ? ["sprint"] : []),
+        "race",
+      ].map((kind): [number, string, string] => [
+        round,
+        kind,
+        HELD[`${round} ${kind}`] ?? "provisional",
+      ]),
   ),
   // The empty body: nothing to show yet.
   [23, "race", "awaiting"],
 ];
+
+/** The calendar, drivers, constructors, OpenF1's sessions and 4 rosters. */
+const OTHER_SNAPSHOTS = 8;
 
 describe("importSeason2026", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
@@ -119,13 +124,18 @@ describe("importSeason2026", () => {
     const report = await run();
     expect(report.rows.events).toBe(23);
     expect(report.rows.seat_assignments).toBe(loadSeats2026().length);
-    expect(report.rows.raw_snapshots).toBe(53);
+    expect(report.rows.raw_snapshots).toBe(RECORDED.length + OTHER_SNAPSHOTS);
     expect(report.rows.results).toBeGreaterThan(900);
+    const statuses = RECORDED.map(([, , status]) => status);
+    const held = (status: string) =>
+      statuses.filter((s) => s === status).length;
     expect(report.sessionStatuses).toEqual({
-      provisional: 40,
+      provisional: held("provisional"),
       awaiting: 3,
       under_review: 2,
     });
+    expect(held("awaiting")).toBe(3);
+    expect(held("under_review")).toBe(2);
   });
 
   it("does not plan or run jobs, finalize or call a provider", async () => {

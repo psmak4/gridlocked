@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, count, eq, inArray, ne } from "drizzle-orm";
 import {
   assetScoreLines,
   effectiveResults,
@@ -680,7 +680,9 @@ class RollBackRescore extends Error {}
 /**
  * Re-scores every session the game scores with `force`, rebuilds totals and
  * standings, compares the ledger before and after, and rolls it all back, so
- * the game is left as it was. Returns one message per table that changed.
+ * the game is left as it was. Returns one message per table that changed, and
+ * one if it couldn't reach every session with a current run: a re-score that
+ * ran nothing would otherwise find nothing changed.
  */
 async function checkForcedRescore(
   db: Db,
@@ -692,6 +694,17 @@ async function checkForcedRescore(
     .transaction(async (tx) => {
       const before = await ledgerRows(tx, gameId);
       const sessionsToScore = await scoredSessions(tx, gameId);
+      const [current] = await tx
+        .select({ n: count() })
+        .from(scoringRuns)
+        .where(
+          and(eq(scoringRuns.gameId, gameId), eq(scoringRuns.isCurrent, true)),
+        );
+      if (sessionsToScore.length !== current!.n) {
+        found.push(
+          `a forced re-score reached ${sessionsToScore.length} of the ${current!.n} sessions with a current run`,
+        );
+      }
       for (const { sessionId } of sessionsToScore) {
         const started = await startRun(tx, now, {
           gameId,

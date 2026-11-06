@@ -320,6 +320,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
               expect(await runs(race)).toEqual([]);
               expect(await scoreJobs(race)).toEqual([]);
               // Scored only as far as qualifying: no team has race points.
+              expect(await statusOf(round1.id)).toBe("scored");
               for (const row of await totals(round1.id)) {
                 expect(Object.keys(row.pointsBySession)).not.toContain(race);
               }
@@ -381,6 +382,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
               const race = await raceId();
               for (const row of await totals(round1.id)) {
                 expect(row.pointsBySession).toHaveProperty(race);
+                expect(row.pointsBySession[race]).not.toBe(0);
               }
               await setSessionException(t.db, now, {
                 gameId,
