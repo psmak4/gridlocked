@@ -110,11 +110,12 @@ export async function scoredSessions(
  * or revalidate does, which calls this again.
  *
  * `stamp` is `v<resultsVersion>` from the results hooks, `x:<auditId>` from an
- * exception change, `c:<auditId>` from a correction version and `r:<auditId>`
- * from an approved re-score. It is in the job's key, so calling this again for
- * the same change queues nothing. Call it with the transaction of the change
- * when there is one. `force` runs the session even with the current run's
- * inputs.
+ * exception change, `c:<auditId>` from a correction version, `r:<auditId>`
+ * from an approved re-score and `retry:<yyyy-mm-dd>` from the daily recovery of
+ * a failed run (`recoverScoringRuns`). It is in the job's key, so calling this
+ * again for the same change queues nothing. Call it with the transaction of the
+ * change when there is one. `force` runs the session even with the current
+ * run's inputs.
  */
 export async function enqueueScoring(
   db: Db,
