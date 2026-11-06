@@ -69,7 +69,7 @@ export interface SeasonGameReport {
   violations: string[];
 }
 
-const memoryStore = (): DueStore => {
+export const memoryStore = (): DueStore => {
   const objects = new Map<string, string>();
   return {
     async get(key) {

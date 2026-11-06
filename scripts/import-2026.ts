@@ -3,7 +3,10 @@
  * the pipeline would have learned it: raw snapshots, calendar, roster, seats,
  * entries, results with their status, and practice participants. See
  * `importSeason2026` in src/providers/import. It plans no jobs and finalizes
- * nothing, so every imported round stays `provisional`: the calendar sync
+ * nothing, so an imported round stays `provisional`, except those that need
+ * staff: after a fresh import rounds 1 and 14 stay `awaiting` (Jolpica omits
+ * the drivers with no qualifying time) and round 19 stays `under_review`
+ * (a substitute, and two drivers at P8) until staff act. The calendar sync
  * (HLD §4.5) plans jobs only for events still to finish, and leaves the
  * imported past rounds as they are rather than queueing a backlog of polls
  * and finalize checks for them. An admin finalizes them (M8) if need be.

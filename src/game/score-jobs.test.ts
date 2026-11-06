@@ -8,7 +8,11 @@ import {
 } from "../../tests/helpers/game-2026";
 import { ingest } from "../../tests/helpers/ingest-2026";
 import { allJobs, sessionOf } from "../../tests/helpers/pipeline-2026";
-import { replayRound, replaySeasonGame } from "../../tests/helpers/replay-2026";
+import {
+  enterNoTimeDrivers,
+  replayRound,
+  replaySeasonGame,
+} from "../../tests/helpers/replay-2026";
 import { readFixture } from "../../tests/helpers/fixtures";
 import { loadBody } from "../../tests/helpers/results-2026";
 import {
@@ -57,9 +61,9 @@ import { overrideResult } from "@/staff/results";
 import type { StaffActor } from "@/staff/roster";
 
 // The scoring pipeline (DM 4.8). The first part replays round 1 (Australia)
-// through the real scheduler tick with a seeded game and two teams: the
-// harness cancels its qualifying, which has no recording, so the race is the
-// only scored session. The second part runs the jobs directly, to reach what a
+// through the real scheduler tick with a seeded game and two teams. Its
+// qualifying is short of three drivers Jolpica omits, so staff enter them at
+// QUALIFYING_ENTERED and it scores before the race. The second part runs the jobs directly, to reach what a
 // weekend doesn't: retries, failures, batches and leagues.
 
 /**
@@ -95,6 +99,8 @@ const LEASE = 300_000;
 const ACTOR: StaffActor = { kind: "admin", label: "staff" };
 // Round 1's race ends at 06:00Z and its results appear at 06:30Z.
 const RACE_END = Date.parse("2026-03-08T06:00:00Z");
+// Round 1's qualifying ends at 06:00Z and its results appear at 06:30Z.
+const QUALIFYING_ENTERED = "2026-03-07T07:00:00Z";
 const after = (hours: number) => new Date(RACE_END + hours * HOUR);
 const iso = (hours: number) => after(hours).toISOString();
 // 280 + 250 + 95 + 85 + 80 + 90 + 70 = 950, leaving 50 in the bank.
@@ -169,6 +175,13 @@ describe("the scoring pipeline (DM 4.8)", () => {
   ): ReturnType<typeof replayRound> =>
     replayRound(t.db, 1, {
       ...options,
+      actions: [
+        {
+          at: QUALIFYING_ENTERED,
+          run: (now) => enterNoTimeDrivers(t.db, now, 1),
+        },
+        ...(options.actions ?? []),
+      ],
       setup: async (db, at) => {
         await seedTeams(db as typeof t.db, at);
         await planGameJobs(db, at, gameId);
@@ -201,8 +214,14 @@ describe("the scoring pipeline (DM 4.8)", () => {
       .from(teamEventTotals)
       .where(eq(teamEventTotals.eventId, eventId))
       .orderBy(asc(teamEventTotals.teamId));
-  const scoreJobs = async () =>
-    (await allJobs(t.db)).filter((j) => j.kind === "score_session");
+  /** The session's scoring jobs: every session's without one. */
+  const scoreJobs = async (sessionId?: string) =>
+    (await allJobs(t.db)).filter(
+      (j) =>
+        j.kind === "score_session" &&
+        (sessionId === undefined ||
+          (j.payload as ScoreSessionPayload).sessionId === sessionId),
+    );
   const pricesFor = (eventId: string) =>
     t.db.select().from(assetPrices).where(eq(assetPrices.eventId, eventId));
   const driverId = async (slug: string) =>
@@ -227,7 +246,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
         status: "succeeded",
         isCurrent: true,
       });
-      const jobs = await scoreJobs();
+      const jobs = await scoreJobs(race);
       expect(jobs.map((j) => j.status)).toEqual([
         "succeeded",
         "succeeded",
@@ -297,9 +316,14 @@ describe("the scoring pipeline (DM 4.8)", () => {
           {
             at: iso(2.5),
             run: async () => {
-              expect(await runs()).toEqual([]);
-              expect(await scoreJobs()).toEqual([]);
-              expect(await statusOf(round1.id)).toBe("locked");
+              const race = await raceId();
+              expect(await runs(race)).toEqual([]);
+              expect(await scoreJobs(race)).toEqual([]);
+              // Scored only as far as qualifying: no team has race points.
+              expect(await statusOf(round1.id)).toBe("scored");
+              for (const row of await totals(round1.id)) {
+                expect(Object.keys(row.pointsBySession)).not.toContain(race);
+              }
             },
           },
         ],
@@ -355,7 +379,11 @@ describe("the scoring pipeline (DM 4.8)", () => {
           {
             at: iso(3),
             run: async (now) => {
-              expect((await totals(round1.id))[0]!.points).not.toBe(0);
+              const race = await raceId();
+              for (const row of await totals(round1.id)) {
+                expect(row.pointsBySession).toHaveProperty(race);
+                expect(row.pointsBySession[race]).not.toBe(0);
+              }
               await setSessionException(t.db, now, {
                 gameId,
                 sessionId: await raceId(),
@@ -380,7 +408,12 @@ describe("the scoring pipeline (DM 4.8)", () => {
           .from(assetScoreLines)
           .where(eq(assetScoreLines.sessionId, race)),
       ).toEqual([]);
-      expect((await totals(round1.id)).map((r) => r.points)).toEqual([0, 0]);
+      // Only qualifying counts now, and neither team's race is in its total.
+      const qualifying = await sessionOf(t.db, round1.id, "qualifying");
+      for (const row of await totals(round1.id)) {
+        expect(row.pointsBySession[race] ?? 0).toBe(0);
+        expect(row.points).toBe(row.pointsBySession[qualifying.id]);
+      }
       const [job] = (await scoreJobs()).filter((j) =>
         j.dedupeKey.includes(":x:"),
       );
@@ -521,7 +554,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
 
       expect(await runs(await raceId())).toHaveLength(1);
       expect(
-        (await scoreJobs()).filter((j) =>
+        (await scoreJobs(await raceId())).filter((j) =>
           j.dedupeKey.startsWith(`score:${gameId}:`),
         ),
       ).toHaveLength(1);

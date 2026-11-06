@@ -1,0 +1,1157 @@
+{
+  "note": "The 2026 scoring replay's script (M4 Task 10), derived from game-2026-script.json for the whole pipeline: the same teams, scenarios and refusals, with one Rebuild pick changed to fit formula prices (round 8, Sainz for Hamilton), one refusal moved to the real finalize's timing (round 14's window), and the staff actions the real results need at rounds 1, 14 and 19. resultsIn and completeEvent are in the file but skipped: the poll and the finalizer do their work. Asset keys are Jolpica ids.",
+  "actions": [
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "Set and forget"
+    },
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "One a week"
+    },
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "Heavy transfers"
+    },
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "Second thoughts"
+    },
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "Chip collector"
+    },
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "Two devices"
+    },
+    {
+      "at": "2026-03-06T06:00:00Z",
+      "kind": "create",
+      "team": "Keeps a withdrawn driver"
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "Set and forget",
+      "picks": [
+        "max_verstappen",
+        "russell",
+        "albon",
+        "gasly",
+        "bottas",
+        "williams",
+        "cadillac"
+      ],
+      "boost": "max_verstappen",
+      "note": "Never saved again: the base carries to every round."
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "Second thoughts",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "Chip collector",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "Two devices",
+      "picks": [
+        "max_verstappen",
+        "leclerc",
+        "sainz",
+        "lawson",
+        "colapinto",
+        "rb",
+        "alpine"
+      ],
+      "boost": "max_verstappen",
+      "device": "phone"
+    },
+    {
+      "at": "2026-03-06T07:00:00Z",
+      "kind": "save",
+      "team": "Keeps a withdrawn driver",
+      "picks": [
+        "hadjar",
+        "antonelli",
+        "alonso",
+        "hulkenberg",
+        "gasly",
+        "red_bull",
+        "williams"
+      ],
+      "boost": "antonelli"
+    },
+    {
+      "at": "2026-03-06T07:10:00Z",
+      "kind": "chip",
+      "team": "Chip collector",
+      "chip": "chip_triple_boost",
+      "target": "piastri",
+      "note": "Overdrive at the team's first event, on a driver without the 2x Boost."
+    },
+    {
+      "at": "2026-03-06T07:20:00Z",
+      "kind": "expectRefused",
+      "code": "chip_unavailable",
+      "note": "Rebuild unlocks after the team's first event.",
+      "action": {
+        "kind": "chip",
+        "team": "Chip collector",
+        "chip": "chip_wildcard"
+      }
+    },
+    {
+      "at": "2026-03-07T07:00:00Z",
+      "kind": "noTimeResult",
+      "round": 1,
+      "driver": "max_verstappen",
+      "constructor": "red_bull",
+      "carNumber": 3,
+      "position": 20,
+      "reason": "Set no time in qualifying: Jolpica omits max_verstappen",
+      "note": "Option A: staff enter the driver Jolpica left out, with no Q times."
+    },
+    {
+      "at": "2026-03-07T07:00:00Z",
+      "kind": "noTimeResult",
+      "round": 1,
+      "driver": "sainz",
+      "constructor": "williams",
+      "carNumber": 55,
+      "position": 21,
+      "reason": "Set no time in qualifying: Jolpica omits sainz",
+      "note": "Option A: staff enter the driver Jolpica left out, with no Q times."
+    },
+    {
+      "at": "2026-03-07T07:00:00Z",
+      "kind": "noTimeResult",
+      "round": 1,
+      "driver": "stroll",
+      "constructor": "aston_martin",
+      "carNumber": 18,
+      "position": 22,
+      "reason": "Set no time in qualifying: Jolpica omits stroll",
+      "note": "Option A: staff enter the driver Jolpica left out, with no Q times."
+    },
+    {
+      "at": "2026-03-10T06:00:00Z",
+      "kind": "completeEvent",
+      "round": 1
+    },
+    {
+      "at": "2026-03-11T12:00:00Z",
+      "kind": "expectRefused",
+      "code": "chip_unavailable",
+      "note": "Overdrive was played at round 1: once a season.",
+      "action": {
+        "kind": "chip",
+        "team": "Chip collector",
+        "chip": "chip_triple_boost",
+        "target": "piastri"
+      }
+    },
+    {
+      "at": "2026-03-12T01:30:00Z",
+      "kind": "save",
+      "team": "Second thoughts",
+      "picks": [
+        "norris",
+        "russell",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-03-12T01:30:00Z",
+      "kind": "save",
+      "team": "Two devices",
+      "picks": [
+        "max_verstappen",
+        "leclerc",
+        "sainz",
+        "lawson",
+        "gasly",
+        "rb",
+        "alpine"
+      ],
+      "boost": "max_verstappen",
+      "device": "laptop",
+      "staleBase": false
+    },
+    {
+      "at": "2026-03-13T01:30:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris",
+      "note": "One transfer a week: two free, one carried at most."
+    },
+    {
+      "at": "2026-03-13T01:30:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "max_verstappen",
+        "russell",
+        "alonso",
+        "sainz",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "max_verstappen",
+      "note": "Four transfers with two free: -20."
+    },
+    {
+      "at": "2026-03-13T01:30:00Z",
+      "kind": "save",
+      "team": "Second thoughts",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris",
+      "note": "Piastri out and back in: the locked lineup is the base, no transfer."
+    },
+    {
+      "at": "2026-03-13T01:30:00Z",
+      "kind": "save",
+      "team": "Two devices",
+      "picks": [
+        "max_verstappen",
+        "leclerc",
+        "sainz",
+        "ocon",
+        "colapinto",
+        "rb",
+        "alpine"
+      ],
+      "boost": "max_verstappen",
+      "device": "phone",
+      "staleBase": true,
+      "note": "The phone still has round 1's lineup open: a stale base, and the later save counts."
+    },
+    {
+      "at": "2026-03-13T08:30:00Z",
+      "kind": "resultsIn",
+      "round": 2,
+      "session": "sprint_qualifying"
+    },
+    {
+      "at": "2026-03-14T04:00:00Z",
+      "kind": "expectRefused",
+      "code": "chip_window_closed",
+      "note": "On a sprint weekend Late Call opens after qualifying, not sprint qualifying.",
+      "action": {
+        "kind": "finalFix",
+        "team": "Chip collector",
+        "out": "hulkenberg",
+        "in": "alonso"
+      }
+    },
+    {
+      "at": "2026-03-14T08:30:00Z",
+      "kind": "resultsIn",
+      "round": 2,
+      "session": "qualifying"
+    },
+    {
+      "at": "2026-03-14T12:00:00Z",
+      "kind": "finalFix",
+      "team": "Chip collector",
+      "out": "hulkenberg",
+      "in": "alonso",
+      "note": "Late Call on a sprint weekend, after qualifying."
+    },
+    {
+      "at": "2026-03-17T09:00:00Z",
+      "kind": "completeEvent",
+      "round": 2
+    },
+    {
+      "at": "2026-03-27T23:00:00Z",
+      "kind": "expectRefused",
+      "code": "composition",
+      "note": "Overdrive on the 2x Boost driver.",
+      "action": {
+        "kind": "chip",
+        "team": "One a week",
+        "chip": "chip_triple_boost",
+        "target": "norris"
+      }
+    },
+    {
+      "at": "2026-03-28T00:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-03-28T00:00:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "max_verstappen",
+        "russell",
+        "alonso",
+        "sainz",
+        "lawson",
+        "alpine",
+        "cadillac"
+      ],
+      "boost": "max_verstappen"
+    },
+    {
+      "at": "2026-03-28T05:59:00Z",
+      "kind": "save",
+      "team": "Second thoughts",
+      "picks": [
+        "norris",
+        "russell",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris",
+      "note": "One minute before the lock: it counts."
+    },
+    {
+      "at": "2026-03-28T06:00:00Z",
+      "kind": "expectRefused",
+      "code": "window_closed",
+      "note": "At the lock: too late.",
+      "action": {
+        "kind": "save",
+        "team": "Second thoughts",
+        "picks": [
+          "norris",
+          "piastri",
+          "hulkenberg",
+          "hadjar",
+          "bearman",
+          "haas",
+          "audi"
+        ],
+        "boost": "norris"
+      }
+    },
+    {
+      "at": "2026-03-31T07:00:00Z",
+      "kind": "completeEvent",
+      "round": 3
+    },
+    {
+      "at": "2026-04-10T07:00:00Z",
+      "kind": "chip",
+      "team": "Heavy transfers",
+      "chip": "chip_wildcard",
+      "note": "Rebuild for the round that is cancelled: refunded, and the lineup counts as normal transfers at the next lock."
+    },
+    {
+      "at": "2026-04-10T07:00:00Z",
+      "kind": "chip",
+      "team": "Chip collector",
+      "chip": "chip_autopilot",
+      "note": "Refunded with the cancellation, and played again at round 6."
+    },
+    {
+      "at": "2026-04-10T07:10:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "norris",
+        "piastri",
+        "antonelli",
+        "albon",
+        "ocon",
+        "alpine",
+        "cadillac"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-04-24T20:30:00Z",
+      "kind": "cancelEvent",
+      "round": 4,
+      "note": "Synthetic: Miami wasn't cancelled in 2026. It stands in for an event cancelled before its lock. Saudi Arabia is off the 2026 calendar, and Bahrain moved to round 16 as the Bahrain Grand Prix in Malaysia, at Sepang. Round 5 opens at once."
+    },
+    {
+      "at": "2026-05-22T14:30:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-05-23T12:00:00Z",
+      "kind": "create",
+      "team": "Late joiner",
+      "note": "Created after round 5's lock."
+    },
+    {
+      "at": "2026-05-23T12:30:00Z",
+      "kind": "expectRefused",
+      "code": "window_closed",
+      "note": "Round 6 hasn't opened yet.",
+      "action": {
+        "kind": "save",
+        "team": "Late joiner",
+        "picks": [
+          "leclerc",
+          "hamilton",
+          "antonelli",
+          "alonso",
+          "stroll",
+          "ferrari",
+          "cadillac"
+        ],
+        "boost": "leclerc"
+      }
+    },
+    {
+      "at": "2026-05-26T22:00:00Z",
+      "kind": "completeEvent",
+      "round": 5
+    },
+    {
+      "at": "2026-05-28T12:00:00Z",
+      "kind": "save",
+      "team": "Late joiner",
+      "picks": [
+        "leclerc",
+        "hamilton",
+        "antonelli",
+        "alonso",
+        "stroll",
+        "ferrari",
+        "cadillac"
+      ],
+      "boost": "leclerc",
+      "note": "Its first event: unlimited transfers and the whole budget."
+    },
+    {
+      "at": "2026-05-28T12:00:00Z",
+      "kind": "chip",
+      "team": "Chip collector",
+      "chip": "chip_autopilot"
+    },
+    {
+      "at": "2026-05-28T12:10:00Z",
+      "kind": "expectRefused",
+      "code": "chip_unavailable",
+      "note": "Rebuild at the team's first event.",
+      "action": {
+        "kind": "chip",
+        "team": "Late joiner",
+        "chip": "chip_wildcard"
+      }
+    },
+    {
+      "at": "2026-05-31T22:00:00Z",
+      "kind": "adminPrice",
+      "round": 7,
+      "prices": {
+        "piastri": 262,
+        "bearman": 76
+      },
+      "reason": "replay: a price correction for round 7 before it opens",
+      "note": "An owned asset's price rises and another's falls."
+    },
+    {
+      "at": "2026-06-06T07:00:00Z",
+      "kind": "expectRefused",
+      "code": "over_budget",
+      "note": "Ocon for Verstappen is over the team's purchasing power.",
+      "action": {
+        "kind": "save",
+        "team": "Heavy transfers",
+        "picks": [
+          "norris",
+          "piastri",
+          "antonelli",
+          "albon",
+          "max_verstappen",
+          "alpine",
+          "cadillac"
+        ],
+        "boost": "norris"
+      }
+    },
+    {
+      "at": "2026-06-06T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-06-06T08:00:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "norris",
+        "piastri",
+        "hadjar",
+        "bearman",
+        "stroll",
+        "alpine",
+        "cadillac"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-06-09T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 6
+    },
+    {
+      "at": "2026-06-13T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-06-13T08:00:00Z",
+      "kind": "chip",
+      "team": "Chip collector",
+      "chip": "chip_no_negative"
+    },
+    {
+      "at": "2026-06-13T08:00:00Z",
+      "kind": "chip",
+      "team": "Late joiner",
+      "chip": "chip_wildcard",
+      "note": "Its second event: Rebuild is unlocked."
+    },
+    {
+      "at": "2026-06-13T08:10:00Z",
+      "kind": "save",
+      "team": "Late joiner",
+      "picks": [
+        "russell",
+        "albon",
+        "antonelli",
+        "alonso",
+        "ocon",
+        "ferrari",
+        "cadillac"
+      ],
+      "boost": "russell"
+    },
+    {
+      "at": "2026-06-16T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 7
+    },
+    {
+      "at": "2026-06-27T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-06-27T08:00:00Z",
+      "kind": "chip",
+      "team": "Chip collector",
+      "chip": "chip_wildcard"
+    },
+    {
+      "at": "2026-06-27T08:00:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "bearman",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-06-27T08:10:00Z",
+      "kind": "save",
+      "team": "Chip collector",
+      "picks": [
+        "max_verstappen",
+        "russell",
+        "albon",
+        "sainz",
+        "ocon",
+        "alpine",
+        "cadillac"
+      ],
+      "boost": "max_verstappen",
+      "note": "Rebuild: seven transfers, no penalty."
+    },
+    {
+      "at": "2026-06-30T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 8
+    },
+    {
+      "at": "2026-07-03T09:30:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-07-07T16:00:00Z",
+      "kind": "completeEvent",
+      "round": 9
+    },
+    {
+      "at": "2026-07-18T07:00:00Z",
+      "kind": "chip",
+      "team": "Chip collector",
+      "chip": "chip_limitless"
+    },
+    {
+      "at": "2026-07-18T08:00:00Z",
+      "kind": "save",
+      "team": "Chip collector",
+      "picks": [
+        "norris",
+        "max_verstappen",
+        "piastri",
+        "russell",
+        "leclerc",
+        "mclaren",
+        "mercedes"
+      ],
+      "boost": "norris",
+      "note": "Blank Cheque: over the budget for one round, then the team reverts."
+    },
+    {
+      "at": "2026-07-21T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 10
+    },
+    {
+      "at": "2026-07-25T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-07-25T08:00:00Z",
+      "kind": "expectRefused",
+      "code": "chip_unavailable",
+      "note": "Safety Car was played at round 7.",
+      "action": {
+        "kind": "chip",
+        "team": "Chip collector",
+        "chip": "chip_no_negative"
+      }
+    },
+    {
+      "at": "2026-07-27T12:00:00Z",
+      "kind": "withdraw",
+      "asset": "hadjar",
+      "fromRound": 12,
+      "reason": "replay: loses his race seat from the Dutch GP",
+      "note": "Owners keep him; nobody else can buy him."
+    },
+    {
+      "at": "2026-07-28T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 11
+    },
+    {
+      "at": "2026-08-21T08:30:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-08-25T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 12
+    },
+    {
+      "at": "2026-09-05T07:00:00Z",
+      "kind": "expectRefused",
+      "code": "asset_unavailable",
+      "note": "Hadjar was sold at round 8 and is withdrawn: he can't come back.",
+      "action": {
+        "kind": "save",
+        "team": "Heavy transfers",
+        "picks": [
+          "norris",
+          "piastri",
+          "hulkenberg",
+          "bearman",
+          "hadjar",
+          "haas",
+          "audi"
+        ],
+        "boost": "norris"
+      }
+    },
+    {
+      "at": "2026-09-05T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-09-05T08:00:00Z",
+      "kind": "save",
+      "team": "Heavy transfers",
+      "picks": [
+        "norris",
+        "piastri",
+        "gasly",
+        "bortoleto",
+        "colapinto",
+        "alpine",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-09-05T08:00:00Z",
+      "kind": "save",
+      "team": "Keeps a withdrawn driver",
+      "picks": [
+        "hadjar",
+        "antonelli",
+        "alonso",
+        "hulkenberg",
+        "ocon",
+        "red_bull",
+        "williams"
+      ],
+      "boost": "antonelli",
+      "note": "Keeps the withdrawn Hadjar through a save."
+    },
+    {
+      "at": "2026-09-07T12:00:00Z",
+      "kind": "expectRefused",
+      "code": "window_closed",
+      "note": "Round 13 isn't final until its +48 h check: round 14 hasn't opened.",
+      "action": {
+        "kind": "save",
+        "team": "One a week",
+        "picks": [
+          "norris",
+          "piastri",
+          "hulkenberg",
+          "hadjar",
+          "lawson",
+          "haas",
+          "audi"
+        ],
+        "boost": "norris"
+      }
+    },
+    {
+      "at": "2026-09-12T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-09-12T16:00:00Z",
+      "kind": "noTimeResult",
+      "round": 14,
+      "driver": "bearman",
+      "constructor": "haas",
+      "carNumber": 87,
+      "position": 21,
+      "reason": "Set no time in qualifying: Jolpica omits bearman",
+      "note": "Option A: staff enter the driver Jolpica left out, with no Q times."
+    },
+    {
+      "at": "2026-09-12T16:00:00Z",
+      "kind": "noTimeResult",
+      "round": 14,
+      "driver": "stroll",
+      "constructor": "aston_martin",
+      "carNumber": 18,
+      "position": 22,
+      "reason": "Set no time in qualifying: Jolpica omits stroll",
+      "note": "Option A: staff enter the driver Jolpica left out, with no Q times."
+    },
+    {
+      "at": "2026-09-15T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 14
+    },
+    {
+      "at": "2026-09-25T06:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-09-28T13:00:00Z",
+      "kind": "completeEvent",
+      "round": 15
+    },
+    {
+      "at": "2026-10-03T02:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-10-06T09:00:00Z",
+      "kind": "completeEvent",
+      "round": 16
+    },
+    {
+      "at": "2026-10-09T06:30:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-10-13T14:00:00Z",
+      "kind": "completeEvent",
+      "round": 17
+    },
+    {
+      "at": "2026-10-24T15:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-10-27T22:00:00Z",
+      "kind": "completeEvent",
+      "round": 18
+    },
+    {
+      "at": "2026-10-31T15:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-10-31T17:00:00Z",
+      "kind": "substitution",
+      "round": 19,
+      "in": "ryo_hirakawa",
+      "out": "ocon",
+      "constructor": "haas",
+      "carNumber": 50,
+      "reason": "Hirakawa replaces Ocon at Haas for the rest of the Mexico City GP weekend (Haas announcement, 31 Oct)",
+      "note": "Before FP3, and so before qualifying."
+    },
+    {
+      "at": "2026-11-01T02:00:00Z",
+      "kind": "resultPatch",
+      "round": 19,
+      "session": "qualifying",
+      "driver": "lawson",
+      "fields": {
+        "position": null,
+        "classification": "disqualified"
+      },
+      "reason": "Lawson disqualified from Mexico City GP qualifying (stewards, 1 Nov: MGU-K breach); Jolpica left his row at P8",
+      "note": "Over the recorded row, which stays as Jolpica has it."
+    },
+    {
+      "at": "2026-11-03T22:00:00Z",
+      "kind": "completeEvent",
+      "round": 19
+    },
+    {
+      "at": "2026-11-07T12:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-11-10T19:00:00Z",
+      "kind": "completeEvent",
+      "round": 20
+    },
+    {
+      "at": "2026-11-20T22:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-11-24T06:00:00Z",
+      "kind": "completeEvent",
+      "round": 21
+    },
+    {
+      "at": "2026-11-28T12:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "lawson",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-12-01T18:00:00Z",
+      "kind": "completeEvent",
+      "round": 22
+    },
+    {
+      "at": "2026-12-05T08:00:00Z",
+      "kind": "save",
+      "team": "One a week",
+      "picks": [
+        "norris",
+        "piastri",
+        "hulkenberg",
+        "hadjar",
+        "bearman",
+        "haas",
+        "audi"
+      ],
+      "boost": "norris"
+    },
+    {
+      "at": "2026-12-08T15:00:00Z",
+      "kind": "completeEvent",
+      "round": 23
+    }
+  ]
+}

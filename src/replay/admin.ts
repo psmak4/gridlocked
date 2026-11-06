@@ -2,6 +2,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { reviewItems } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { openReviewItem } from "@/reference/review";
+import { addOverride } from "@/results/overrides";
+import { STAFF_PLACEHOLDER_USER_ID } from "@/staff/results";
+import { revalidateEvent } from "@/staff/revalidate";
 
 /**
  * What an admin does during the replay (HLD §12, scripted scenarios): the
@@ -54,4 +57,42 @@ export async function applyAdminAction(
         eq(reviewItems.status, "open"),
       ),
     );
+}
+
+/**
+ * A driver the provider left out of qualifying for setting no time (Jolpica
+ * lists only drivers with a Q1 time), entered by staff so the session can
+ * clear: an `insert` override, `classified`, after the recorded rows, with no Q
+ * times, which is how "no time set" is read (DM 2.4). Then the event is checked
+ * again, as a staff action does.
+ */
+export async function insertNoTimeResult(
+  db: Db,
+  now: Date,
+  input: {
+    eventId: string;
+    sessionId: string;
+    driverId: string;
+    constructorId: string;
+    carNumber: number;
+    position: number;
+    reason: string;
+  },
+): Promise<void> {
+  await addOverride(db, now, {
+    sessionId: input.sessionId,
+    driverId: input.driverId,
+    kind: "insert",
+    fields: {
+      constructor_id: input.constructorId,
+      car_number: input.carNumber,
+      position: input.position,
+      classification: "classified",
+      provider_status: "No time set",
+      provider_position_text: String(input.position),
+    },
+    reason: input.reason,
+    createdBy: STAFF_PLACEHOLDER_USER_ID,
+  });
+  await revalidateEvent(db, now, input.eventId);
 }

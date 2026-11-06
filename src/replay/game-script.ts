@@ -37,7 +37,16 @@
  * - `completeEvent`: the round's event is `completed`, standing in for the
  *   finalizer (M2's replay proved it), since the import plans no pipeline
  *   jobs. Then it runs `finalizeGameEvent` directly, which makes the game event
- *   `final` and queues the next open.
+ *   `final` and queues the next open;
+ * - `noTimeResult`: staff enter a driver the provider left out of qualifying,
+ *   with no Q times, at `position` after the provider's rows;
+ * - `resultPatch`: a staff override on a provider row (`overrideResult`);
+ * - `substitution`: a driver takes a seat for the rest of the weekend
+ *   (`recordSubstitution`).
+ *
+ * Those three name drivers and constructors by script keys too, resolved by
+ * `GameScriptRun.driverId` and `constructorId`, since a substitute isn't in
+ * the pool. Only the scoring replay runs them.
  */
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -59,7 +68,10 @@ import { withdrawPoolAsset } from "@/game/pool";
 import { publishPrices } from "@/game/prices";
 import { createTeam } from "@/game/teams";
 import { newId } from "@/lib/ids";
-import type { StaffActor } from "@/staff/roster";
+import { insertNoTimeResult } from "@/replay/admin";
+import type { ResultFields } from "@/results/overrides";
+import { overrideResult } from "@/staff/results";
+import { recordSubstitution, type StaffActor } from "@/staff/roster";
 
 const GAME_ERROR_CODES = [
   "game_not_open",
@@ -148,6 +160,35 @@ export const gameActionSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ ...timed, kind: z.literal("cancelEvent"), round }),
   z.strictObject({ ...timed, kind: z.literal("completeEvent"), round }),
+  z.strictObject({
+    ...timed,
+    kind: z.literal("noTimeResult"),
+    round,
+    driver: key,
+    constructor: key,
+    carNumber: z.number().int().positive(),
+    position: z.number().int().positive(),
+    reason: z.string().min(1),
+  }),
+  z.strictObject({
+    ...timed,
+    kind: z.literal("resultPatch"),
+    round,
+    session: z.enum(SESSION_KINDS),
+    driver: key,
+    fields: z.record(z.string(), z.unknown()),
+    reason: z.string().min(1),
+  }),
+  z.strictObject({
+    ...timed,
+    kind: z.literal("substitution"),
+    round,
+    in: key,
+    out: key,
+    constructor: key,
+    carNumber: z.number().int().positive(),
+    reason: z.string().min(1),
+  }),
 ]);
 
 export const gameScriptSchema = z.strictObject({
@@ -175,6 +216,10 @@ export interface GameScriptRun {
   assetId: (key: string) => Promise<string>;
   /** The event of a calendar round. */
   eventOf: (round: number) => string;
+  /** The driver a script key names, for a replay with staff result actions. */
+  driverId?: (key: string) => Promise<string>;
+  /** The constructor a script key names, likewise. */
+  constructorId?: (key: string) => Promise<string>;
   /** Team ids by label, filled by `create`. */
   teams: Map<string, string>;
   /** The version each device of a team has open, by `<team>/<device>`. */
@@ -187,6 +232,8 @@ export function newGameScriptRun(input: {
   gameId: string;
   assetId: (key: string) => Promise<string>;
   eventOf: (round: number) => string;
+  driverId?: (key: string) => Promise<string>;
+  constructorId?: (key: string) => Promise<string>;
 }): GameScriptRun {
   return { ...input, teams: new Map(), devices: new Map(), refused: 0 };
 }
@@ -195,6 +242,32 @@ function teamOf(run: GameScriptRun, team: string): string {
   const id = run.teams.get(team);
   if (!id) throw new Error(`no team "${team}" (create it first)`);
   return id;
+}
+
+/** The session of `kind` at a round. */
+async function sessionOf(
+  db: Db,
+  run: GameScriptRun,
+  round: number,
+  kind: (typeof SESSION_KINDS)[number],
+): Promise<string> {
+  const [session] = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(
+      and(eq(sessions.eventId, run.eventOf(round)), eq(sessions.kind, kind)),
+    );
+  if (!session) throw new Error(`round ${round} has no ${kind}`);
+  return session.id;
+}
+
+/** The script's driver and constructor keys, for a run that resolves them. */
+function resolvers(run: GameScriptRun) {
+  const { driverId, constructorId } = run;
+  if (!driverId || !constructorId) {
+    throw new Error("this replay doesn't resolve drivers and constructors");
+  }
+  return { driverId, constructorId };
 }
 
 async function applyPlayerAction(
@@ -333,19 +406,10 @@ async function applyOther(
       return;
     }
     case "resultsIn": {
-      const eventId = run.eventOf(action.round);
-      const [session] = await db
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(
-          and(eq(sessions.eventId, eventId), eq(sessions.kind, action.session)),
-        );
-      if (!session) {
-        throw new Error(`round ${action.round} has no ${action.session}`);
-      }
+      const sessionId = await sessionOf(db, run, action.round, action.session);
       await db
         .insert(sessionResultState)
-        .values({ sessionId: session.id, status: "provisional" })
+        .values({ sessionId, status: "provisional" })
         .onConflictDoUpdate({
           target: sessionResultState.sessionId,
           set: { status: "provisional" },
@@ -370,6 +434,42 @@ async function applyOther(
       await finalizeGameEvent(db, now, {
         gameId: run.gameId,
         eventId: run.eventOf(action.round),
+      });
+      return;
+    }
+    case "noTimeResult": {
+      const { driverId, constructorId } = resolvers(run);
+      await insertNoTimeResult(db, now, {
+        eventId: run.eventOf(action.round),
+        sessionId: await sessionOf(db, run, action.round, "qualifying"),
+        driverId: await driverId(action.driver),
+        constructorId: await constructorId(action.constructor),
+        carNumber: action.carNumber,
+        position: action.position,
+        reason: action.reason,
+      });
+      return;
+    }
+    case "resultPatch": {
+      await overrideResult(db, now, {
+        sessionId: await sessionOf(db, run, action.round, action.session),
+        driverId: await resolvers(run).driverId(action.driver),
+        fields: action.fields as ResultFields,
+        reason: action.reason,
+        actor: ACTOR,
+      });
+      return;
+    }
+    case "substitution": {
+      const { driverId, constructorId } = resolvers(run);
+      await recordSubstitution(db, now, {
+        eventId: run.eventOf(action.round),
+        inDriverId: await driverId(action.in),
+        constructorId: await constructorId(action.constructor),
+        carNumber: action.carNumber,
+        outDriverId: await driverId(action.out),
+        reason: action.reason,
+        actor: ACTOR,
       });
       return;
     }

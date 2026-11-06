@@ -1,3 +1,6 @@
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq, like } from "drizzle-orm";
@@ -257,8 +260,15 @@ describe("replayWeekend", () => {
   });
 
   it("cancels scored sessions that have no recorded results and leaves the rest to finish", async () => {
-    // Round 12 (Dutch GP, a sprint weekend) has only its race recorded.
-    const report = await replay({ round: 12 });
+    // Round 12 (Dutch GP, a sprint weekend), from a copy of the fixtures that
+    // has only its race: every round now has all its sessions recorded.
+    const partial = mkdtempSync(join(tmpdir(), "replay-partial-"));
+    cpSync(FIXTURES, partial, { recursive: true });
+    for (const file of ["r12-sprint.json", "r12-qualifying.json"]) {
+      rmSync(join(partial, "jolpica", "2026", file));
+    }
+    const report = await replay({ round: 12, fixturesDir: partial });
+    rmSync(partial, { recursive: true });
 
     expect(report.cancelledSessions).toEqual(["sprint", "qualifying"]);
     expect(report.sessionStatuses).toEqual({ race: "final" });
