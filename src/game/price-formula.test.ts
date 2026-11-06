@@ -30,6 +30,11 @@ import { RULESET_2026 } from "./ruleset";
 
 const NOW = new Date("2026-02-01T09:00:00.000Z");
 const { formula } = RULESET_2026.prices;
+/** The formula with nothing unscored, so a ratio is the plain points over price. */
+const plain = {
+  ...formula,
+  unscoredPoints: { driver: 0, constructor: 0 },
+};
 const { min, max } = RULESET_2026.prices;
 const bounds = { min, max };
 
@@ -38,26 +43,27 @@ const change = (
   price: number,
   average: number,
   assetType: "driver" | "constructor" = "driver",
+  used = plain,
 ) =>
   priceChange({
     price,
     assetType,
     recentPoints: [average],
-    formula,
+    formula: used,
     bounds,
   });
 
 describe("priceChange (pure)", () => {
   it("each tier maps to its change in each band", () => {
-    // Expensive: $20M expects 20 points. Ratios 0.25, 0.75, 1.25 and 2.
-    expect([5, 15, 25, 40].map((avg) => change(200, avg))).toEqual([
+    // Expensive: $20M expects 20 points. Ratios 0.25, 0.75, 1 and 2.
+    expect([5, 15, 20, 40].map((avg) => change(200, avg))).toEqual([
       { tier: "terrible", change: -3, newPrice: 197 },
       { tier: "poor", change: -1, newPrice: 199 },
       { tier: "good", change: 1, newPrice: 201 },
       { tier: "great", change: 3, newPrice: 203 },
     ]);
-    // Cheap: $10M expects 10 points. Ratios 0.3, 0.8, 1.2 and 2.
-    expect([3, 8, 12, 20].map((avg) => change(100, avg))).toEqual([
+    // Cheap: $10M expects 10 points. Ratios 0.3, 0.8, 1 and 2.
+    expect([3, 8, 10, 20].map((avg) => change(100, avg))).toEqual([
       { tier: "terrible", change: -6, newPrice: 94 },
       { tier: "poor", change: -2, newPrice: 98 },
       { tier: "good", change: 2, newPrice: 102 },
@@ -66,8 +72,8 @@ describe("priceChange (pure)", () => {
   });
 
   it("a ratio on a threshold takes the higher tier", () => {
-    // $10M expects 10 points: ratios 0.6, 1 and 1.5 exactly.
-    expect([6, 10, 15].map((avg) => change(100, avg).tier)).toEqual([
+    // $10M expects 10 points: ratios 0.6, 0.9 and 1.2 exactly.
+    expect([6, 9, 12].map((avg) => change(100, avg).tier)).toEqual([
       "poor",
       "good",
       "great",
@@ -83,7 +89,7 @@ describe("priceChange (pure)", () => {
 
   it("drivers and constructors have their own points per million", () => {
     const own = {
-      ...formula,
+      ...plain,
       pointsPerMillion: { driver: 1, constructor: 2 },
     };
     // 20 points on $10M: a driver's baseline is 10, a constructor's 20.
@@ -92,6 +98,13 @@ describe("priceChange (pure)", () => {
     expect(priceChange({ ...base, assetType: "constructor" }).tier).toBe(
       "good",
     );
+  });
+
+  it("the points the game doesn't score count towards the ratio", () => {
+    // 2 points on $10M: a driver's 2 + 6 gives 0.8, a constructor's 2 + 15
+    // gives 1.7.
+    expect(change(100, 2, "driver", formula).tier).toBe("poor");
+    expect(change(100, 2, "constructor", formula).tier).toBe("great");
   });
 
   it("a price is clamped at $3M and $34M", () => {
@@ -116,7 +129,7 @@ describe("priceChange (pure)", () => {
         price,
         assetType: "driver",
         recentPoints: [average],
-        formula,
+        formula: plain,
         bounds,
       });
     // Cheap and terrible: 52 - 6 would be 46. Expensive and great: 298 + 3.
@@ -132,13 +145,13 @@ describe("priceChange (pure)", () => {
         price: 100,
         assetType: "driver",
         recentPoints,
-        formula,
+        formula: plain,
         bounds,
       });
-    // Averages of 12 in each case: ratio 1.2, good.
-    expect(run([12])).toEqual(run([12, 12, 12]));
-    expect(run([10, 14])).toEqual(run([12, 12, 12]));
-    expect(run([12]).tier).toBe("good");
+    // Averages of 10 in each case: ratio 1, good.
+    expect(run([10])).toEqual(run([10, 10, 10]));
+    expect(run([8, 12])).toEqual(run([10, 10, 10]));
+    expect(run([10]).tier).toBe("good");
   });
 
   it("only the newest three events count, the last ones in the list", () => {
@@ -147,7 +160,7 @@ describe("priceChange (pure)", () => {
         price: 100,
         assetType: "driver",
         recentPoints,
-        formula,
+        formula: plain,
         bounds,
       });
     // 100 is the oldest and is outside the window: the average is 3.
@@ -166,7 +179,7 @@ describe("priceChange (pure)", () => {
         price: 250,
         assetType: "constructor",
         recentPoints: [-20, 10],
-        formula,
+        formula: plain,
         bounds,
       }).tier,
     ).toBe("terrible");
@@ -178,7 +191,7 @@ describe("priceChange (pure)", () => {
         price: 123,
         assetType: "driver",
         recentPoints: [],
-        formula,
+        formula: plain,
         bounds,
       }),
     ).toEqual({ tier: null, change: 0, newPrice: 123 });
@@ -208,7 +221,11 @@ describe("runPriceUpdate (DM 3.5)", () => {
    * Scores a round's race with one line per asset: `points` by Jolpica key. An
    * asset not named has no line, so it scored 0.
    */
-  const score = async (eventId: string, points: Record<string, number>) => {
+  const score = async (
+    eventId: string,
+    points: Record<string, number>,
+    absent: string[] = [],
+  ) => {
     const race = await sessionOf(t.db, eventId, "race");
     const [ge] = await t.db
       .select()
@@ -242,6 +259,19 @@ describe("runPriceUpdate (DM 3.5)", () => {
         detail: {},
       });
     }
+    for (const key of absent) {
+      await t.db.insert(assetScoreLines).values({
+        id: newId(),
+        gameId,
+        sessionId: race.id,
+        runId,
+        assetId: await game.assetId(key),
+        ruleCode: "stub_absent",
+        category: "race",
+        points: -20,
+        detail: { reason: "absent" },
+      });
+    }
   };
 
   /** Locks the round before `n` and opens round `n`, as the jobs would. */
@@ -257,9 +287,9 @@ describe("runPriceUpdate (DM 3.5)", () => {
 
   it("the update writes formula prices and publishes the next event", async () => {
     await score(rounds[0]!.id, {
-      norris: 40, // $28M expects 28: ratio 1.43, good
-      piastri: 20, // $25M expects 25: ratio 0.8, poor
-      cadillac: 10, // $4M expects 4: ratio 2.5, great
+      norris: 24, // 24 + 6 on $28M: ratio 1.07, good
+      piastri: 14, // 14 + 6 on $25M: ratio 0.8, poor
+      cadillac: 10, // 10 + 15 on $4M: ratio 6.25, great
     });
 
     const result = await update(rounds[0]!.id);
@@ -270,9 +300,10 @@ describe("runPriceUpdate (DM 3.5)", () => {
     expect(prices.get(await game.assetId("norris"))).toBe(281);
     expect(prices.get(await game.assetId("piastri"))).toBe(249);
     expect(prices.get(await game.assetId("cadillac"))).toBe(46);
-    // No line means 0 points: terrible. Expensive -3, cheap -6.
+    // No line means 0 points. 0 + 6 on $20M is terrible, -3; 0 + 15 on $9M is
+    // great, +6.
     expect(prices.get(await game.assetId("leclerc"))).toBe(197);
-    expect(prices.get(await game.assetId("haas"))).toBe(84);
+    expect(prices.get(await game.assetId("haas"))).toBe(96);
 
     const rows = await t.db
       .select()
@@ -295,7 +326,7 @@ describe("runPriceUpdate (DM 3.5)", () => {
   });
 
   it("the inputs explain every change", async () => {
-    await score(rounds[0]!.id, { norris: 40, cadillac: 10 });
+    await score(rounds[0]!.id, { norris: 24, cadillac: 10 });
     const { runId } = (await update(rounds[0]!.id, "staff:preston")) as {
       runId: string;
     };
@@ -327,9 +358,9 @@ describe("runPriceUpdate (DM 3.5)", () => {
       assetId: await game.assetId("norris"),
       assetType: "driver",
       price: 280,
-      recentPoints: [40],
-      average: 40,
-      ratio: 40 / 28,
+      recentPoints: [24],
+      average: 24,
+      ratio: 30 / 28,
       tier: "good",
       change: 1,
       newPrice: 281,
@@ -338,10 +369,10 @@ describe("runPriceUpdate (DM 3.5)", () => {
       assetType: "constructor",
       recentPoints: [0],
       average: 0,
-      ratio: 0,
-      tier: "terrible",
-      change: -6,
-      newPrice: 84,
+      ratio: 15 / 9,
+      tier: "great",
+      change: 6,
+      newPrice: 96,
     });
     // Every stored price is the one its input says.
     const prices = await pricesOf(rounds[1]!.id);
@@ -377,9 +408,63 @@ describe("runPriceUpdate (DM 3.5)", () => {
     expect(entry).toMatchObject({
       price: 286,
       average: (100 + 20 + 5) / 3,
-      tier: "good",
-      newPrice: 287,
+      tier: "great",
+      newPrice: 289,
     });
+  });
+
+  const entryOf = async (runId: string, key: string) => {
+    const [run] = await t.db
+      .select()
+      .from(priceUpdateRuns)
+      .where(eq(priceUpdateRuns.id, runId));
+    const assetId = await game.assetId(key);
+    return (
+      run!.inputs as {
+        assets: { assetId: string; recentPoints: number[] }[];
+      }
+    ).assets.find((a) => a.assetId === assetId);
+  };
+
+  it("an asset absent from the scored event keeps its price", async () => {
+    await score(rounds[0]!.id, {}, ["hadjar"]);
+    const { runId } = (await update(rounds[0]!.id)) as { runId: string };
+
+    const entry = await entryOf(runId, "hadjar");
+    expect(entry).toMatchObject({
+      recentPoints: [],
+      average: null,
+      ratio: null,
+      tier: null,
+      change: 0,
+      absent: true,
+    });
+    const hadjar = await game.assetId("hadjar");
+    expect((await pricesOf(rounds[1]!.id)).get(hadjar)).toBe(
+      (await pricesOf(rounds[0]!.id)).get(hadjar),
+    );
+  });
+
+  it("an event the asset missed isn't one of its last three", async () => {
+    await score(rounds[0]!.id, { hadjar: 40 });
+    expect(await update(rounds[0]!.id)).toHaveProperty("runId");
+    await score(rounds[1]!.id, {}, ["hadjar"]);
+    await lockOpenThrough(2);
+    expect(await update(rounds[1]!.id)).toHaveProperty("runId");
+    await score(rounds[2]!.id, { hadjar: 10 });
+    await lockOpenThrough(3);
+    const { runId } = (await update(rounds[2]!.id)) as { runId: string };
+
+    expect((await entryOf(runId, "hadjar"))!.recentPoints).toEqual([40, 10]);
+  });
+
+  it("a driver with some lines of their own isn't absent", async () => {
+    await score(rounds[0]!.id, { hadjar: 3 }, ["hadjar"]);
+    const { runId } = (await update(rounds[0]!.id)) as { runId: string };
+
+    const entry = await entryOf(runId, "hadjar");
+    expect(entry!.recentPoints).toEqual([-17]);
+    expect(entry).not.toHaveProperty("absent");
   });
 
   it("an open next event is skipped", async () => {
@@ -454,7 +539,7 @@ describe("runPriceUpdate (DM 3.5)", () => {
       actor: { kind: "admin", label: "staff" },
       prices: [{ assetId: norris, price: 300 }],
     });
-    await score(rounds[0]!.id, { norris: 40, piastri: 20 });
+    await score(rounds[0]!.id, { norris: 40, piastri: 14 });
     const { runId } = (await update(rounds[0]!.id)) as { runId: string };
 
     const [row] = await t.db
@@ -481,7 +566,7 @@ describe("runPriceUpdate (DM 3.5)", () => {
     expect(assets.find((a) => a.assetId === norris)).toMatchObject({
       kept: "admin",
       recentPoints: [40],
-      tier: "good",
+      tier: "great",
     });
     expect(assets.filter((a) => a.kept !== undefined)).toHaveLength(1);
   });

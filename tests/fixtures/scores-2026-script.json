@@ -1,5 +1,5 @@
 {
-  "note": "The 2026 scoring replay's script (M4 Task 10), derived from game-2026-script.json for the whole pipeline: the same teams, scenarios and refusals, with one Rebuild pick changed to fit formula prices (round 8, Sainz for Hamilton), one refusal moved to the real finalize's timing (round 14's window), and the staff actions the real results need at rounds 1, 14 and 19. resultsIn and completeEvent are in the file but skipped: the poll and the finalizer do their work. Asset keys are Jolpica ids.",
+  "note": "The 2026 scoring replay's script (M4 Task 10), derived from game-2026-script.json for the whole pipeline: the same teams, scenarios and refusals, with two Rebuild picks changed to fit formula prices (round 8, Sainz for Hamilton; round 4's window, Gasly for Ocon), one refusal moved to the real finalize's timing (round 14's window), and the staff actions the real results need at rounds 1, 14 and 19. resultsIn and completeEvent are in the file but skipped: the poll and the finalizer do their work. Asset keys are Jolpica ids.",
   "actions": [
     {
       "at": "2026-03-06T06:00:00Z",
@@ -453,7 +453,7 @@
         "piastri",
         "antonelli",
         "albon",
-        "ocon",
+        "gasly",
         "alpine",
         "cadillac"
       ],

@@ -148,8 +148,9 @@ describe("the ruleset's price formula and autopilot params", () => {
     expect(parsed.prices.formula).toEqual({
       window: 3,
       pointsPerMillion: { driver: 1, constructor: 1 },
+      unscoredPoints: { driver: 6, constructor: 15 },
       bandSplit: 185,
-      thresholds: { poor: 0.6, good: 1.0, great: 1.5 },
+      thresholds: { poor: 0.6, good: 0.9, great: 1.2 },
       changes: { expensive: [-3, -1, 1, 3], cheap: [-6, -2, 2, 6] },
     });
   });

@@ -145,7 +145,10 @@ export const assetScoreLines = pgTable(
       onDelete: "restrict",
     }),
     points: integer("points").notNull(),
-    /** For the explanation only, e.g. `{ "grid": 7, "position": 3 }`. */
+    /**
+     * For the explanation, e.g. `{ "grid": 7, "position": 3 }`. The price
+     * formula also reads `reason: "absent"`: a driver with no seat that event.
+     */
     detail: jsonb("detail").notNull(),
   },
   (t) => [

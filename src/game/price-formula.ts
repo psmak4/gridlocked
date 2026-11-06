@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   assetPrices,
+  assetScoreLines,
   assetSessionTotals,
   gameEvents,
   poolAssets,
@@ -42,8 +43,8 @@ export function recentAverage(
 }
 
 /**
- * The average over the points the price should earn: its price in $M times
- * the asset type's points per million.
+ * The average, with the points this game doesn't score, over the points the
+ * price should earn: its price in $M times the asset type's points per million.
  */
 export function priceRatio(input: {
   price: MoneyUnits;
@@ -52,7 +53,10 @@ export function priceRatio(input: {
   formula: PriceFormula;
 }): number {
   const { price, assetType, average, formula } = input;
-  return average / ((price / 10) * formula.pointsPerMillion[assetType]);
+  return (
+    (average + formula.unscoredPoints[assetType]) /
+    ((price / 10) * formula.pointsPerMillion[assetType])
+  );
 }
 
 /**
@@ -95,7 +99,7 @@ interface AssetInput {
   assetType: PoolAssetType;
   /** The price in force for the scored event. */
   price: MoneyUnits;
-  /** Its points in the recent scored events, oldest first. */
+  /** Its points in the recent scored events it took part in, oldest first. */
   recentPoints: number[];
   average: number | null;
   ratio: number | null;
@@ -104,6 +108,8 @@ interface AssetInput {
   newPrice: MoneyUnits;
   /** Set when the next event already has this asset's price from staff: it stays. */
   kept?: "admin";
+  /** Set when it missed the scored event: its price stands. */
+  absent?: true;
 }
 
 /**
@@ -161,7 +167,8 @@ export async function runPriceUpdate(
     ).prices;
 
     // Scored events up to this one, newest first: those with a session whose
-    // lines are a current run's. Only as many as the formula averages.
+    // lines are a current run's. All of them, since an asset's last few skip
+    // the events it missed.
     const scoredNewestFirst = await tx
       .selectDistinct({
         eventId: gameEvents.eventId,
@@ -184,8 +191,7 @@ export async function runPriceUpdate(
           lte(gameEvents.sequence, after.sequence),
         ),
       )
-      .orderBy(desc(gameEvents.sequence))
-      .limit(formula.window);
+      .orderBy(desc(gameEvents.sequence));
     if (!scoredNewestFirst.some((e) => e.eventId === afterEventId)) {
       return { skipped: "no_scores" } as const;
     }
@@ -212,6 +218,28 @@ export async function runPriceUpdate(
       .groupBy(sessions.eventId, assetSessionTotals.assetId)) {
       totals.set(`${row.eventId}/${row.assetId}`, row.points);
     }
+    // Asset by event where every line is an `absent` penalty.
+    const missed = new Set(
+      (
+        await tx
+          .select({
+            eventId: sessions.eventId,
+            assetId: assetScoreLines.assetId,
+          })
+          .from(assetScoreLines)
+          .innerJoin(sessions, eq(sessions.id, assetScoreLines.sessionId))
+          .where(
+            and(
+              eq(assetScoreLines.gameId, gameId),
+              inArray(sessions.eventId, eventIds),
+            ),
+          )
+          .groupBy(sessions.eventId, assetScoreLines.assetId)
+          .having(
+            sql`bool_and(${assetScoreLines.detail}->>'reason' is not distinct from 'absent')`,
+          )
+      ).map((row) => `${row.eventId}/${row.assetId}`),
+    );
 
     const priced = await tx
       .select({
@@ -243,9 +271,13 @@ export async function runPriceUpdate(
       ).map((row) => [row.assetId, row.price]),
     );
     const assets: AssetInput[] = priced.map(({ assetId, assetType, price }) => {
-      const recentPoints = eventIds.map(
-        (eventId) => totals.get(`${eventId}/${assetId}`) ?? 0,
-      );
+      const absent = missed.has(`${afterEventId}/${assetId}`);
+      const recentPoints = absent
+        ? []
+        : eventIds
+            .filter((eventId) => !missed.has(`${eventId}/${assetId}`))
+            .map((eventId) => totals.get(`${eventId}/${assetId}`) ?? 0)
+            .slice(-formula.window);
       const average = recentAverage(recentPoints, formula.window);
       const kept = admin.get(assetId);
       return {
@@ -265,6 +297,7 @@ export async function runPriceUpdate(
           formula,
           bounds: { min, max },
         }),
+        ...(absent ? { absent: true as const } : {}),
         ...(kept === undefined
           ? {}
           : { kept: "admin" as const, change: 0, newPrice: kept }),
