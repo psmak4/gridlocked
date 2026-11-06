@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../../tests/helpers/test-db";
 import { loadSeats2026 } from "../../../tests/helpers/seats-2026";
 import {
@@ -25,19 +25,30 @@ const FIXTURES = fileURLToPath(
 const T1 = new Date("2026-10-28T09:00:00.000Z");
 const T2 = new Date("2026-10-28T10:00:00.000Z");
 
+const SPRINT_ROUNDS = [2, 4, 5, 9, 12, 17];
+/** Where a session ends up when the import can't take it to provisional. */
+const HELD: Record<string, string> = {
+  // Jolpica omits drivers with no Q1 time, so these stay short of the field.
+  "1 qualifying": "awaiting",
+  "14 qualifying": "awaiting",
+  // Hirakawa for Ocon needs a staff substitution, and qualifying has two P8s.
+  "19 qualifying": "under_review",
+  "19 race": "under_review",
+};
+
 /** Every recorded scored session: round, kind, and where it should end up. */
 const RECORDED: Array<[number, string, string]> = [
-  [1, "race", "provisional"],
-  [2, "race", "provisional"],
-  [2, "sprint", "provisional"],
-  [12, "race", "provisional"],
-  [13, "race", "provisional"],
-  [14, "race", "provisional"],
-  [15, "race", "provisional"],
-  [16, "race", "provisional"],
-  [17, "race", "provisional"],
-  [18, "qualifying", "provisional"],
-  [18, "race", "provisional"],
+  ...Array.from({ length: 19 }, (_, i) => i + 1).flatMap((round) =>
+    [
+      "qualifying",
+      ...(SPRINT_ROUNDS.includes(round) ? ["sprint"] : []),
+      "race",
+    ].map((kind): [number, string, string] => [
+      round,
+      kind,
+      HELD[`${round} ${kind}`] ?? "provisional",
+    ]),
+  ),
   // The empty body: nothing to show yet.
   [23, "race", "awaiting"],
 ];
@@ -73,23 +84,48 @@ describe("importSeason2026", () => {
     }
   });
 
-  it("opens no blocking review item", async () => {
+  it("opens blocking review items only for round 19, which needs staff", async () => {
     const report = await run();
     const blocking = await t.db
-      .select()
+      .select({
+        round: events.round,
+        session: sessions.kind,
+        kind: reviewItems.kind,
+        problem: sql<string>`${reviewItems.details}->>'problem'`,
+      })
       .from(reviewItems)
-      .where(eq(reviewItems.severity, "blocking"));
-    expect(blocking).toEqual([]);
-    expect(report.reviewItems.openBlocking).toBe(0);
+      .innerJoin(sessions, eq(sessions.id, reviewItems.sessionId))
+      .innerJoin(events, eq(events.id, sessions.eventId))
+      .where(eq(reviewItems.severity, "blocking"))
+      .orderBy(asc(sessions.kind), asc(reviewItems.kind));
+    expect(blocking).toEqual(
+      [
+        ["qualifying", "missing_driver", "missing_driver"],
+        ["qualifying", "unknown_driver", "unknown_driver"],
+        ["qualifying", "validation_failed", "positions_not_contiguous"],
+        ["race", "missing_driver", "missing_driver"],
+        ["race", "unknown_driver", "unknown_driver"],
+      ].map(([session, kind, problem]) => ({
+        round: 19,
+        session,
+        kind,
+        problem,
+      })),
+    );
+    expect(report.reviewItems.openBlocking).toBe(5);
   });
 
   it("reports what is in every table afterwards", async () => {
     const report = await run();
     expect(report.rows.events).toBe(23);
     expect(report.rows.seat_assignments).toBe(loadSeats2026().length);
-    expect(report.rows.raw_snapshots).toBe(20);
-    expect(report.rows.results).toBeGreaterThan(200);
-    expect(report.sessionStatuses).toEqual({ provisional: 11, awaiting: 1 });
+    expect(report.rows.raw_snapshots).toBe(53);
+    expect(report.rows.results).toBeGreaterThan(900);
+    expect(report.sessionStatuses).toEqual({
+      provisional: 40,
+      awaiting: 3,
+      under_review: 2,
+    });
   });
 
   it("does not plan or run jobs, finalize or call a provider", async () => {
@@ -146,11 +182,18 @@ describe("importSeason2026", () => {
     const rows = await t.db.select().from(sessionParticipants);
     expect(rows.length).toBeGreaterThan(60);
     expect(new Set(rows.map((r) => r.provider))).toEqual(new Set(["openf1"]));
-    // Warnings may be raised for real surprises, but never anything blocking.
+    // Warnings may be raised for real surprises, but never anything blocking,
+    // but for round 19's own items, which the test above pins.
     const open = await t.db
-      .select()
+      .select({ severity: reviewItems.severity })
       .from(reviewItems)
-      .where(eq(reviewItems.status, "open"));
+      .leftJoin(events, eq(events.id, reviewItems.eventId))
+      .where(
+        and(
+          eq(reviewItems.status, "open"),
+          sql`${events.round} is distinct from 19`,
+        ),
+      );
     expect(open.every((i) => i.severity === "warning")).toBe(true);
   });
 

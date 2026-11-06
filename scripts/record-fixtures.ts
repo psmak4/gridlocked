@@ -18,19 +18,7 @@ import { createProviderClient } from "@/providers/http/client";
 import { createRateLimiter } from "@/providers/http/rate-limiter";
 import { systemClock, systemTimer } from "@/lib/clock";
 import { getSetting } from "@/settings";
-
-const BASE_URL = "https://api.jolpi.ca/ergast/f1";
-const PAGE_SIZE = 100;
-const outRoot = fileURLToPath(
-  new URL("../tests/fixtures/jolpica", import.meta.url),
-);
-
-interface MRData {
-  total?: string;
-  limit?: string;
-  offset?: string;
-  RaceTable?: { Races?: Array<Record<string, unknown>> };
-}
+import { openJolpicaRecorder, pad, type MRData } from "./lib/jolpica-recorder";
 
 const OPENF1_BASE_URL = "https://api.openf1.org/v1";
 const openf1Root = fileURLToPath(
@@ -138,61 +126,13 @@ async function recordOpenF1(onlySessions: boolean) {
   await t.close();
 }
 
-const pad = (round: number | string) => String(round).padStart(2, "0");
-
 async function main() {
   const openf1 = process.argv.find((a) => a.startsWith("--openf1"));
   if (openf1) {
     await recordOpenF1(openf1 === "--openf1=sessions");
     return;
   }
-  const t = await createTestDb();
-  const limits = (await getSetting(t.db, "provider_limits")).jolpica;
-  const client = createProviderClient({
-    provider: "jolpica",
-    baseUrl: BASE_URL,
-    db: t.db,
-    clock: systemClock,
-    fetch,
-    limiter: createRateLimiter(limits, systemTimer),
-    timer: systemTimer,
-  });
-
-  const written = new Set<string>();
-  let calls = 0;
-
-  /** Fetches `endpoint` (and any further pages) and saves the raw bodies. */
-  async function record(
-    endpoint: string,
-    file: string,
-    opts: { expectRaces?: boolean } = {},
-  ): Promise<MRData> {
-    if (written.has(file)) throw new Error(`duplicate fixture ${file}`);
-    written.add(file);
-    let first: MRData | undefined;
-    for (let offset = 0, page = 1; ; page++) {
-      calls++;
-      const res = await client.get(endpoint, {
-        limit: String(PAGE_SIZE),
-        offset: String(offset),
-      });
-      const mr = (res.body as { MRData: MRData }).MRData;
-      first ??= mr;
-      const name =
-        page === 1 ? file : file.replace(/\.json$/, `.p${page}.json`);
-      const path = join(outRoot, name);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, JSON.stringify(res.body, null, 2) + "\n");
-      console.log(`${calls}. ${endpoint} offset=${offset} -> ${name}`);
-      if (opts.expectRaces && !(mr.RaceTable?.Races?.length ?? 0)) {
-        throw new Error(`${endpoint}: no races in the response`);
-      }
-      const total = Number(mr.total ?? 0);
-      offset += PAGE_SIZE;
-      if (offset >= total) break;
-    }
-    return first;
-  }
+  const { record, calls, close } = await openJolpicaRecorder();
 
   // `--rounds=15,16,17` records only those 2026 race results (a later top-up).
   const extra = process.argv.find((a) => a.startsWith("--rounds="));
@@ -204,8 +144,8 @@ async function main() {
         { expectRaces: true },
       );
     }
-    console.log(`done: ${calls} calls`);
-    await t.close();
+    console.log(`done: ${calls()} calls`);
+    await close();
     return;
   }
 
@@ -221,8 +161,8 @@ async function main() {
     if ((mr.RaceTable?.Races?.length ?? 0) !== 0) {
       throw new Error(`round ${round} already has results`);
     }
-    console.log(`done: ${calls} calls`);
-    await t.close();
+    console.log(`done: ${calls()} calls`);
+    await close();
     return;
   }
 
@@ -281,8 +221,8 @@ async function main() {
     doneResults.add(file);
   }
 
-  console.log(`done: ${calls} calls`);
-  await t.close();
+  console.log(`done: ${calls()} calls`);
+  await close();
 }
 
 main().catch((error) => {
