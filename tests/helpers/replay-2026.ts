@@ -72,7 +72,7 @@ export async function enterNoTimeDrivers(db: Db, now: Date, round: number) {
         ),
       );
     await insertNoTimeResult(db, now, {
-      ...row,
+      sessionId: row.sessionId,
       driverId,
       constructorId: entry!.constructorId,
       carNumber: entry!.carNumber,
