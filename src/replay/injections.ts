@@ -4,9 +4,15 @@
  *
  * - `penalty`: from `at` on, the race answers as if the stewards had added
  *   `seconds` to `driver`'s time (a Jolpica driver id) and the classification
- *   had been redone.
+ *   had been redone. In a season, `round` says which race.
  * - `outage`: every provider request in [`at`, `until`) is refused with a 503.
  */
 export type Injection =
-  | { at: string; kind: "penalty"; driver: string; seconds: number }
+  | {
+      at: string;
+      kind: "penalty";
+      driver: string;
+      seconds: number;
+      round?: number;
+    }
   | { at: string; kind: "outage"; until: string };

@@ -52,6 +52,59 @@ const jsonOf = async <T>(response: Response) => (await response.json()) as T;
 const orderOf = (body: Served) =>
   body.MRData.RaceTable.Races[0]!.Results.map((r) => r.Driver.driverId);
 
+describe("createReplayFetch: a season", () => {
+  const ROUND_1_RACE_END = new Date("2026-03-08T06:00:00.000Z");
+  const url = (round: number) => `${JOLPICA}/2026/${round}/results.json`;
+  const season = (
+    now: Date,
+    injections: Parameters<typeof createReplayFetch>[0]["injections"] = [],
+  ) =>
+    createReplayFetch({
+      fixturesDir: FIXTURES,
+      season: 2026,
+      rounds: new Map([
+        [1, [{ kind: "race", scheduledEnd: ROUND_1_RACE_END }]],
+        [18, [{ kind: "race", scheduledEnd: RACE_END }]],
+      ]),
+      now: () => now,
+      publishDelayMs: 30 * 60_000,
+      injections,
+    });
+
+  it("serves each round as its own session ends", async () => {
+    const between = season(minutes(RACE_END, -60 * 24));
+    const first = await json(await between(url(1)));
+    expect(first.MRData.RaceTable.Races).toHaveLength(1);
+    const second = await json(await between(url(18)));
+    expect(second.MRData.RaceTable.Races).toEqual([]);
+
+    const after = season(minutes(RACE_END, 31));
+    expect(orderOf(await json(await after(url(18)))).length).toBeGreaterThan(0);
+  });
+
+  it("answers 404 for a round it doesn't replay", async () => {
+    const fetch = season(minutes(RACE_END, 31));
+    expect((await fetch(url(2))).status).toBe(404);
+  });
+
+  it("applies a penalty only to its own round", async () => {
+    const at = minutes(RACE_END, 31);
+    const plain = orderOf(await json(await season(at)(url(18))));
+    const fetch = season(at, [
+      {
+        at: at.toISOString(),
+        kind: "penalty",
+        round: 18,
+        driver: plain[0]!,
+        seconds: 600,
+      },
+    ]);
+    expect(orderOf(await json(await fetch(url(18))))[0]).not.toBe(plain[0]);
+    const round1 = orderOf(await json(await season(at)(url(1))));
+    expect(orderOf(await json(await fetch(url(1))))).toEqual(round1);
+  });
+});
+
 describe("createReplayFetch: Jolpica results", () => {
   it("serves Jolpica's real empty shape, for this season and round, before publication", async () => {
     const { fetch } = setup({ now: minutes(RACE_END, 29) });

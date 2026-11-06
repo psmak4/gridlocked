@@ -8,19 +8,18 @@
  * that is already recorded stays byte for byte; only what's missing is
  * fetched. Then it checks every round has its files, for its own round.
  *
- * Add a round by raising `THROUGH_ROUND` once its results are final.
+ * Add a round by raising `RECORDED_THROUGH_ROUND`
+ * (tests/helpers/recorded-2026.ts) once its results are final.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { RECORDED_THROUGH_ROUND } from "../tests/helpers/recorded-2026";
 import {
   jolpicaFixturesRoot,
   openJolpicaRecorder,
   pad,
   type MRData,
 } from "./lib/jolpica-recorder";
-
-/** The last round with final results; the calendar's others are still to run. */
-const THROUGH_ROUND = 19;
 
 const readRecorded = (file: string) =>
   JSON.parse(readFileSync(join(jolpicaFixturesRoot, file), "utf8")) as {
@@ -56,7 +55,7 @@ async function main() {
   const flag = process.argv.find((a) => a.startsWith("--through="));
   const through = flag
     ? Number(flag.slice("--through=".length))
-    : THROUGH_ROUND;
+    : RECORDED_THROUGH_ROUND;
   const rounds = roundsThrough(through);
   const wanted = rounds.flatMap(({ round, sprint }) =>
     filesOf(round, sprint).map((f) => ({ ...f, round })),

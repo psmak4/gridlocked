@@ -13,7 +13,10 @@
  *   the recorded bodies. OpenF1 `drivers` is the recorded body of that
  *   session when there is one, else an empty array.
  * - An `outage` injection answers every request with a 503.
- * - Anything else is a 404: the replay only knows its own weekend.
+ * - Anything else is a 404: the replay only knows its own weekends.
+ *
+ * One weekend (`round` and `sessions`) or several (`rounds`, by round), each
+ * round's bodies served as above.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -36,19 +39,26 @@ export interface ReplaySession {
   scheduledEnd: Date;
 }
 
-export interface ReplayFetchOptions {
+export type ReplayFetchOptions = {
   /** The root that holds `jolpica/` and `openf1/`. */
   fixturesDir: string;
   season: number;
-  round: number;
   /** The simulated time, read at each request. */
   now: () => Date;
-  /** The target event's scored sessions that the replay runs. */
-  sessions: ReplaySession[];
   /** Results are published this long after the session's scheduled end. */
   publishDelayMs: number;
   injections: Injection[];
-}
+} & (
+  | {
+      round: number;
+      /** The target event's scored sessions that the replay runs. */
+      sessions: ReplaySession[];
+    }
+  | {
+      /** Each round's scored sessions that the replay runs. */
+      rounds: Map<number, ReplaySession[]>;
+    }
+);
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -57,7 +67,11 @@ const json = (body: unknown, status = 200) =>
   });
 
 export function createReplayFetch(opts: ReplayFetchOptions): typeof fetch {
-  const { fixturesDir, season, round } = opts;
+  const { fixturesDir, season } = opts;
+  const rounds =
+    "rounds" in opts
+      ? opts.rounds
+      : new Map([[opts.round, opts.sessions] as const]);
   const jolpicaDir = join(fixturesDir, "jolpica", String(season));
   const openf1Dir = join(fixturesDir, "openf1", String(season));
   const cache = new Map<string, unknown>();
@@ -68,7 +82,7 @@ export function createReplayFetch(opts: ReplayFetchOptions): typeof fetch {
     return structuredClone(cache.get(path));
   };
 
-  const resultsFile = (suffix: string) =>
+  const resultsFile = (round: number, suffix: string) =>
     join(jolpicaDir, `r${String(round).padStart(2, "0")}-${suffix}.json`);
 
   /** OpenF1 session key -> recorded drivers file, found the way the import links sessions. */
@@ -107,7 +121,7 @@ export function createReplayFetch(opts: ReplayFetchOptions): typeof fetch {
     return driverFiles;
   };
 
-  const emptyResults = (endpoint: string) => {
+  const emptyResults = (round: number, endpoint: string) => {
     const body = read(join(jolpicaDir, "r23-results-empty.json")) as {
       MRData: { url: string; RaceTable: { season: string; round: string } };
     };
@@ -117,21 +131,28 @@ export function createReplayFetch(opts: ReplayFetchOptions): typeof fetch {
     return body;
   };
 
-  function jolpicaResults(endpoint: string, now: Date): Response {
+  function jolpicaResults(
+    round: number,
+    endpoint: string,
+    now: Date,
+  ): Response {
     const served = RESULTS[endpoint];
-    const session = opts.sessions.find((s) => s.kind === served?.kind);
+    const session = rounds.get(round)?.find((s) => s.kind === served?.kind);
     if (!served || !session) return json({ error: "not replayed" }, 404);
 
     const publishAt = session.scheduledEnd.getTime() + opts.publishDelayMs;
-    const file = resultsFile(served.suffix);
+    const file = resultsFile(round, served.suffix);
     if (now.getTime() < publishAt || !existsSync(file)) {
-      return json(emptyResults(endpoint));
+      return json(emptyResults(round, endpoint));
     }
     let body = read(file);
     if (served.kind === "race") {
       const penalties = opts.injections
         .filter(
-          (i) => i.kind === "penalty" && Date.parse(i.at) <= now.getTime(),
+          (i) =>
+            i.kind === "penalty" &&
+            (i.round === undefined || i.round === round) &&
+            Date.parse(i.at) <= now.getTime(),
         )
         .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
       for (const p of penalties) {
@@ -169,9 +190,9 @@ export function createReplayFetch(opts: ReplayFetchOptions): typeof fetch {
       if (
         results &&
         Number(results[1]) === season &&
-        Number(results[2]) === round
+        rounds.has(Number(results[2]))
       ) {
-        return jolpicaResults(results[3]!, now);
+        return jolpicaResults(Number(results[2]), results[3]!, now);
       }
     } else if (path.startsWith(`${OPENF1_PATH}/`)) {
       const rest = path.slice(OPENF1_PATH.length);
