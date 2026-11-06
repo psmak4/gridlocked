@@ -18,6 +18,7 @@ import {
   drivers,
   gameEvents,
   games,
+  jobs,
   leagueStandings,
   lineupVersions,
   priceUpdateRuns,
@@ -31,8 +32,12 @@ import {
   teamEventTotals,
   teams,
 } from "@/db/schema";
-import { gameChecksKey, scoreKey } from "@/jobs/kinds";
-import { enqueue } from "@/jobs/queue";
+import {
+  gameChecksKey,
+  scoreKey,
+  type ScoreSessionPayload,
+} from "@/jobs/kinds";
+import { enqueue, reapExpired } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
 import { simulatedClock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
@@ -51,11 +56,13 @@ import {
   dryRunGame,
   publishCorrectionVersion,
   pruneLineupVersions,
+  recoverScoringRuns,
 } from "./corrections";
 import { saveFinalFix } from "./chips";
 import { GameError } from "./errors";
 import { planGameEvents } from "./games";
 import { checkGameInvariants } from "./invariants";
+import { createGameHandlers } from "./jobs";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { RULESET_2026 } from "./ruleset";
 import {
@@ -63,7 +70,7 @@ import {
   enqueueScoring,
   finalizeGameEvent,
 } from "./score-jobs";
-import { startRun, writeAssetLines } from "./scoring-runs";
+import { failRun, startRun, writeAssetLines } from "./scoring-runs";
 import { createTeam } from "./teams";
 
 // Corrections (DM 4.9) and the daily checks (DM 4.8, 3.7), over the recorded
@@ -1347,6 +1354,348 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
     });
   });
 
+  describe("recoverScoringRuns", () => {
+    const LATER = 2 * HOUR;
+    const dayOf = (at: Date) => at.toISOString().slice(0, 10);
+    const retryKey = (at: Date) =>
+      scoreKey(gameId, race.id, `retry:${dayOf(at)}`);
+    const all = () => ({ ...createGameHandlers(), ...createScoreHandlers() });
+    const runAll = () =>
+      runDue(t.db, clock, all(), { maxJobs: 50, leaseMs: LEASE });
+    const sweep = () => recoverScoringRuns(t.db, clock.now(), { gameId });
+    const later = (ms: number) => at(new Date(clock.now().getTime() + ms));
+    /** A live run with no job behind it, its asset lines unwritten. */
+    const startLive = async (force = false) => {
+      const started = await startRun(t.db, clock.now(), {
+        gameId,
+        sessionId: race.id,
+        trigger: "override",
+        mode: "live",
+        force,
+      });
+      if (!("runId" in started)) throw new Error("skipped");
+      return started.runId;
+    };
+    const statusOf = async (runId: string) =>
+      (await runsOf(race.id)).find((r) => r.id === runId)!.status;
+    const queueStep = (runId: string | undefined) =>
+      enqueue(t.db, {
+        kind: "score_session",
+        dedupeKey: `score:test:${runId ?? "assets"}`,
+        runAt: clock.now(),
+        payload: {
+          gameId,
+          sessionId: race.id,
+          trigger: "override",
+          runId,
+          step: runId === undefined ? "assets" : "teams",
+        } satisfies ScoreSessionPayload,
+      });
+    /** The ledger without its ids and run tags, in a stable order. */
+    const ledger = async () => ({
+      lines: (
+        await t.db
+          .select({
+            teamId: teamAdjustmentLines.teamId,
+            sessionId: teamAdjustmentLines.sessionId,
+            assetId: teamAdjustmentLines.assetId,
+            lineType: teamAdjustmentLines.lineType,
+            category: teamAdjustmentLines.category,
+            points: teamAdjustmentLines.points,
+          })
+          .from(teamAdjustmentLines)
+          .where(eq(teamAdjustmentLines.eventId, round1.id))
+      )
+        .map((line) => JSON.stringify(line))
+        .sort(),
+      totals: (await t.db.select().from(teamEventTotals))
+        .map(({ teamId, eventId, points, cumulativePoints, status }) =>
+          JSON.stringify({ teamId, eventId, points, cumulativePoints, status }),
+        )
+        .sort(),
+    });
+    /**
+     * Round 1 final, then a correction whose re-score dies mid-`teams`: the
+     * worker goes on the last attempt of the second team's batch, so nothing
+     * called `failRun`, and `reapExpired` dead-letters the job.
+     */
+    async function killedMidTeams() {
+      await finalizeGameEvent(t.db, clock.now(), {
+        gameId,
+        eventId: round1.id,
+      });
+      await runAll();
+      await publish([round1.id]);
+      await runDue(t.db, clock, createScoreHandlers({ batchSize: 1 }), {
+        maxJobs: 2,
+        leaseMs: LEASE,
+      });
+      const [next] = (await scoreJobs()).filter((j) => j.status === "pending");
+      await t.db
+        .update(jobs)
+        .set({
+          status: "running",
+          attempts: next!.maxAttempts,
+          lockedUntil: clock.now(),
+        })
+        .where(eq(jobs.id, next!.id));
+      await reapExpired(t.db, clock.now());
+      return runsOf(race.id).then((rows) => rows.at(-1)!);
+    }
+
+    it("a run killed mid-teams on a final event is failed, re-scored, and matches a clean run", async () => {
+      const killed = await killedMidTeams();
+      expect(killed).toMatchObject({ status: "running", isCurrent: true });
+      expect((await gameEvent(round1.id)).status).toBe("final");
+      const old = await pointsOf(round1.id);
+      // Team lines of both runs: one team's new, the other's old.
+      expect(
+        new Set(
+          (
+            await t.db
+              .select({ runId: teamAdjustmentLines.runId })
+              .from(teamAdjustmentLines)
+              .where(eq(teamAdjustmentLines.eventId, round1.id))
+          ).map((line) => line.runId),
+        ).size,
+      ).toBe(2);
+      // While it stays `running`, the daily check doesn't look at the event.
+      expect(
+        await checkScoreExplanations(t.db, clock.now(), { gameId }),
+      ).toEqual({ mismatches: 0, events: [] });
+
+      await later(LATER);
+      expect(await sweep()).toEqual({ failed: 1, queued: 1 });
+
+      expect(await runsOf(race.id).then((r) => r.at(-1))).toMatchObject({
+        id: killed.id,
+        status: "failed",
+        finishedAt: clock.now(),
+      });
+      expect(
+        (await scoreJobs()).find((j) => j.dedupeKey === retryKey(clock.now())),
+      ).toMatchObject({
+        status: "pending",
+        payload: {
+          gameId,
+          sessionId: race.id,
+          trigger: "ruleset_correction",
+          step: "assets",
+          force: true,
+        },
+      });
+
+      expect(await runAll()).toMatchObject({ failed: 0 });
+
+      const retried = (await runsOf(race.id)).at(-1)!;
+      expect(retried).toMatchObject({
+        trigger: "ruleset_correction",
+        status: "succeeded",
+        isCurrent: true,
+      });
+      expect((await gameEvent(round1.id)).status).toBe("final");
+      expect(
+        new Set(
+          (
+            await t.db
+              .select({ runId: teamAdjustmentLines.runId })
+              .from(teamAdjustmentLines)
+              .where(eq(teamAdjustmentLines.eventId, round1.id))
+          ).map((line) => line.runId),
+        ),
+      ).toEqual(new Set([retried.id]));
+      expect((await pointsOf(round1.id)).get(teamA)).not.toBe(old.get(teamA));
+      expect(
+        await checkScoreExplanations(t.db, clock.now(), { gameId }),
+      ).toEqual({ mismatches: 0, events: [] });
+
+      // A clean run over the same inputs writes exactly what the retry left.
+      const recovered = await ledger();
+      await enqueueScoring(t.db, clock.now(), {
+        sessionId: race.id,
+        stamp: "clean",
+        trigger: "admin",
+        gameId,
+        force: true,
+      });
+      expect(await runAll()).toMatchObject({ failed: 0 });
+      expect((await runsOf(race.id)).at(-1)).toMatchObject({
+        trigger: "admin",
+        status: "succeeded",
+      });
+      expect(await ledger()).toEqual(recovered);
+    });
+
+    it("the check leaves an event whose latest run failed to the recovery", async () => {
+      const killed = await killedMidTeams();
+      await failRun(t.db, clock.now(), killed.id);
+
+      expect(
+        await checkScoreExplanations(t.db, clock.now(), { gameId }),
+      ).toEqual({ mismatches: 0, events: [] });
+      expect(await items("score_mismatch")).toEqual([]);
+    });
+
+    it("a second sweep the same day queues nothing, while the next day's does", async () => {
+      await killedMidTeams();
+      await later(LATER);
+      await sweep();
+      const before = await scoreJobs();
+
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      expect(await scoreJobs()).toEqual(before);
+
+      // Its retry dies too: not again today, but tomorrow.
+      await t.db
+        .update(jobs)
+        .set({ status: "dead" })
+        .where(eq(jobs.dedupeKey, retryKey(clock.now())));
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      await later(DAY);
+      expect(await sweep()).toEqual({ failed: 0, queued: 1 });
+    });
+
+    it("a run that died writing its assets is re-run though its inputs match the current run's", async () => {
+      // The run that failed never became current, so the succeeded one is, and
+      // with the same fingerprint an unforced retry would skip for ever.
+      const runId = await startLive(true);
+      await failRun(t.db, clock.now(), runId);
+
+      expect(await sweep()).toEqual({ failed: 0, queued: 1 });
+      expect(await run()).toMatchObject({ failed: 0 });
+
+      expect((await runsOf(race.id)).at(-1)).toMatchObject({
+        status: "succeeded",
+        isCurrent: true,
+      });
+      await later(DAY);
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+    });
+
+    it("a run with a job alive is left alone, whichever step it is", async () => {
+      const runId = await startLive(true);
+      await queueStep(runId);
+      await later(LATER);
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      expect(await statusOf(runId)).toBe("running");
+    });
+
+    it("an assets job still alive counts for the run it would start again", async () => {
+      const runId = await startLive(true);
+      await queueStep(undefined);
+      await later(LATER);
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      expect(await statusOf(runId)).toBe("running");
+    });
+
+    it.each(["running", "failed"] as const)(
+      "a job %s counts as alive",
+      async (status) => {
+        const runId = await startLive(true);
+        const { id } = await queueStep(runId);
+        await t.db.update(jobs).set({ status }).where(eq(jobs.id, id));
+        await later(LATER);
+        expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+        expect(await statusOf(runId)).toBe("running");
+      },
+    );
+
+    it("a dead job doesn't", async () => {
+      const runId = await startLive(true);
+      const { id } = await queueStep(runId);
+      await t.db.update(jobs).set({ status: "dead" }).where(eq(jobs.id, id));
+      await later(LATER);
+      expect(await sweep()).toEqual({ failed: 1, queued: 1 });
+    });
+
+    it("a run less than an hour old is left alone", async () => {
+      const runId = await startLive(true);
+      await later(HOUR);
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      expect(await statusOf(runId)).toBe("running");
+    });
+
+    it("a session that scored cleanly isn't touched", async () => {
+      const jobsBefore = await allJobs(t.db);
+      const runsBefore = await runsOf(race.id);
+      await later(LATER);
+
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+
+      expect(await allJobs(t.db)).toEqual(jobsBefore);
+      expect(await runsOf(race.id)).toEqual(runsBefore);
+      expect(await items("scoring_retried")).toEqual([]);
+    });
+
+    it("a session under review has its stuck run failed, but isn't re-scored", async () => {
+      const runId = await startLive(true);
+      await t.db
+        .update(sessionResultState)
+        .set({ status: "under_review" })
+        .where(eq(sessionResultState.sessionId, race.id));
+      await later(LATER);
+
+      expect(await sweep()).toEqual({ failed: 1, queued: 0 });
+
+      expect(await statusOf(runId)).toBe("failed");
+      expect(
+        (await scoreJobs()).filter((j) => j.dedupeKey.includes("retry")),
+      ).toEqual([]);
+    });
+
+    it("leaves dry runs alone, running or failed", async () => {
+      const dry = await startRun(t.db, clock.now(), {
+        gameId,
+        sessionId: race.id,
+        trigger: "admin",
+        mode: "dry_run",
+      });
+      if (!("runId" in dry)) throw new Error("skipped");
+      await later(LATER);
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      expect(await statusOf(dry.runId)).toBe("running");
+
+      await failRun(t.db, clock.now(), dry.runId);
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+      expect(
+        (await scoreJobs()).filter((j) => j.dedupeKey.includes("retry")),
+      ).toEqual([]);
+    });
+
+    it("does nothing for a game that isn't running", async () => {
+      const runId = await startLive(true);
+      await failRun(t.db, clock.now(), runId);
+      await t.db
+        .update(games)
+        .set({ status: "completed" })
+        .where(eq(games.id, gameId));
+      expect(await sweep()).toEqual({ failed: 0, queued: 0 });
+    });
+
+    it("opens a warning that names the run, once while it stays open", async () => {
+      const runId = await startLive(true);
+      await later(LATER);
+      await sweep();
+      await t.db
+        .update(jobs)
+        .set({ status: "dead" })
+        .where(eq(jobs.dedupeKey, retryKey(clock.now())));
+      await later(DAY);
+      await sweep();
+
+      expect(await items("scoring_retried")).toMatchObject([
+        {
+          severity: "warning",
+          status: "open",
+          eventId: round1.id,
+          sessionId: race.id,
+          details: { gameId, runId, queued: 1 },
+          dedupeKey: `scoring_retried:${gameId}:${race.id}`,
+        },
+      ]);
+    });
+  });
+
   describe("the game_checks job", () => {
     const queue = (now: Date) =>
       enqueue(t.db, {
@@ -1384,6 +1733,34 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
         .from(lineupVersions)
         .where(eq(lineupVersions.id, versionId));
       expect(remaining).toEqual([]);
+    });
+
+    it("recovers a stuck run, after the check that skipped it, so no mismatch opens", async () => {
+      await override(race.id);
+      const started = await startRun(t.db, clock.now(), {
+        gameId,
+        sessionId: race.id,
+        trigger: "override",
+        mode: "live",
+      });
+      if (!("runId" in started)) throw new Error("skipped");
+      await writeAssetLines(t.db, clock.now(), started.runId);
+      const later = new Date(clock.now().getTime() + 2 * HOUR);
+      await at(later);
+      await queue(later);
+
+      expect(
+        await runDue(t.db, clock, handlers(), { maxJobs: 1, leaseMs: LEASE }),
+      ).toEqual({ ran: 1, failed: 0, lost: 0 });
+
+      expect((await runsOf(race.id)).at(-1)).toMatchObject({
+        id: started.runId,
+        status: "failed",
+      });
+      expect(await items("score_mismatch")).toEqual([]);
+      expect(
+        (await scoreJobs()).filter((j) => j.dedupeKey.includes("retry")),
+      ).toHaveLength(1);
     });
   });
 });

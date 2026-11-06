@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { providerIds, sessions } from "@/db/schema";
+import { CLASSIFICATIONS, providerIds, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { resultFieldsSchema, type ResultFields } from "@/results/overrides";
 import { SCORED_KINDS } from "@/results/validate";
-import { overrideResult } from "./results";
+import { insertResult, overrideResult } from "./results";
 import { changeSeats, recordSubstitution, type StaffActor } from "./roster";
 import type { SessionMove, StaffDeps } from "./revalidate";
 
@@ -61,6 +61,14 @@ const overrideChange = z.strictObject({
     message: "fields must set at least one column",
   }),
 });
+const insertChange = z.strictObject({
+  session: z.enum(SCORED_KINDS),
+  driver: key,
+  team: key,
+  car: carNumber,
+  position: z.number().int().min(1).nullable(),
+  classification: z.enum(CLASSIFICATIONS),
+});
 
 const common = {
   STAFF_EVENT: text("STAFF_EVENT").regex(
@@ -101,12 +109,28 @@ export type StaffCommand =
       reason: string;
       actor: StaffActor;
       dryRun: boolean;
+    }
+  | {
+      command: "insert";
+      event: string;
+      change: {
+        session: (typeof SCORED_KINDS)[number];
+        driver: string;
+        team: string;
+        car: number;
+        position: number | null;
+        classification: (typeof CLASSIFICATIONS)[number];
+      };
+      reason: string;
+      actor: StaffActor;
+      dryRun: boolean;
     };
 
 const COMMANDS = {
   substitute: substituteChange,
   seats: seatsChange,
   override: overrideChange,
+  insert: insertChange,
 } as const;
 
 /**
@@ -251,6 +275,25 @@ export async function runStaffCommand(
     };
     if (cmd.dryRun) return { dryRun: true, command: cmd.command, resolved };
     const result = await overrideResult(
+      db,
+      now,
+      { ...resolved, reason: cmd.reason, actor: cmd.actor },
+      deps,
+    );
+    return { dryRun: false, command: cmd.command, resolved, ...result };
+  }
+
+  if (cmd.command === "insert") {
+    const resolved = {
+      sessionId: await sessionOf(db, eventId, cmd.event, cmd.change.session),
+      driverId: await resolve(db, "driver", cmd.change.driver),
+      constructorId: await resolve(db, "constructor", cmd.change.team),
+      carNumber: cmd.change.car,
+      position: cmd.change.position,
+      classification: cmd.change.classification,
+    };
+    if (cmd.dryRun) return { dryRun: true, command: cmd.command, resolved };
+    const result = await insertResult(
       db,
       now,
       { ...resolved, reason: cmd.reason, actor: cmd.actor },

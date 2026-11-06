@@ -13,6 +13,7 @@ import {
   assetScoreLines,
   events,
   gameEvents,
+  poolAssets,
   priceUpdateRuns,
   scoringRuns,
 } from "@/db/schema";
@@ -456,6 +457,89 @@ describe("runPriceUpdate (DM 3.5)", () => {
     const { runId } = (await update(rounds[2]!.id)) as { runId: string };
 
     expect((await entryOf(runId, "hadjar"))!.recentPoints).toEqual([40, 10]);
+  });
+
+  describe("an asset added mid-season", () => {
+    /** Hadjar joins from round `n`, as if the pool had gained him there. */
+    const joinsFrom = async (n: number) => {
+      await t.db
+        .update(poolAssets)
+        .set({ addedFromEventId: rounds[n - 1]!.id })
+        .where(eq(poolAssets.id, await game.assetId("hadjar")));
+    };
+    /** Rounds 1 to 3 scored, the update run after each, returning round 3's. */
+    const throughRound3 = async (points: Record<string, number>[]) => {
+      await score(rounds[0]!.id, points[0]!);
+      expect(await update(rounds[0]!.id)).toHaveProperty("runId");
+      await score(rounds[1]!.id, points[1]!);
+      await lockOpenThrough(2);
+      expect(await update(rounds[1]!.id)).toHaveProperty("runId");
+      await score(rounds[2]!.id, points[2]!);
+      await lockOpenThrough(3);
+      const { runId } = (await update(rounds[2]!.id)) as { runId: string };
+      return runId;
+    };
+
+    it("the events before it joined aren't in its window", async () => {
+      await joinsFrom(3);
+      const runId = await throughRound3([{}, {}, { hadjar: 12 }]);
+
+      expect(await entryOf(runId, "hadjar")).toMatchObject({
+        recentPoints: [12],
+        average: 12,
+      });
+    });
+
+    it("an event it joined from counts, and a 0 after that is a real 0", async () => {
+      await joinsFrom(2);
+      const runId = await throughRound3([{}, { hadjar: 12 }, { norris: 5 }]);
+
+      expect((await entryOf(runId, "hadjar"))!.recentPoints).toEqual([12, 0]);
+    });
+
+    it("joined from its first event, a no-line event still counts 0", async () => {
+      await joinsFrom(3);
+      const runId = await throughRound3([{}, {}, { norris: 5 }]);
+
+      expect((await entryOf(runId, "hadjar"))!.recentPoints).toEqual([0]);
+      expect((await entryOf(runId, "norris"))!.recentPoints).toEqual([0, 0, 5]);
+    });
+
+    it("the absent rule still holds after it joined", async () => {
+      await joinsFrom(2);
+      await score(rounds[0]!.id, {});
+      expect(await update(rounds[0]!.id)).toHaveProperty("runId");
+      await score(rounds[1]!.id, { hadjar: 12 });
+      await lockOpenThrough(2);
+      expect(await update(rounds[1]!.id)).toHaveProperty("runId");
+      await score(rounds[2]!.id, {}, ["hadjar"]);
+      await lockOpenThrough(3);
+      const { runId } = (await update(rounds[2]!.id)) as { runId: string };
+
+      expect(await entryOf(runId, "hadjar")).toMatchObject({
+        recentPoints: [],
+        absent: true,
+      });
+    });
+
+    it("added from a cancelled round, it joins at the round after", async () => {
+      await joinsFrom(2);
+      await score(rounds[0]!.id, { norris: 40 });
+      const cancelledAt = new Date(rounds[1]!.lockAt.getTime() - 3_600_000);
+      await setSimulatedClock(t.db, cancelledAt);
+      await t.db
+        .update(events)
+        .set({ status: "cancelled" })
+        .where(eq(events.id, rounds[1]!.id));
+      await planGameEvents(t.db, cancelledAt, gameId);
+
+      const { runId } = (await update(rounds[0]!.id)) as { runId: string };
+
+      expect(await entryOf(runId, "hadjar")).toMatchObject({
+        recentPoints: [],
+        tier: null,
+      });
+    });
   });
 
   it("a driver with some lines of their own isn't absent", async () => {

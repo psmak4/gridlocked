@@ -173,7 +173,8 @@ export type GameChecksPayload = z.infer<typeof gameChecksPayload>;
 /**
  * The first job of a run. `stamp` says what changed: `v<resultsVersion>` for
  * the results hooks, `x:<auditId>` for an exception change, `c:<auditId>` for a
- * correction version and `r:<auditId>` for an approved re-score.
+ * correction version, `r:<auditId>` for an approved re-score and
+ * `retry:<yyyy-mm-dd>` for the daily recovery of a failed run.
  */
 export const scoreKey = (gameId: string, sessionId: string, stamp: string) =>
   `score:${gameId}:${sessionId}:${stamp}`;

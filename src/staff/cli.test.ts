@@ -358,3 +358,154 @@ describe("pnpm staff override", () => {
     expect(await t.db.select().from(auditLog)).toEqual([]);
   });
 });
+
+// Round 14's qualifying: Jolpica lists nobody with no Q1 time, so the recorded
+// session is short of Bearman and Stroll.
+describe("pnpm staff insert", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let sessionId: string;
+  const change = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      session: "qualifying",
+      driver: "bearman",
+      team: "haas",
+      car: 87,
+      position: 21,
+      classification: "classified",
+      ...over,
+    });
+  const INSERT = {
+    ...ENV,
+    STAFF_EVENT: "2026/14",
+    STAFF_CHANGE: change(),
+    STAFF_REASON: "Set no time in qualifying",
+  };
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    await seedWorldWithSeats(t.db);
+    sessionId = await sessionIdFor(t.db, 14, "qualifying");
+    await seedEntriesFor(t.db, sessionId);
+    await ingest(
+      t.db,
+      T0,
+      sessionId,
+      "qualifying",
+      loadBody("jolpica/2026/r14-qualifying.json"),
+    );
+    await advanceStatus(t.db, T0, sessionId);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("parses the change, with a position that can be null", () => {
+    expect(parseStaffEnv("insert", INSERT)).toMatchObject({
+      command: "insert",
+      event: "2026/14",
+      dryRun: false,
+      change: {
+        session: "qualifying",
+        driver: "bearman",
+        team: "haas",
+        car: 87,
+        position: 21,
+        classification: "classified",
+      },
+    });
+    expect(
+      parseStaffEnv("insert", {
+        ...INSERT,
+        STAFF_CHANGE: change({
+          position: null,
+          classification: "did_not_start",
+        }),
+      }).change,
+    ).toMatchObject({ position: null, classification: "did_not_start" });
+  });
+
+  it("is a dry run unless told otherwise", () => {
+    expect(
+      parseStaffEnv("insert", { ...INSERT, STAFF_DRY_RUN: undefined }).dryRun,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["no position key", { position: undefined }],
+    ["position 0", { position: 0 }],
+    ["an unknown classification", { classification: "retired" }],
+    ["a session that isn't scored", { session: "fp1" }],
+    ["no team", { team: undefined }],
+    ["a key it doesn't know", { grid: 3 }],
+  ])("refuses a change with %s", (_, over) => {
+    expect(() =>
+      parseStaffEnv("insert", { ...INSERT, STAFF_CHANGE: change(over) }),
+    ).toThrow(/STAFF_CHANGE/);
+  });
+
+  it("a dry run resolves the keys and writes nothing", async () => {
+    const report = await runStaffCommand(
+      t.db,
+      T1,
+      parseStaffEnv("insert", { ...INSERT, STAFF_DRY_RUN: "true" }),
+    );
+    expect(report).toMatchObject({
+      dryRun: true,
+      command: "insert",
+      resolved: {
+        sessionId,
+        driverId: await idFor(t.db, "driver", "bearman"),
+        constructorId: await idFor(t.db, "constructor", "haas"),
+        carNumber: 87,
+        position: 21,
+        classification: "classified",
+      },
+    });
+    expect(await t.db.select().from(resultOverrides)).toEqual([]);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+
+  it("a real run inserts the row, audits it, and moves the session", async () => {
+    await runStaffCommand(t.db, T1, parseStaffEnv("insert", INSERT));
+    const report = await runStaffCommand(
+      t.db,
+      T1,
+      parseStaffEnv("insert", {
+        ...INSERT,
+        STAFF_CHANGE: change({
+          driver: "stroll",
+          team: "aston_martin",
+          car: 18,
+          position: 22,
+        }),
+      }),
+    );
+
+    expect(report).toMatchObject({
+      dryRun: false,
+      changed: true,
+      sessions: [{ sessionId, previous: "awaiting", next: "provisional" }],
+    });
+    expect(await t.db.select().from(auditLog)).toMatchObject([
+      { action: "result_override.create", actorLabel: "psmak4" },
+      { action: "result_override.create", actorLabel: "psmak4" },
+    ]);
+  });
+
+  it.each([
+    ["an unknown driver key", { driver: "nobody" }, /no driver nobody/],
+    ["an unknown team key", { team: "nobody" }, /no constructor nobody/],
+    ["a driver with a provider row", { driver: "norris" }, /already has/],
+    ["a session the event lacks", { session: "sprint" }, /no sprint session/],
+  ])("%s is refused before any write", async (_, over, error) => {
+    await expect(
+      runStaffCommand(
+        t.db,
+        T1,
+        parseStaffEnv("insert", { ...INSERT, STAFF_CHANGE: change(over) }),
+      ),
+    ).rejects.toThrow(error);
+    expect(await t.db.select().from(resultOverrides)).toEqual([]);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+});

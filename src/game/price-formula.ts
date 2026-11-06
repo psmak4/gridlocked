@@ -99,7 +99,7 @@ interface AssetInput {
   assetType: PoolAssetType;
   /** The price in force for the scored event. */
   price: MoneyUnits;
-  /** Its points in the recent scored events it took part in, oldest first. */
+  /** Its points in the recent scored events since it joined, oldest first. */
   recentPoints: number[];
   average: number | null;
   ratio: number | null;
@@ -120,8 +120,10 @@ interface AssetInput {
  * keep them; an asset with none (one added since) keeps any price it already
  * has for the next event, as does one whose price for the next event is
  * already an `admin` one (recorded in `inputs` as `kept`). An asset with no lines in a scored event scored 0
- * there. Then `publishPrices` completes the list. Running it again replaces
- * the rows with a new run.
+ * there, and the events before it joined aren't in its window: an asset's
+ * events start at its `added_from_event_id`, placed by sequence as the lineup
+ * check places it. Then `publishPrices` completes the list. Running it again
+ * replaces the rows with a new run.
  *
  * Skips, writing nothing, when `afterEventId` has no scored session (a
  * current run on any of its sessions), when no later event is left and when
@@ -199,7 +201,8 @@ export async function runPriceUpdate(
     if (next.status !== "upcoming") return { skipped: "next_open" } as const;
 
     // Each asset's points per scored event: the sum of its session totals.
-    const eventIds = scoredNewestFirst.map((e) => e.eventId).reverse();
+    const scoredOldestFirst = [...scoredNewestFirst].reverse();
+    const eventIds = scoredOldestFirst.map((e) => e.eventId);
     const totals = new Map<string, number>();
     for (const row of await tx
       .select({
@@ -246,6 +249,10 @@ export async function runPriceUpdate(
         assetId: assetPrices.assetId,
         assetType: poolAssets.assetType,
         price: assetPrices.price,
+        // Null for an event past the last one: then none of them count.
+        joinedAt: sql<
+          number | null
+        >`game_event_sequence_from(${poolAssets.gameId}, ${poolAssets.addedFromEventId})`,
       })
       .from(assetPrices)
       .innerJoin(poolAssets, eq(poolAssets.id, assetPrices.assetId))
@@ -270,39 +277,46 @@ export async function runPriceUpdate(
           )
       ).map((row) => [row.assetId, row.price]),
     );
-    const assets: AssetInput[] = priced.map(({ assetId, assetType, price }) => {
-      const absent = missed.has(`${afterEventId}/${assetId}`);
-      const recentPoints = absent
-        ? []
-        : eventIds
-            .filter((eventId) => !missed.has(`${eventId}/${assetId}`))
-            .map((eventId) => totals.get(`${eventId}/${assetId}`) ?? 0)
-            .slice(-formula.window);
-      const average = recentAverage(recentPoints, formula.window);
-      const kept = admin.get(assetId);
-      return {
-        assetId,
-        assetType,
-        price,
-        recentPoints,
-        average,
-        ratio:
-          average === null
-            ? null
-            : priceRatio({ price, assetType, average, formula }),
-        ...priceChange({
-          price,
+    const assets: AssetInput[] = priced.map(
+      ({ assetId, assetType, price, joinedAt }) => {
+        const absent = missed.has(`${afterEventId}/${assetId}`);
+        const recentPoints = absent
+          ? []
+          : scoredOldestFirst
+              .filter(
+                ({ eventId, sequence }) =>
+                  joinedAt !== null &&
+                  sequence! >= joinedAt &&
+                  !missed.has(`${eventId}/${assetId}`),
+              )
+              .map(({ eventId }) => totals.get(`${eventId}/${assetId}`) ?? 0)
+              .slice(-formula.window);
+        const average = recentAverage(recentPoints, formula.window);
+        const kept = admin.get(assetId);
+        return {
+          assetId,
           assetType,
+          price,
           recentPoints,
-          formula,
-          bounds: { min, max },
-        }),
-        ...(absent ? { absent: true as const } : {}),
-        ...(kept === undefined
-          ? {}
-          : { kept: "admin" as const, change: 0, newPrice: kept }),
-      };
-    });
+          average,
+          ratio:
+            average === null
+              ? null
+              : priceRatio({ price, assetType, average, formula }),
+          ...priceChange({
+            price,
+            assetType,
+            recentPoints,
+            formula,
+            bounds: { min, max },
+          }),
+          ...(absent ? { absent: true as const } : {}),
+          ...(kept === undefined
+            ? {}
+            : { kept: "admin" as const, change: 0, newPrice: kept }),
+        };
+      },
+    );
 
     const runId = newId();
     await tx.insert(priceUpdateRuns).values({

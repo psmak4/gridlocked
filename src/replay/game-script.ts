@@ -440,7 +440,6 @@ async function applyOther(
     case "noTimeResult": {
       const { driverId, constructorId } = resolvers(run);
       await insertNoTimeResult(db, now, {
-        eventId: run.eventOf(action.round),
         sessionId: await sessionOf(db, run, action.round, "qualifying"),
         driverId: await driverId(action.driver),
         constructorId: await constructorId(action.constructor),

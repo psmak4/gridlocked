@@ -672,9 +672,10 @@ export async function finishRun(
 
 /**
  * Marks a run `failed`, with its `finished_at`, when the job running it has no
- * attempts left. Only a `running` run: one that went on or was superseded
- * keeps its status. Its lines stay until the next run replaces them, and a
- * failed current run is never skipped against, so that run always goes ahead.
+ * attempts left, or when `recoverScoringRuns` finds it stuck with no job. Only a
+ * `running` run: one that went on or was superseded keeps its status. Its lines
+ * stay until the next run replaces them, and a failed current run is never
+ * skipped against, so that run always goes ahead.
  */
 export async function failRun(db: Db, now: Date, runId: string): Promise<void> {
   await db

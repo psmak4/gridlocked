@@ -67,15 +67,18 @@ export const isLockedOrLater = (status: GameEventStatus) =>
  *   `game_open` job pending, running or waiting to retry. It is an ordinary
  *   open job, so its order and timing checks are the same;
  * - `game_finalize:<game>:<event>:sweep:<yyyy-mm-dd>` likewise, due at `now`,
- *   for a `locked` or `scored` game event whose event is `completed` and that
- *   has no `game_finalize` job pending, running or waiting to retry: its job
- *   died, or it locked after its event completed, so it never had one. It is
- *   an ordinary finalize job, and a retry of one that committed does nothing.
+ *   for a `locked` or `scored` game event whose event is `completed` or
+ *   `cancelled` and that has no `game_finalize` job pending, running or waiting
+ *   to retry: its job died, it locked after its event completed, so it never
+ *   had one, or its event was cancelled after the lock (DM 3.9), which only this
+ *   sweep finishes: the event's own finalize check does nothing for a cancelled
+ *   event. It is an ordinary finalize job, and a retry of one that committed
+ *   does nothing.
  *
- * An event that is `final`, or cancelled, gets nothing, nor does one that has
- * locked and whose event isn't `completed`. Call it whenever the calendar is
- * synced, which the daily `sync_calendar` job does for every game of its
- * season.
+ * An event that is `final`, or cancelled in the game, gets nothing, nor does
+ * one that has locked and whose event is still `scheduled`. Call it whenever
+ * the calendar is synced, which the daily `sync_calendar` job does for every
+ * game of its season.
  */
 export async function planGameJobs(
   db: Db,
@@ -117,12 +120,12 @@ export async function planGameJobs(
 
   await db.transaction(async (tx) => {
     for (const [i, event] of calendar.entries()) {
-      // Finished with no finalize job left alive (the last one died, or it
-      // locked after its event completed): a sweep runs the finalize, once a
-      // day at most.
+      // Finished with no finalize job left alive (the last one died, it
+      // locked after its event completed, or its event was cancelled after
+      // the lock): a sweep runs the finalize, once a day at most.
       if (
         (event.status === "locked" || event.status === "scored") &&
-        event.eventStatus === "completed"
+        (event.eventStatus === "completed" || event.eventStatus === "cancelled")
       ) {
         const [alive] = await tx
           .select({ id: jobs.id })

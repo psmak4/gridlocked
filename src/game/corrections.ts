@@ -1,9 +1,17 @@
-import { and, asc, eq, inArray, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, max, sql } from "drizzle-orm";
 import { z } from "zod";
 import { writeAudit } from "@/audit/log";
-import { gameEvents, games, rulesetVersions, scoringRuns } from "@/db/schema";
+import {
+  events,
+  gameEvents,
+  games,
+  jobs,
+  rulesetVersions,
+  scoringRuns,
+  sessions,
+} from "@/db/schema";
 import type { Db } from "@/db/types";
-import { gameChecksPayload } from "@/jobs/kinds";
+import { gameChecksPayload, scoreSessionPayload } from "@/jobs/kinds";
 import type { JobHandler } from "@/jobs/runner";
 import { recomputeStandings } from "@/leagues/standings";
 import { openReviewItem } from "@/reference/review";
@@ -28,13 +36,16 @@ import { recomputeTotals } from "./totals";
 // the scoring pipeline: a correction version re-points past events and re-scores
 // them, a dry run reports what a re-score would change without writing it, and
 // approving queues that re-score. The daily job checks that stored totals can
-// be explained and prunes old lineup versions. Reads results only through the
-// scoring steps, and never writes results or reference data (DM 0.5).
+// be explained, recovers scoring runs that died and prunes old lineup versions.
+// Reads results only through the scoring steps, and never writes results or
+// reference data (DM 0.5).
 
 /** The game event statuses a correction can re-point. */
 const CORRECTABLE = ["locked", "scored", "final"];
 /** How long after an event goes `final` its unused versions stay (DM 3.7). */
 const PRUNE_AFTER_MS = 7 * 24 * 3_600_000;
+/** A live run this old with no job left has lost its worker (DM 4.8). */
+const STUCK_AFTER_MS = 3_600_000;
 
 /**
  * Publishes a correction version and re-points past events to it (DM 4.9), in
@@ -414,10 +425,15 @@ export async function checkScoreExplanations(
       and coalesce(t.points, 0) <> coalesce(b.points, 0) + coalesce(a.points, 0)
       and not exists (
         select 1
-        from scoring_runs r
-        join sessions se on se.id = r.session_id
-        where r.game_id = ${game} and se.event_id = s.event_id
-          and r.mode = 'live' and r.status = 'running'
+        from sessions se
+        join lateral (
+          select r.status
+          from scoring_runs r
+          where r.game_id = ${game} and r.session_id = se.id and r.mode = 'live'
+          order by r.id desc
+          limit 1
+        ) latest on true
+        where se.event_id = s.event_id and latest.status in ('running', 'failed')
       )
     order by g.sequence, s.team_id
   `)) as { rows: unknown[] };
@@ -447,6 +463,124 @@ export async function checkScoreExplanations(
     });
   }
   return { mismatches: found.length, events: eventIds };
+}
+
+/**
+ * The daily recovery of scoring that died (DM 4.8), for a `running` game. A step
+ * job that goes dead leaves new asset lines, mixed team lines and old totals.
+ * Finalizing repairs that, but after `final` the dead job's key blocks a re-queue,
+ * and a worker that died on its last attempt never ran `failRun`, so its run stays
+ * `running` and `checkScoreExplanations` skips the event for good.
+ *
+ * - A live run still `running`, more than an hour old, with no `score_session`
+ *   job alive for it becomes `failed`. Alive is `pending`, `running` or `failed`
+ *   (waiting to retry), and for it means a later step of that run, or an `assets`
+ *   job for its session, which would start again.
+ * - A session whose latest live run failed, with no job alive for that run, is
+ *   queued again (`enqueueScoring`) under the stamp `retry:<yyyy-mm-dd>`, so at
+ *   most once a day, with the failed run's trigger. It is forced: a run that died
+ *   before its asset lines never became current, so the current run can be a
+ *   `succeeded` one with the same fingerprint, and `startRun` would skip for ever
+ *   while the latest run stayed failed. `enqueueScoring` queues nothing for a
+ *   session under review or cancelled: its run still fails, and a later sweep
+ *   queues it. A `final` game event stays `final`, and prices don't move.
+ *
+ * What it did opens the warning `scoring_retried`, keyed
+ * `scoring_retried:<game>:<session>` and unique only while open. Dry runs are
+ * never touched. Returns how many runs it failed and jobs it queued.
+ */
+export async function recoverScoringRuns(
+  db: Db,
+  now: Date,
+  input: { gameId: string },
+): Promise<{ failed: number; queued: number }> {
+  const { gameId } = input;
+  const [game] = await db
+    .select({ status: games.status })
+    .from(games)
+    .where(eq(games.id, gameId));
+  if (game?.status !== "running") return { failed: 0, queued: 0 };
+
+  const alive = (
+    await db
+      .select({ payload: jobs.payload })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.kind, "score_session"),
+          inArray(jobs.status, ["pending", "running", "failed"]),
+          sql`${jobs.payload}->>'gameId' = ${gameId}`,
+        ),
+      )
+  ).map((job) => scoreSessionPayload.parse(job.payload));
+  const hasJob = (run: { id: string; sessionId: string }) =>
+    alive.some(
+      (job) =>
+        job.sessionId === run.sessionId && (job.runId ?? run.id) === run.id,
+    );
+
+  const liveRuns = and(
+    eq(scoringRuns.gameId, gameId),
+    eq(scoringRuns.mode, "live"),
+  );
+  const stuck = (
+    await db
+      .select({ id: scoringRuns.id, sessionId: scoringRuns.sessionId })
+      .from(scoringRuns)
+      .where(
+        and(
+          liveRuns,
+          eq(scoringRuns.status, "running"),
+          lt(scoringRuns.startedAt, new Date(now.getTime() - STUCK_AFTER_MS)),
+        ),
+      )
+      .orderBy(asc(scoringRuns.id))
+  ).filter((run) => !hasJob(run));
+  for (const { id } of stuck) await failRun(db, now, id);
+
+  const latest = await db
+    .selectDistinctOn([scoringRuns.sessionId], {
+      id: scoringRuns.id,
+      sessionId: scoringRuns.sessionId,
+      status: scoringRuns.status,
+      trigger: scoringRuns.trigger,
+      eventId: sessions.eventId,
+      seasonId: events.seasonId,
+    })
+    .from(scoringRuns)
+    .innerJoin(sessions, eq(sessions.id, scoringRuns.sessionId))
+    .innerJoin(events, eq(events.id, sessions.eventId))
+    .where(liveRuns)
+    .orderBy(scoringRuns.sessionId, desc(scoringRuns.id));
+
+  const day = now.toISOString().slice(0, 10);
+  const justFailed = new Set(stuck.map((run) => run.id));
+  let queued = 0;
+  for (const run of latest) {
+    if (run.status !== "failed" || hasJob(run)) continue;
+    const { id: runId, sessionId, trigger, eventId, seasonId } = run;
+    queued += await db.transaction(async (tx) => {
+      const count = await enqueueScoring(tx, now, {
+        sessionId,
+        stamp: `retry:${day}`,
+        trigger,
+        gameId,
+        force: true,
+      });
+      if (count > 0 || justFailed.has(runId)) {
+        await openReviewItem(tx, now, {
+          kind: "scoring_retried",
+          seasonId,
+          eventId,
+          sessionId,
+          details: { gameId, runId, queued: count },
+          dedupeKey: `scoring_retried:${gameId}:${sessionId}`,
+        });
+      }
+      return count;
+    });
+  }
+  return { failed: stuck.length, queued };
 }
 
 const prunedSchema = z.object({ deleted: z.number() });
@@ -503,8 +637,11 @@ export async function pruneLineupVersions(
 
 /**
  * The `game_checks` handler (DM 4.8), queued daily by `sync_calendar` for each
- * `running` game: `checkScoreExplanations`, then `pruneLineupVersions`. Both can
- * run twice. One that throws is retried by the queue, on its own.
+ * `running` game: `checkScoreExplanations`, `recoverScoringRuns`, then
+ * `pruneLineupVersions`. The recovery comes after the check: the check skips a
+ * session whose latest run is `running` or `failed`, so a dead run is repaired
+ * without a false `score_mismatch`. All can run twice. One that throws is retried by the queue,
+ * on its own.
  */
 export function createGameChecksHandler(): JobHandler {
   return async (job, ctx) => {
@@ -512,6 +649,7 @@ export function createGameChecksHandler(): JobHandler {
     const { gameId } = gameChecksPayload.parse(job.payload);
     const now = ctx.clock.now();
     await checkScoreExplanations(db, now, { gameId });
+    await recoverScoringRuns(db, now, { gameId });
     await pruneLineupVersions(db, now, { gameId });
   };
 }
