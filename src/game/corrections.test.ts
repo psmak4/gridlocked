@@ -1526,6 +1526,16 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
       expect(await ledger()).toEqual(recovered);
     });
 
+    it("the check leaves an event whose latest run failed to the recovery", async () => {
+      const killed = await killedMidTeams();
+      await failRun(t.db, clock.now(), killed.id);
+
+      expect(
+        await checkScoreExplanations(t.db, clock.now(), { gameId }),
+      ).toEqual({ mismatches: 0, events: [] });
+      expect(await items("score_mismatch")).toEqual([]);
+    });
+
     it("a second sweep the same day queues nothing, while the next day's does", async () => {
       await killedMidTeams();
       await later(LATER);

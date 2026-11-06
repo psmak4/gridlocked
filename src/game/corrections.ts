@@ -425,10 +425,15 @@ export async function checkScoreExplanations(
       and coalesce(t.points, 0) <> coalesce(b.points, 0) + coalesce(a.points, 0)
       and not exists (
         select 1
-        from scoring_runs r
-        join sessions se on se.id = r.session_id
-        where r.game_id = ${game} and se.event_id = s.event_id
-          and r.mode = 'live' and r.status = 'running'
+        from sessions se
+        join lateral (
+          select r.status
+          from scoring_runs r
+          where r.game_id = ${game} and r.session_id = se.id and r.mode = 'live'
+          order by r.id desc
+          limit 1
+        ) latest on true
+        where se.event_id = s.event_id and latest.status in ('running', 'failed')
       )
     order by g.sequence, s.team_id
   `)) as { rows: unknown[] };
@@ -634,8 +639,8 @@ export async function pruneLineupVersions(
  * The `game_checks` handler (DM 4.8), queued daily by `sync_calendar` for each
  * `running` game: `checkScoreExplanations`, `recoverScoringRuns`, then
  * `pruneLineupVersions`. The recovery comes after the check: the check skips a
- * run still `running`, so a stuck run is repaired without a false
- * `score_mismatch`. All can run twice. One that throws is retried by the queue,
+ * session whose latest run is `running` or `failed`, so a dead run is repaired
+ * without a false `score_mismatch`. All can run twice. One that throws is retried by the queue,
  * on its own.
  */
 export function createGameChecksHandler(): JobHandler {
