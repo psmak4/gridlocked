@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { moveLeagueRanges, type PlannedEvent } from "@/leagues/ranges";
 import { openReviewItem } from "@/reference/review";
 import { refundChips } from "./chips";
 import { carryPrices } from "./prices";
@@ -176,6 +177,9 @@ export async function insertRulesetVersion(
  * event's, so prices don't change). Nothing locks for it, and lineups saved
  * for it count at the next lock (`lockedLineup`).
  *
+ * Mini-league ranges follow the renumbering, so a league stays on the same
+ * real events (`moveLeagueRanges`, DM 4.5).
+ *
  * Writes only what differs, so running it again changes nothing. Call it when
  * a game is created, a version is added and whenever the calendar changes.
  * Runs for one game take turns (the game row is held). A row is written only
@@ -329,9 +333,18 @@ export async function planGameEvents(
     }
 
     const cancelledNow: { eventId: string; wasOpen: boolean }[] = [];
+    // Which event held each sequence, and what each holds after this run.
+    const sequencedBefore = new Map<number, string>();
+    for (const row of existing.values()) {
+      if (row.sequence !== null) sequencedBefore.set(row.sequence, row.eventId);
+    }
+    const planned: PlannedEvent[] = [];
     for (const [i, event] of calendar.entries()) {
       const row = existing.get(event.id);
-      if (frozen.has(event.id)) continue;
+      if (frozen.has(event.id)) {
+        planned.push({ eventId: event.id, sequence: row?.sequence ?? null });
+        continue;
+      }
 
       // Reinstated on the calendar after a later event opened: the window has
       // moved past it, and putting it back ahead of that event would leave
@@ -360,6 +373,7 @@ export async function planGameEvents(
           ? row.status
           : "upcoming";
       const sequence = cancelled ? null : nextSequence();
+      planned.push({ eventId: event.id, sequence });
       // A row on a version dropped this run keeps it.
       const rulesetVersionId =
         row && dropped.has(row.rulesetVersionId)
@@ -410,6 +424,9 @@ export async function planGameEvents(
         });
       }
     }
+
+    // Mini-league ranges are sequences: they stay on the same real events.
+    await moveLeagueRanges(tx, now, gameId, sequencedBefore, planned);
 
     // Cancelled before its lock: the chips come back (the database allows a
     // refund only once the event is `cancelled`, as it now is).
