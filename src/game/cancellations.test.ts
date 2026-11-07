@@ -14,6 +14,7 @@ import {
   events,
   gameEvents,
   gameSessionExceptions,
+  leagues,
   reviewItems,
   sessions,
   teamEventStates,
@@ -32,6 +33,7 @@ import { lockEvent } from "./lock";
 import { withdrawPoolAsset } from "./pool";
 import { priceList, publishPrices } from "./prices";
 import { createTeam } from "./teams";
+import { createLeague } from "@/leagues/leagues";
 
 // Cancelled events and abandoned sessions (DM 3.9, 3.11) over the recorded
 // 2026 game: one test for each cancellation row. Round 1 (Australia) is the
@@ -885,5 +887,114 @@ describe("cancellations (DM 3.9)", () => {
     await setSessionException(t.db, later, input);
     expect(await exceptions()).toHaveLength(1);
     expect(await audits()).toHaveLength(3);
+  });
+  describe("mini-league ranges follow their events (DM 4.5)", () => {
+    const sequenceOf = async (event: { id: string }) => {
+      const [row] = await t.db
+        .select({ sequence: gameEvents.sequence })
+        .from(gameEvents)
+        .where(
+          and(eq(gameEvents.gameId, gameId), eq(gameEvents.eventId, event.id)),
+        );
+      return row!.sequence!;
+    };
+    /** A private league from one round to another; no end means the season. */
+    const leagueOn = async (from: number, to?: number) => {
+      const { leagueId } = await createLeague(t.db, NOW, {
+        gameId,
+        ownerUserId: newId(),
+        kind: "private",
+        name: "Range",
+        startSequence: await sequenceOf(await round2026(t.db, from)),
+        endSequence:
+          to === undefined
+            ? undefined
+            : await sequenceOf(await round2026(t.db, to)),
+      });
+      return leagueId;
+    };
+    const rangeOf = async (leagueId: string) => {
+      const [row] = await t.db
+        .select()
+        .from(leagues)
+        .where(eq(leagues.id, leagueId));
+      return row!;
+    };
+    /** The real events a league covers now, in order. */
+    const eventsOf = async (leagueId: string) => {
+      const { startSequence, endSequence } = await rangeOf(leagueId);
+      const rows = await t.db
+        .select({ eventId: gameEvents.eventId, sequence: gameEvents.sequence })
+        .from(gameEvents)
+        .where(eq(gameEvents.gameId, gameId))
+        .orderBy(asc(gameEvents.sequence));
+      return rows
+        .filter(
+          (r) =>
+            r.sequence !== null &&
+            r.sequence >= startSequence &&
+            (endSequence === null || r.sequence <= endSequence),
+        )
+        .map((r) => r.eventId);
+    };
+    const ids = async (...rounds: number[]) =>
+      Promise.all(rounds.map(async (n) => (await round2026(t.db, n)).id));
+
+    it("a league after the cancelled event stays on the same races", async () => {
+      const league = await leagueOn(3, 5);
+      await cancel(round2);
+      expect(await eventsOf(league)).toEqual(await ids(3, 4, 5));
+    });
+
+    it("a league across the cancelled event keeps the races around it", async () => {
+      const league = await leagueOn(1, 3);
+      await cancel(round2);
+      expect(await eventsOf(league)).toEqual(await ids(1, 3));
+    });
+
+    it("a league starting on the cancelled event starts at the next race", async () => {
+      const league = await leagueOn(2, 4);
+      await cancel(round2);
+      expect(await eventsOf(league)).toEqual(await ids(3, 4));
+    });
+
+    it("a league ending on the cancelled event ends at the race before it", async () => {
+      const league = await leagueOn(1, 2);
+      await cancel(round2);
+      expect(await eventsOf(league)).toEqual(await ids(1));
+    });
+
+    it("a league on only the cancelled event moves to the next race", async () => {
+      const league = await leagueOn(2, 2);
+      await cancel(round2);
+      expect(await eventsOf(league)).toEqual(await ids(3));
+    });
+
+    it("a league with no end keeps none", async () => {
+      const league = await leagueOn(3);
+      await cancel(round2);
+      const row = await rangeOf(league);
+      expect(row.startSequence).toBe(await sequenceOf(round3));
+      expect(row.endSequence).toBeNull();
+    });
+
+    it("planning again changes nothing", async () => {
+      const league = await leagueOn(3, 5);
+      await cancel(round2);
+      const first = await rangeOf(league);
+      await planGameEvents(t.db, new Date(NOW.getTime() + HOUR_MS), gameId);
+      expect(await rangeOf(league)).toEqual(first);
+    });
+
+    it("a reinstated event moves the ranges back", async () => {
+      const league = await leagueOn(3, 5);
+      await cancel(round2);
+      await t.db
+        .update(events)
+        .set({ status: "scheduled" })
+        .where(eq(events.id, round2.id));
+      await planGameEvents(t.db, NOW, gameId);
+      expect(await eventsOf(league)).toEqual(await ids(3, 4, 5));
+    });
   });
 });

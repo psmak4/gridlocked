@@ -64,8 +64,8 @@ function slugify(text: string): string {
  * too. The slug is the name plus a random suffix, so two leagues can share a
  * name; it is not made from the code, which is a secret for a private league.
  * The range is the event sequences `startSequence` (default 1) to
- * `endSequence` (default: the end of the season), and `maxMembers` is
- * optional. A code or slug that collides is retried with new random parts.
+ * `endSequence` (default: the end of the season), which planning keeps on the
+ * same real events (`moveLeagueRanges`), and `maxMembers` is optional. A code or slug that collides is retried with new random parts.
  * Refused when the trimmed name is not 1 to 40 characters (`bad_name`); a bad
  * range or limit throws.
  */

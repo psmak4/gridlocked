@@ -650,7 +650,7 @@ Checked against the official [FAQ](https://fantasy.formula1.com/en/faqs) and [ga
 
 **Not published officially:**
 - **How team value works when you sell.** A fan guide's worked example shows a team's cost cap rising by exactly the price gain of a driver it owns ([FanAmp](https://www.fanamp.com/articles/f1-fantasy-cost-caps-explained)). That matches "buy and sell at the current price, keep unspent money in a bank", which is what 3.6 models. *My call; it mirrors the official game as far as it can be observed.*
-- **What a cancelled race does** to chips and transfers. 3.9 proposes rules for this. *My call; check it.*
+- **What a cancelled race does** to chips and transfers. 3.9 sets the rules for this game, confirmed by the owner on 2026-11-07.
 
 ### 3.1 `games` (one playable game; kept open for other game types, decided 2026-10-27)
 | Column | Type | Notes |
@@ -798,6 +798,8 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 
 **Calibration target:** the spread of weekly changes over the replayed 2026 season should look like the official game's.
 
+**Confirmed by the owner (2026-11-07):** `unscoredPoints` and the rule that an absent asset's price stands are this game's rules, not stand-ins until something better.
+
 **Calibration result (2026-11-06, rounds 1 to 19):**
 - The official price rule fits a window of 3, thresholds 0.6, 0.9 and 1.2 and these bands: it gives 623 of the 627 weekly moves of active assets. Its zero moves are an asset at $3M or $34M, or an inactive one, whose price stands.
 - `unscoredPoints` is what overtakes, Driver of the Day and pit stops earned there per asset per event: 6.0 for drivers and 14.9 for constructors.
@@ -918,7 +920,7 @@ The save check calls `team_purchasing_power` for every version except `limitless
 - **In one transaction** (`planGameEvents`, which the calendar sync runs for each game before planning its jobs): the game event becomes `cancelled` with no sequence, its chips are refunded, and if it was the open event, the next upcoming one opens at once (prices carried first when none were published).
 - **"Before lock" means before the lock has started:** once an event's `lock_at` has passed, or the lock job has written any of its rows, its game event is never cancelled or renumbered, whatever its status. The lock job finishes, and the event is treated as cancelled after lock.
 - **Session cancelled after lock** (e.g. a race called off after qualifying): sessions already run stay scored, and the cancelled session simply has no results. Chips stay used, because the lock happened. Prices update as normal from what was scored. A game event that has locked never becomes `cancelled`, even if its event does: it keeps its sequence, its lock record and its chips.
-- **Event cancelled after lock:** the event's own finalize check does nothing for a cancelled event, so the daily `game_finalize` sweep (4.8) closes it for the game. The game event becomes `final` on what was scored, so its totals and standings are `final` and the next event's prices come from the formula. With nothing scored, the update skips (`no_scores`), the game event still becomes `final`, its lock records get totals of 0, and the next window opens at once on carried prices, not at the 24-hour cutoff. A session that was under review stays as it is: it holds nothing here, since no check will ever finalize its results.
+- **Event cancelled after lock:** the event's own finalize check does nothing for a cancelled event, so the daily `game_finalize` sweep (4.8) closes it for the game. The game event becomes `final` on what was scored, so its totals and standings are `final` and the next event's prices come from the formula. With nothing scored, the update skips (`no_scores`), the game event still becomes `final`, its lock records get totals of 0, and the next window opens at once on carried prices, not at the 24-hour cutoff. **Transfer penalties (decided 2026-11-07):** an event that scored nothing applies none, since its totals are 0; one where any session scored applies them as normal. A session that was under review stays as it is: it holds nothing here, since no check will ever finalize its results.
 
 **Abandoned sessions with a classification** (e.g. Belgium 2021): scored as classified by default (ruleset param). Admins can void one through `game_session_exceptions` (`setSessionException`, policy `skip`), and clear it again (`clearSessionException`, which removes the row). Both need a reason and are audited, and both trigger a re-score (M4). A session has at most one exception per game. `decided_by` is a plain uuid until M5 adds users; the audit row names who acted.
 
@@ -1145,7 +1147,7 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 
 - **Unique per auto league:** `(game_id, kind, constructor_id)` and its driver and country equivalents. There's exactly one "Ferrari fans" league per game.
 - **Auto leagues are keyed by constructor ID, not name,** so a rebrand doesn't split a league (1.7).
-- **A mini-league range uses event sequences, not rounds,** which survive renumbering (1.3, 3.3).
+- **A mini-league range uses event sequences, not rounds, and it stays on the same real events (decided 2026-11-07).** Sequences can move before an event locks (3.3), so `planGameEvents` moves every range with them in the same transaction (`moveLeagueRanges`, `src/leagues/ranges.ts`). A range end on a cancelled event moves inward to the nearest race still running. A league left with no races moves to the next one, or the last one if nothing comes after, so its range is never empty (*my call for that last case; check it*). A whole-season league has nothing to move.
 
 **Built (M4)** in `src/db/schema/leagues.ts`, with `createLeague` and `syncAutoLeagues` in `src/leagues/leagues.ts`.
 - **`createGame` makes the game's `global` league** in the same transaction (name "Global", slug `global`). A partial unique index allows one per game. It has no code, owner, limit or range of its own, and no members.
