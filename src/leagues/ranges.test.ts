@@ -63,9 +63,18 @@ describe("rangeAfterRenumber", () => {
     ).toEqual({ start: 2, end: 2 });
   });
 
-  it("stays on the last race when nothing comes after", () => {
+  it("keeps a range with no race left, never moving back to a scored one", () => {
     expect(
       rangeAfterRenumber({ start: 5, end: 5 }, BEFORE, order("e")),
+    ).toEqual({ start: 5, end: 5 });
+    expect(
+      rangeAfterRenumber({ start: 4, end: 5 }, BEFORE, order("d", "e")),
+    ).toEqual({ start: 4, end: 4 });
+  });
+
+  it("drops a cancelled last race from a range with others left", () => {
+    expect(
+      rangeAfterRenumber({ start: 4, end: 5 }, BEFORE, order("e")),
     ).toEqual({ start: 4, end: 4 });
   });
 

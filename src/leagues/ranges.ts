@@ -27,10 +27,13 @@ function nearest(
 /**
  * The range covering the same real events after planning, given which event
  * held each sequence before (`before`) and every event now, in lock order
- * (`order`). A range end on a cancelled event moves inward to the nearest race
- * still running. A range left with no races moves to the next one, or the last
- * one if nothing comes after, so a league never has an empty range. A sequence
- * no event held is past the season and stays as it is.
+ * (`order`). A start on a cancelled event moves forward to the next race and
+ * an end moves back to the race before it, so either end stays on a race the
+ * range covers. A range left with no races moves to the next one. With nothing
+ * after it, the range stays where it is and covers nothing: it never moves back
+ * onto a race already scored, which would build no table for it, and a race
+ * reinstated there is covered again. A sequence no event held is past the season
+ * and stays as it is.
  */
 export function rangeAfterRenumber(
   range: LeagueRange,
@@ -47,18 +50,14 @@ export function rangeAfterRenumber(
   const start =
     startIndex === null
       ? range.start
-      : (nearest(order, startIndex, 1) ??
-        nearest(order, startIndex, -1) ??
-        range.start);
+      : (nearest(order, startIndex, 1) ?? range.start);
   if (range.end === null) return { start, end: null };
 
   const endIndex = indexOf(range.end);
   const end =
     endIndex === null
       ? range.end
-      : (nearest(order, endIndex, -1) ??
-        nearest(order, endIndex, 1) ??
-        range.end);
+      : (nearest(order, endIndex, -1) ?? range.end);
   return { start, end: Math.max(start, end) };
 }
 
