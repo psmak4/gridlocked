@@ -767,8 +767,7 @@ Today, a run's `before` figures come from the current lines. If an earlier run w
 - `@`-mention rename handling (M7): `post_mentions` doesn't exist yet.
 
 ## After approval
-Done on 7 Nov 2026, once this plan merged:
 1. One task issue per task, as sub-issues of #6, with the board fields set.
-2. Vercel and the `exports` bucket added to the epic's approval list, and "an export including archived chat" moved to M7 in the roadmap.
+2. Vercel and the `exports` bucket added to the epic's approval list.
 
-Work starts on Task 1 when you say so, with Tasks 11 and 14 alongside it if you like. Nothing is built yet.
+The roadmap already has this plan's changes, including "an export including archived chat" moving to M7. Work starts on Task 1 when you say so, with Tasks 11 and 14 alongside it if you like. Nothing is built yet.
