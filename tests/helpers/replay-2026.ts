@@ -25,7 +25,7 @@ import type { TickDb } from "@/jobs/tick";
 import { insertNoTimeResult } from "@/replay/admin";
 import { gameScriptSchema } from "@/replay/game-script";
 import { addOverride } from "@/results/overrides";
-import { STAFF_PLACEHOLDER_USER_ID } from "@/staff/results";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { revalidateEvent } from "@/staff/revalidate";
 import { readFixture } from "./fixtures";
 import { seedGame2026 } from "./game-2026";
@@ -208,7 +208,7 @@ export async function lateStewardsPenalty(
           : { time_ms: Number(row.Time.millis) }),
       },
       reason,
-      createdBy: STAFF_PLACEHOLDER_USER_ID,
+      createdBy: SYSTEM_USER_ID,
     });
   }
   await revalidateEvent(db, now, race.eventId);

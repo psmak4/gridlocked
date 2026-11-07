@@ -239,6 +239,20 @@
       "when": 1793982652810,
       "tag": "0033_base_lines_filter_early",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794093638339,
+      "tag": "0034_modern_dragon_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794093640294,
+      "tag": "0035_identity_rules",
+      "breakpoints": true
     }
   ]
 }
