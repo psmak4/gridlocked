@@ -55,9 +55,7 @@ export function rangeAfterRenumber(
 
   const endIndex = indexOf(range.end);
   const end =
-    endIndex === null
-      ? range.end
-      : (nearest(order, endIndex, -1) ?? range.end);
+    endIndex === null ? range.end : (nearest(order, endIndex, -1) ?? range.end);
   return { start, end: Math.max(start, end) };
 }
 
