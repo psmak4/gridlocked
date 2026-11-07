@@ -91,11 +91,27 @@ describe("identity tables", () => {
   });
 
   it("usernames are unique whatever their case", async () => {
-    await seedUser(t.db, { username: "Senna" });
-    await expectPgError(
-      seedUser(t.db, { username: "SENNA", email: "other@example.test" }),
-      UNIQUE_VIOLATION,
-    );
+    // Inserted as written: seedUser lowercases, which would let Better Auth's
+    // plain unique constraint answer instead of the lower(username) index.
+    const row = (email: string, username: string) => ({
+      id: newId(),
+      name: username,
+      email,
+      username,
+    });
+    await t.db.insert(users).values(row("a@example.test", "Senna"));
+    const error = await t.db
+      .insert(users)
+      .values(row("b@example.test", "senna"))
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(error, "expected the statement to be rejected").toBeDefined();
+    const cause = (error as { cause?: { code?: string; constraint?: string } })
+      .cause;
+    expect(cause?.code).toBe(UNIQUE_VIOLATION);
+    expect(cause?.constraint).toBe("users_username_lower_idx");
   });
 
   it("trust_level outside 0 to 3 is refused", async () => {
