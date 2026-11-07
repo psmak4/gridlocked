@@ -8,7 +8,7 @@ import {
   sessions,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { STAFF_PLACEHOLDER_USER_ID } from "@/staff/results";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { audit, requireReason, type StaffActor } from "@/staff/roster";
 import { enqueueScoring } from "./score-jobs";
 
@@ -89,7 +89,7 @@ export async function setSessionException(
       sessionId,
       policy,
       reason,
-      decidedBy: STAFF_PLACEHOLDER_USER_ID,
+      decidedBy: SYSTEM_USER_ID,
       decidedAt: now,
       createdAt: now,
       updatedAt: now,

@@ -8,6 +8,7 @@ import {
   sessions,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { addOverride, type ResultFields } from "@/results/overrides";
 import { audit, requireReason, type StaffActor } from "./roster";
 import {
@@ -20,12 +21,6 @@ import {
 // §4.3): a `patch` override over the provider row, for provider data that
 // is wrong and stays wrong, or an `insert` for a driver the provider left out.
 // Run through `pnpm staff override` and `pnpm staff insert` until M8.
-
-/**
- * Stands in for `result_overrides.created_by` until M5 adds users: the
- * column is a uuid, and who acted is in the audit row's `actor_label`.
- */
-export const STAFF_PLACEHOLDER_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 /** `results.provider_status` of an inserted row: no provider said anything. */
 const INSERTED_STATUS = "Entered by staff";
@@ -108,7 +103,7 @@ export async function overrideResult(
       kind: "patch",
       fields,
       reason,
-      createdBy: STAFF_PLACEHOLDER_USER_ID,
+      createdBy: SYSTEM_USER_ID,
     });
     await writeAudit(tx, now, {
       ...audit(input.actor, reason),
@@ -226,7 +221,7 @@ export async function insertResult(
       kind: "insert",
       fields,
       reason,
-      createdBy: STAFF_PLACEHOLDER_USER_ID,
+      createdBy: SYSTEM_USER_ID,
     });
     await writeAudit(tx, now, {
       ...audit(input.actor, reason),

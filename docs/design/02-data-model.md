@@ -1539,6 +1539,7 @@ A user can report a given target only once.
 
 **`filter_rules`:** the hard-rule filters (HLD §7.4).
 - Columns: `pattern`, `match_type` (`word`, `regex`, `domain`), `effect` (`block`, `hold_for_review`, `flag`), `scope` (`all`, `titles`, `chat`, `usernames`), `created_by`, `active`.
+- `created_by` is a `users` FK and `active` defaults to true. CHECKs hold `match_type`, `effect` and `scope` to the lists above. A `regex` pattern is matched case-insensitively. The `usernames` rows in 6.3 are seeded by the M5 migration, with the system user as `created_by`.
 - It's config, editable by admins and audited. Link limits, mention limits and duplicate detection are code, with their thresholds in `settings` (2.11).
 
 **Rate limits** are checked by counting the user's recent rows, e.g. posts by this author in the last 10 minutes. That uses the index `posts (author_user_id, created_at)`, so there's no separate counter table to keep in sync.
@@ -1580,7 +1581,9 @@ A user can report a given target only once.
 **`push_subscriptions`:** `id`, `user_id`, `endpoint` (unique), `p256dh`, `auth`, `user_agent`, `created_at`, `last_success_at`, `failure_count`. It's pruned on HTTP 410, and push fan-out is batched (2.10).
 
 **`email_outbox`:** account emails waiting for the daily cap (HLD §10).
-- Columns: `id`, `to_email`, `template` (`verify_email`, `magic_link`, `password_reset`), `payload`, `status` (`queued`, `sent`, `failed`), `attempts`, `send_after`, `provider_message_id`, `created_at`.
+- Columns: `id`, `to_email`, `template` (`verify_email`, `magic_link`, `password_reset`, `email_change_notice`, `delete_confirm`), `payload` (jsonb, default `{}`), `status` (`queued`, `sent`, `failed`, `expired`), `attempts`, `send_after`, `provider_message_id`, `created_at`, and three nullable ones added in M5: `sent_at`, `expires_at` (a magic link or reset past it is `expired`, not sent) and `last_error`.
+- **`to_email` is nullable** because a sent or expired row's address can be scrubbed (6.7), but a CHECK requires it while `status = 'queued'`.
+- **One queued row per address and template:** a partial unique index on `(lower(to_email), template) WHERE status = 'queued'`, so a repeat request doesn't queue a second email. An index on `(status, send_after)` serves the sender.
 - **Magic links and resets go first**, since they expire. Verification emails wait if the cap is near.
 
 ### 5.12 Search (proposed; not in the HLD's launch list, so it can wait)
@@ -1695,14 +1698,16 @@ erDiagram
 ### 6.1 Better Auth's tables (shape set by Better Auth; names set by us)
 | Table | Holds | Our additions and notes |
 |---|---|---|
-| `users` | id, name, email (unique), email_verified, image, created_at, updated_at | Admin plugin fields: `role`, `banned`, `ban_reason`, `ban_expires`. Username plugin: `username` (unique, case-insensitive) and `display_username`. **`role` is the single source of truth** for `admin`, `moderator` and `user` (HLD §3.2), plus the reserved `system` |
-| `auth_sessions` | id, user_id, token, expires_at, ip_address, user_agent, `impersonated_by` | Expired sessions are pruned daily. The IP is kept only for the session's life |
-| `auth_accounts` | One row per sign-in method: `credential` (password hash) or `discord` (provider IDs and tokens) | Google and Apple later are just new provider rows (HLD §9) |
-| `auth_verifications` | Email verification, magic-link and reset tokens with expiry | Pruned on expiry |
-| `auth_two_factors` | TOTP secrets and backup codes (two-factor plugin) | **Proposed: required for `admin` and `moderator` roles** (6.4) |
-| `auth_rate_limits` | Key, count, last request | Auth endpoints only. Pruned |
+| `users` | id, name, email (unique), email_verified, image, created_at, updated_at | Admin plugin fields: `role`, `banned`, `ban_reason`, `ban_expires`. Username plugin: `username` (unique, case-insensitive) and `display_username`. Two-factor plugin: `two_factor_enabled`. **`role` is the single source of truth** for `admin`, `moderator` and `user` (HLD §3.2), plus the reserved `system` |
+| `auth_sessions` | id, user_id, token, expires_at, ip_address, user_agent, `impersonated_by`, created_at, updated_at | Expired sessions are pruned daily. The IP is kept only for the session's life. **Ours:** `staff_verified_at` (nullable), for staff re-checks (6.4) |
+| `auth_accounts` | One row per sign-in method: `credential` (password hash) or `discord` (provider IDs and tokens) | Google and Apple later are just new provider rows (HLD §9). The columns are Better Auth's: `account_id`, `provider_id`, `user_id`, the access, refresh and id tokens with their expiries, `scope`, `password`, `created_at`, `updated_at` |
+| `auth_verifications` | Email verification, magic-link and reset tokens with expiry | Pruned on expiry. `identifier`, `value`, `expires_at`, `created_at`, `updated_at` |
+| `auth_two_factors` | TOTP secrets and backup codes (two-factor plugin) | **Proposed: required for `admin` and `moderator` roles** (6.4). `secret`, `backup_codes`, `user_id`, plus the plugin's `verified`, `failed_verification_count` and `locked_until` |
+| `auth_rate_limits` | Key, count, last request | Auth endpoints only. Pruned. `last_request` is epoch milliseconds, a bigint |
 
-**One reserved `system` user** (role `system`, no sign-in accounts) is the author of results posts and auto threads. It can never sign in.
+**The shape was read from Better Auth 1.7.10** (core, admin, username and two-factor plugins). M5 Task 3 re-checks it against the version it installs. Ids are uuids made by the app. Foreign keys from these tables to `users` cascade; every other table's reference to a user restricts, since users are anonymized, never deleted (6.7). `username` keeps Better Auth's own unique constraint, and the unique index on `lower(username)` (6.3) is added beside it.
+
+**One reserved `system` user** (role `system`, no sign-in accounts) is the author of results posts and auto threads. It can never sign in: a trigger refuses an `auth_accounts` insert for a user whose role is `system`. Its id is the all-zero uuid, `SYSTEM_USER_ID`, which the first staff rows already held as a placeholder. It has a `profiles` row, and a migration creates it.
 
 ### 6.2 `profiles` (everything about a user that isn't sign-in)
 | Column | Type | Notes |
@@ -1724,6 +1729,8 @@ erDiagram
 | broadcasts_read_at | timestamptz | The bell's read marker for broadcasts (5.11) |
 | username_changed_at | timestamptz, nullable | For the change limit (6.3) |
 | created_at, updated_at, version | | |
+
+Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC`; `age_confirmed_at` is nullable, since the system user never confirms; `trust_level`, `reputation` and `days_visited` default to 0; `trust_level_locked` to false; `version` to 1. A CHECK keeps `trust_level` between 0 and 3.
 
 **Why a separate table rather than Better Auth's `additionalFields`:** these columns change often, are read all over the app, and have foreign keys into reference data. Keeping them in our own table means Better Auth's migrations never touch them.
 
@@ -1779,6 +1786,8 @@ erDiagram
 | requested_at, completed_at | timestamptz | |
 | export_object_key | text, nullable | An export file in object storage |
 | export_expires_at | timestamptz, nullable | The download link expires after 7 days, and then the file is deleted |
+| export_url | text, nullable | Where the user downloads the export (added in M5) |
+| confirm_token_hash, confirm_expires_at | text, timestamptz, nullable | A deletion waits for the emailed confirmation link. Only the token's hash is kept (added in M5) |
 
 **Export:** a job builds one JSON file with:
 - the user's profile and sign-in methods (provider names, not tokens);
