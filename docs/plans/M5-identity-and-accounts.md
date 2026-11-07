@@ -37,24 +37,24 @@ I read Better Auth 1.7.10's source (the version on the spike branch) and the pro
 6. **The website can't wake the scheduler quickly.** Publishing the due-times file needs Object Storage keys, which only the Neon Function has. So a job queued from a web request waits for the safety tick, at most 6 hours. That's fine for a queued email or an export, and it's why a normal email is sent inside the request.
 7. **The roadmap's "preview deploys" and "prebuilt from CI" pull in different directions,** and the M5 epic leaves Vercel off its approval list (decision 1).
 
-## Decisions (for approval)
-These five change what gets built. Each has my recommendation first.
+## Decisions (approved 7 Nov 2026)
+These five change what gets built. You approved all five recommendations, and the alternatives stay here for the record. This settles the design only: every cloud account in [What each task needs from you](#what-each-task-needs-from-you) is still a separate approval.
 
 1. **What is the staging website?** Discord needs its redirect URL registered, and Turnstile lists hostnames with no wildcards. Vercel's Standard Protection covers everything except production domains. So sign-in needs one fixed public address.
-   - **Recommended: one Vercel project, `gridlocked-staging`, deployed to its fixed `gridlocked-staging.vercel.app` address.** The existing manual **Deploy staging** workflow builds it in CI and uploads it prebuilt, right after the migrations, so code and schema always match. It deploys from `main` only. The Vercel GitHub app isn't needed. If that name is taken, any fixed name works.
-   - **Alternative: the roadmap's GitHub app, with a preview per PR.** You'd see each PR running. But preview addresses change, so Discord, Turnstile and email links only work on a stable alias anyway, and every preview shares a staging database that's only migrated from `main`.
+   - **Approved: one Vercel project, `gridlocked-staging`, deployed to its fixed `gridlocked-staging.vercel.app` address.** The existing manual **Deploy staging** workflow builds it in CI and uploads it prebuilt, right after the migrations, so code and schema always match. It deploys from `main` only. The Vercel GitHub app isn't needed. If that name is taken, any fixed name works.
+   - **Not chosen: the roadmap's GitHub app, with a preview per PR.** You'd see each PR running. But preview addresses change, so Discord, Turnstile and email links only work on a stable alias anyway, and every preview shares a staging database that's only migrated from `main`.
 2. **Real email in staging, with no domain of our own.**
-   - **Recommended: no domain in M5.** Staging sends from `onboarding@resend.dev`, which reaches only your Resend account address. That's enough to prove the path. Tests use Resend's `delivered@resend.dev` address. The domain arrives with production in M9, which matches HLD §13.1 (no purchase before the trademark check) and the free-plans rule.
-   - **Alternative: buy the primary domain now.** Staging could email anyone, but it costs money ahead of the trademark check.
+   - **Approved: no domain in M5.** Staging sends from `onboarding@resend.dev`, which reaches only your Resend account address. That's enough to prove the path. Tests use Resend's `delivered@resend.dev` address. The domain arrives with production in M9, which matches HLD §13.1 (no purchase before the trademark check) and the free-plans rule.
+   - **Not chosen: buy the primary domain now.** Staging could email anyone, but it costs money ahead of the trademark check.
 3. **Age, terms and a username for people who don't use the email form.** Wave 4's "Choose a way in" only has a footer line ("By continuing you agree…"). It has no username step for Discord or magic link, and it leaves out the community rules.
-   - **Recommended: a short "Finish signing up" screen after a first Discord or magic-link sign-in,** with the same two checkboxes and the username field as the email form. Until it's done, the account can do nothing. Each person leaves an explicit, dated record (DM 6.2, 6.8). An account that never finishes is removed after 7 days. That's a hard delete, because nothing about it was ever accepted or kept. This is a new screen, built from the email form's parts, and the footer line gets reworded.
-   - **Alternative: treat the footer line as acceptance.** One less screen, but weaker evidence for your lawyer, and Discord and magic-link people still need a username step.
+   - **Approved: a short "Finish signing up" screen after a first Discord or magic-link sign-in,** with the same two checkboxes and the username field as the email form. Until it's done, the account can do nothing. Each person leaves an explicit, dated record (DM 6.2, 6.8). An account that never finishes is removed after 7 days. That's a hard delete, because nothing about it was ever accepted or kept. This is a new screen, built from the email form's parts, and the footer line gets reworded.
+   - **Not chosen: treat the footer line as acceptance.** One less screen, but weaker evidence for your lawyer, and Discord and magic-link people still need a username step.
 4. **Part 6 rows that depend on things later milestones build.** There's no chat until M7 and no staff screens until M8, so a few of the epic's tests can't be real yet. The roadmap's "an export including archived chat" is one.
-   - **Recommended: M5 builds the rule and the guard, and names where the row finishes** ([the table at the end](#scenario-coverage-dm-611-and-the-roadmaps-key-tests)). The registry test forces M7 to add its tables to export and deletion. "An export including archived chat" moves to M7's key tests.
-   - **Alternative: add stub chat tables now for the test.** The test would pass, but it would prove nothing about the real chat tables.
-5. **Staff two-step sign-in.** DM 6.4 proposes it as required, and it needs your yes. Because of finding 3, it also needs a design.
-   - **Recommended: staff tools ask for a TOTP code once per session, however the person signed in.** Password sign-in also keeps the plugin's normal challenge. A session that hasn't passed stays an ordinary user session.
-   - **Alternative: staff may only sign in with a password and TOTP,** with magic link and Discord refused for staff roles. It's simpler to explain, but an admin who signed up through Discord would first need a password.
+   - **Approved: M5 builds the rule and the guard, and names where the row finishes** ([the table at the end](#scenario-coverage-dm-611-and-the-roadmaps-key-tests)). The registry test forces M7 to add its tables to export and deletion. "An export including archived chat" moves to M7's key tests.
+   - **Not chosen: add stub chat tables now for the test.** The test would pass, but it would prove nothing about the real chat tables.
+5. **Staff two-step sign-in.** DM 6.4 proposed it as required, and this decision makes it so. Because of finding 3, it also needed a design.
+   - **Approved: staff tools ask for a TOTP code once per session, however the person signed in.** Password sign-in also keeps the plugin's normal challenge. A session that hasn't passed stays an ordinary user session.
+   - **Not chosen: staff may only sign in with a password and TOTP,** with magic link and Discord refused for staff roles. It's simpler to explain, but an admin who signed up through Discord would first need a password.
 
 **My calls (lower stakes; each is written into the DM when its task lands):**
 - **Better Auth 1.7.18,** pinned exactly (the latest release, 8 versions after the spike). Behaviour I read in 1.7.10 is pinned by tests in the owning tasks, so a difference shows up as a failing test.
@@ -766,7 +766,9 @@ Today, a run's `before` figures come from the current lines. If an earlier run w
 - The real legal text, the production Neon and Vercel projects, the sending domain and Sentry (M9).
 - `@`-mention rename handling (M7): `post_mentions` doesn't exist yet.
 
-## After you approve this plan
-1. I write one task issue per task, as sub-issues of #6, with the board fields set.
-2. I add Vercel to the epic's approval list, and move "an export including archived chat" to M7 in the roadmap (if you choose as recommended).
-3. Work starts on Task 1, or on Tasks 11 and 14 alongside it.
+## After approval
+Done on 7 Nov 2026, once this plan merged:
+1. One task issue per task, as sub-issues of #6, with the board fields set.
+2. Vercel and the `exports` bucket added to the epic's approval list, and "an export including archived chat" moved to M7 in the roadmap.
+
+Work starts on Task 1 when you say so, with Tasks 11 and 14 alongside it if you like. Nothing is built yet.

@@ -60,7 +60,7 @@ This is the roadmap for phase 5, the build. It splits the work into milestones t
 | Environment | What | When it exists |
 |---|---|---|
 | Local | Vite dev server (TanStack Start) and PGlite; Next.js until the framework move. No cloud accounts needed | M0 |
-| Staging | Its own free Neon project, `gridlocked-staging` in AWS US East 1 (HLD §11.4), plus Vercel preview deploys | Neon from M1 (approved 2026-10-28); Vercel from M5 |
+| Staging | Its own free Neon project, `gridlocked-staging` in AWS US East 1 (HLD §11.4), plus one Vercel Hobby project at a fixed address, deployed from `main` (M5 decision 1) | Neon from M1 (approved 2026-10-28); Vercel from M5 |
 | Production | Vercel Hobby plus the production Neon project | M9, on approval |
 
 ## Milestones
@@ -203,13 +203,14 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a reserved or official-looking username;
   - a 90-day username hold;
   - deletion leaving a tombstone that every foreign key still accepts;
-  - an export including archived chat;
+  - a data export (its archived chat part moved to M7 on 2026-11-07);
   - the audit log being append-only.
 - **Approval needed:**
   - a Resend account, Free;
   - a Cloudflare Turnstile site key, free;
   - a Discord application, for OAuth;
-  - a Vercel project, Hobby, linked to the repo for preview deploys against `gridlocked-staging` (moved here from M1 and M2 on 2026-10-28). You install Vercel's GitHub app. The app deploys with Nitro's `vercel` preset, built in CI and uploaded prebuilt (framework and hosting spike, 2026-10-31).
+  - a Vercel project, Hobby, against `gridlocked-staging` (moved here from M1 and M2 on 2026-10-28), at one fixed address so Discord and Turnstile work. The app deploys with Nitro's `vercel` preset, built in CI and uploaded prebuilt from the Deploy staging workflow (framework and hosting spike, 2026-10-31). The Vercel GitHub app and per-PR previews were dropped on 2026-11-07 ([M5 plan](../plans/M5-identity-and-accounts.md), decision 1);
+  - an `exports` bucket on the existing Neon project, for data exports.
 
 ### M6 — Fantasy screens (target 22 Jan)
 - **Goal:** the game is playable on a phone.
@@ -240,7 +241,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - logged-out visitors being spoiler-safe;
   - slow mode;
   - the spoiler title check;
-  - a report flow and auto-hide.
+  - a report flow and auto-hide;
+  - a data export including archived chat (moved from M5 on 2026-11-07).
 
 ### M8 — Staff tools (target 12 Feb)
 - **Goal:** a normal weekend needs no staff, and an abnormal one is quick to fix.
