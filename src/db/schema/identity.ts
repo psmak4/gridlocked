@@ -143,7 +143,11 @@ export const authAccounts = pgTable(
 export const authVerifications = pgTable(
   "auth_verifications",
   {
-    id: uuid("id").primaryKey(),
+    // Text, not uuid: Better Auth keys a single-use row (the lock it takes
+    // while stripping unproven access from an account) by an id it derives
+    // from a hash, base64url-encoded under a custom `generateId`. Nothing
+    // refers to these rows, and they expire.
+    id: text("id").primaryKey(),
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

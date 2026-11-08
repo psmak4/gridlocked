@@ -299,6 +299,23 @@ describe("magic link, verification and reset", () => {
     expect(second.headers.get("location") ?? "").toContain("error=");
   });
 
+  it("a magic link for an account whose address isn't confirmed yet signs in and confirms it", async () => {
+    // Better Auth locks the account while it strips unproven access, with a
+    // verification row whose id it derives from a hash: it must fit the column.
+    expect((await auth.handler(signUpRequest(EMAIL))).status).toBe(200);
+    await requestLink();
+    const response = await auth.handler(
+      clickLink(linkIn(mail.last(EMAIL, "sign-in link"))),
+    );
+    expect(response.status).toBe(302);
+    expect(hasSession(response)).toBe(true);
+    const [row] = await t.db
+      .select({ emailVerified: users.emailVerified })
+      .from(users)
+      .where(eq(users.email, EMAIL));
+    expect(row?.emailVerified).toBe(true);
+  });
+
   it("an expired link sends you to the error page, which offers a new one", async () => {
     await requestLink();
     const url = new URL(linkIn(mail.last(EMAIL, "sign-in link")));
