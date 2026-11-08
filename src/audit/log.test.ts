@@ -78,6 +78,17 @@ describe("writeAudit", () => {
     });
   });
 
+  it("a Date inside before or after is kept as it was", async () => {
+    const when = new Date("2026-12-01T10:00:00.000Z");
+    expect(redactPersonal({ banExpires: when, list: [when] })).toEqual({
+      banExpires: when,
+      list: [when],
+    });
+    await writeAudit(t.db, NOW, { ...ENTRY, after: { banExpires: when } });
+    const [row] = await t.db.select().from(auditLog);
+    expect(row!.after).toEqual({ banExpires: when.toISOString() });
+  });
+
   it("redactPersonal leaves its input alone", () => {
     const input = { a: { email: "a@example.com" } };
     expect(redactPersonal(input)).toEqual({ a: { email: "[redacted]" } });
