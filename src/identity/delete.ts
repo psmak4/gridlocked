@@ -19,6 +19,7 @@ import { newId } from "@/lib/ids";
 import { queueEmail } from "./email/outbox";
 import type { EmailSender } from "./email/sender";
 import { PERSONAL_DATA, type ScrubContext } from "./personal-data";
+import { requireReason } from "@/staff/roster";
 import { lockAdmins, requireAnotherAdmin, staffTransaction } from "./roles";
 import { IdentityError, requireViewer, type Viewer } from "./viewer";
 
@@ -128,11 +129,22 @@ export async function scrubAccount(
   now: Date,
   input: { userId: string; actor: DeletionActor; reason?: string | null },
 ): Promise<void> {
-  await staffTransaction(db, (tx) => scrubInTransaction(tx, now, input));
+  // A staff deletion is a staff action, so it says why, as a ban does.
+  // M8 adds the rank rule (a moderator can't delete staff) with its screens;
+  // until then the caller checks `requireStaff` and the target.
+  const reason =
+    input.actor.kind === "user"
+      ? input.reason
+      : requireReason(input.reason ?? "");
+  await staffTransaction(db, (tx) =>
+    scrubInTransaction(tx, now, { ...input, reason }),
+  );
 }
 
 /**
- * The user asks to delete their account, typing their username (any case).
+ * The user asks to delete their account, typing their username (any case),
+ * or their email address if they never chose a username. `deps.baseUrl` is
+ * the site's address, for the link.
  * With a verified address, a one-hour token goes out as `delete_confirm` and
  * only its hash is kept; a new request replaces an older one's link. With
  * none, a sign-in in the last 10 minutes is the confirmation, and the account
@@ -144,10 +156,7 @@ export async function requestDeletion(
   db: Db,
   now: Date,
   input: { viewer: Viewer | null; typedUsername: string },
-  deps: { sender: EmailSender | null; baseUrl: string } = {
-    sender: null,
-    baseUrl: "",
-  },
+  deps: { sender: EmailSender | null; baseUrl: string },
 ): Promise<{ confirm: "email" | "fresh_sign_in" }> {
   const viewer = requireViewer(input.viewer);
   if (viewer.impersonatedBy !== null) throw new IdentityError("read_only");
@@ -169,8 +178,11 @@ export async function requestDeletion(
     if (!user) throw new IdentityError("unauthenticated");
     if (user.role === "system") throw new IdentityError("role_reserved");
     if (user.status === "deleted") throw new IdentityError("inactive");
+    // The username, or the email address for an account that never chose
+    // one; either in any case.
     const typed = input.typedUsername.trim().toLowerCase();
-    if (!user.username || typed !== user.username.toLowerCase()) {
+    const expected = (user.username ?? user.email).trim().toLowerCase();
+    if (typed === "" || typed !== expected) {
       throw new IdentityError("wrong_username");
     }
     if (user.role === "admin") {

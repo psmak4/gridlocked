@@ -591,7 +591,7 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
     table: "trust_level_changes",
     userColumn: "user_id",
     onDelete: "keep",
-    why: "moderation history about the user, kept for the 2-year retention period (DM 5.10); levels and times only",
+    why: "moderation history about the user, kept for the 2-year retention period (DM 5.10): levels, source, reason and time; exported, since the user may see their own history (DM 6.5)",
     exportAs: "trustLevelChanges",
     async read(db, userId) {
       const rows = await db
@@ -599,6 +599,9 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
           fromLevel: trustLevelChanges.fromLevel,
           toLevel: trustLevelChanges.toLevel,
           source: trustLevelChanges.source,
+          // The moderator's reason is about the user, so it is theirs to
+          // see (DM 6.5); who made the change is not.
+          reason: trustLevelChanges.reason,
           changedAt: trustLevelChanges.changedAt,
         })
         .from(trustLevelChanges)

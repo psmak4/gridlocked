@@ -24,6 +24,8 @@ import {
   privacyRequests,
   users,
 } from "@/db/schema";
+import { jobs, trustLevelChanges } from "@/db/schema";
+import type { Job } from "@/jobs/queue";
 import { simulatedClock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
 import { runDue } from "@/jobs/runner";
@@ -36,6 +38,7 @@ import {
   EXPORT_LINK_SECONDS,
   expireExports,
   requestExport,
+  type ExportStore,
 } from "./export";
 
 const NOW = new Date("2026-11-08T06:00:00Z");
@@ -74,20 +77,40 @@ describe("data export (DM 6.7)", () => {
     await t.close();
   });
 
-  const runJobs = (at: Date) => {
+  const runJobs = (at: Date, store: ExportStore = files.store) => {
     clock.set(at);
     return runDue(
       t.db,
       clock,
       {
         privacy_export: createPrivacyExportHandler({
-          store: files.store,
+          store,
           sender: mail.sender,
         }),
       },
       { maxJobs: 10, leaseMs: LEASE },
     );
   };
+  /** The store, with `fn` run once just after the first `put`. */
+  const afterPut = (fn: () => Promise<void>): ExportStore => {
+    let done = false;
+    return {
+      ...files.store,
+      async put(key, body) {
+        await files.store.put(key, body);
+        if (done) return;
+        done = true;
+        await fn();
+      },
+    };
+  };
+  const exportJob = (requestId: string): Job =>
+    ({
+      id: newId(),
+      kind: "privacy_export",
+      dedupeKey: `privacy_export:${requestId}`,
+      payload: { requestId },
+    }) as unknown as Job;
   const request = async (id: string) =>
     (
       await t.db
@@ -366,5 +389,133 @@ describe("data export (DM 6.7)", () => {
     expect(await errorCode(() => requestExport(t.db, NOW, { userId }))).toBe(
       "inactive",
     );
+  });
+
+  it("a last attempt that dies after the file is written leaves nothing the next daily run misses", async () => {
+    const userId = await seedUser(t.db);
+    const { requestId } = await requestExport(t.db, NOW, { userId });
+    await t.db
+      .update(jobs)
+      .set({ maxAttempts: 1 })
+      .where(eq(jobs.kind, "privacy_export"));
+    const dies: ExportStore = {
+      ...files.store,
+      async presign() {
+        throw new Error("the function timed out");
+      },
+    };
+    const run = await runJobs(NOW, dies);
+    expect(run.failed).toBe(1);
+    const key = `exports/${requestId}.json`;
+    expect(files.objects.has(key)).toBe(true);
+    const [job] = await t.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.kind, "privacy_export"));
+    expect(job?.status).toBe("dead");
+    // The key was recorded before the write.
+    expect((await request(requestId)).exportObjectKey).toBe(key);
+
+    // Within the day the request may still be running, so it stays.
+    expect(
+      await expireExports(
+        t.db,
+        new Date(NOW.getTime() + DAY - MIN),
+        files.store,
+      ),
+    ).toBe(0);
+    expect(files.objects.has(key)).toBe(true);
+    // The next daily run after that deletes it.
+    const daily = createIdentityDailyHandler({
+      exportStore: files.store,
+      log: () => {},
+    });
+    clock.set(new Date(NOW.getTime() + DAY));
+    await daily({} as never, { db: t.db, clock });
+    expect(files.objects.has(key)).toBe(false);
+    expect((await request(requestId)).exportObjectKey).toBeNull();
+    // And a failed request (marked by the next export request) is swept too.
+    const second = await requestExport(t.db, new Date(NOW.getTime() + DAY), {
+      userId,
+    });
+    expect(second.requestId).not.toBe(requestId);
+    expect((await request(requestId)).status).toBe("failed");
+  });
+
+  it("a second run of the same job leaves the file the first one recorded", async () => {
+    const userId = await seedUser(t.db, { email: "ada@example.test" });
+    const { requestId } = await requestExport(t.db, NOW, { userId });
+    const key = `exports/${requestId}.json`;
+    // The first run's lease ran out: a second runner takes the job and
+    // finishes it while the first is still writing.
+    const second = createPrivacyExportHandler({
+      store: files.store,
+      sender: mail.sender,
+      log: () => {},
+    });
+    const first = createPrivacyExportHandler({
+      store: afterPut(() => second(exportJob(requestId), { db: t.db, clock })),
+      sender: mail.sender,
+      log: () => {},
+    });
+    await first(exportJob(requestId), { db: t.db, clock });
+
+    const row = await request(requestId);
+    expect(row).toMatchObject({ status: "completed", exportObjectKey: key });
+    expect(files.objects.has(key)).toBe(true);
+    expect(files.deleted).toEqual([]);
+  });
+
+  it("an account deleted between the build and the record has its file deleted", async () => {
+    const userId = await seedUser(t.db, { email: "ada@example.test" });
+    const { requestId } = await requestExport(t.db, NOW, { userId });
+    const key = `exports/${requestId}.json`;
+    const handler = createPrivacyExportHandler({
+      store: afterPut(() =>
+        scrubAccount(t.db, NOW, {
+          userId,
+          actor: { kind: "user", userId, label: "self" },
+        }),
+      ),
+      sender: mail.sender,
+      log: () => {},
+    });
+    await handler(exportJob(requestId), { db: t.db, clock });
+    expect(files.puts.map((p) => p.key)).toEqual([key]);
+    expect(files.objects.has(key)).toBe(false);
+    expect(await request(requestId)).toMatchObject({
+      status: "failed",
+      exportUrl: null,
+      completedAt: null,
+    });
+    expect(mail.sent).toEqual([]);
+  });
+
+  it("the export includes the user's trust level history, with the reason", async () => {
+    const userId = await seedUser(t.db);
+    const moderator = await seedUser(t.db, { role: "moderator" });
+    await t.db.insert(trustLevelChanges).values({
+      id: newId(),
+      userId,
+      fromLevel: 1,
+      toLevel: 0,
+      source: "moderator",
+      changedBy: moderator,
+      reason: "repeated spoilers",
+      changedAt: NOW,
+    });
+    const data = (await buildExport(t.db, userId)) as {
+      trustLevelChanges: unknown[];
+    };
+    expect(data.trustLevelChanges).toEqual([
+      {
+        fromLevel: 1,
+        toLevel: 0,
+        source: "moderator",
+        reason: "repeated spoilers",
+        changedAt: NOW.toISOString(),
+      },
+    ]);
+    expect(JSON.stringify(data)).not.toContain(moderator);
   });
 });

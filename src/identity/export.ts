@@ -188,6 +188,21 @@ export function createPrivacyExportHandler({
     }
     if (row.status !== "pending" && row.status !== "processing") return;
 
+    // Ruling 45: the key is recorded, and committed, before the file exists,
+    // so a run that dies after the write still leaves a row that
+    // expireExports finds.
+    const claimed = await db
+      .update(privacyRequests)
+      .set({ exportObjectKey: key })
+      .where(
+        and(
+          eq(privacyRequests.id, requestId),
+          inArray(privacyRequests.status, OPEN),
+        ),
+      )
+      .returning({ id: privacyRequests.id });
+    if (claimed.length === 0) return;
+
     const data = {
       generatedAt: now.toISOString(),
       ...(await buildExport(db, row.userId)),
@@ -195,38 +210,68 @@ export function createPrivacyExportHandler({
     await store.put(key, JSON.stringify(data, null, 2));
     const url = await store.presign(key, EXPORT_LINK_SECONDS);
 
-    const email = await db.transaction(async (tx) => {
-      const t = tx as unknown as Db;
-      const [profile] = await t
-        .select({ status: profiles.status, email: users.email })
-        .from(profiles)
-        .innerJoin(users, eq(users.id, profiles.userId))
-        .where(eq(profiles.userId, row.userId))
-        .for("update", { of: profiles });
-      if (!profile || profile.status === "deleted") return null;
-      const done = await t
-        .update(privacyRequests)
-        .set({
-          status: "completed",
-          completedAt: now,
-          exportObjectKey: key,
-          exportExpiresAt: new Date(now.getTime() + EXPORT_LINK_SECONDS * 1000),
-          exportUrl: url,
-        })
-        .where(
-          and(
-            eq(privacyRequests.id, requestId),
-            inArray(privacyRequests.status, OPEN),
-          ),
-        )
-        .returning({ id: privacyRequests.id });
-      return done.length > 0 ? profile.email : null;
-    });
-    if (email === null) {
+    const outcome = await db.transaction(
+      async (
+        tx,
+      ): Promise<
+        | { kind: "recorded"; email: string }
+        | { kind: "deleted" }
+        | { kind: "closed"; keep: boolean }
+      > => {
+        const t = tx as unknown as Db;
+        const [profile] = await t
+          .select({ status: profiles.status, email: users.email })
+          .from(profiles)
+          .innerJoin(users, eq(users.id, profiles.userId))
+          .where(eq(profiles.userId, row.userId))
+          .for("update", { of: profiles });
+        if (!profile || profile.status === "deleted")
+          return { kind: "deleted" };
+        const done = await t
+          .update(privacyRequests)
+          .set({
+            status: "completed",
+            completedAt: now,
+            exportObjectKey: key,
+            exportExpiresAt: new Date(
+              now.getTime() + EXPORT_LINK_SECONDS * 1000,
+            ),
+            exportUrl: url,
+          })
+          .where(
+            and(
+              eq(privacyRequests.id, requestId),
+              inArray(privacyRequests.status, OPEN),
+            ),
+          )
+          .returning({ id: privacyRequests.id });
+        if (done.length > 0) return { kind: "recorded", email: profile.email };
+        // Another run of this job (its lease ran out) got there first: its
+        // file, at the same key, is the one the user was sent.
+        const [current] = await t
+          .select({
+            status: privacyRequests.status,
+            key: privacyRequests.exportObjectKey,
+          })
+          .from(privacyRequests)
+          .where(eq(privacyRequests.id, requestId));
+        return {
+          kind: "closed",
+          keep: current?.status === "completed" && current.key === key,
+        };
+      },
+    );
+    if (outcome.kind === "deleted") {
       await store.delete(key);
-      log("privacy_export: account deleted or request closed, stopped");
+      log("privacy_export: account deleted, file removed");
       return;
     }
+    if (outcome.kind === "closed") {
+      if (!outcome.keep) await store.delete(key);
+      log("privacy_export: request already closed, stopped");
+      return;
+    }
+    const { email } = outcome;
 
     try {
       await queueEmail(
@@ -251,44 +296,52 @@ export function createPrivacyExportHandler({
 }
 
 /**
- * Deletes export files past `export_expires_at`, and those of deleted
- * accounts at once, then clears the key and the link. Each file is deleted
- * before its row is cleared, so a failure leaves the row for the next run; a
- * failure doesn't stop the others, and the run throws at the end if any
- * failed. Returns how many it removed.
+ * Deletes export files, by their deterministic key, for every export request
+ * that has one recorded and is past `export_expires_at`, belongs to a deleted
+ * account, is `failed`, or is still open a day after it was asked for (its
+ * job died, perhaps after writing the file). The job records the key before
+ * it writes (Ruling 45), so a request with no key has no file; once its file
+ * is deleted the key and the link are cleared, so each request is swept once.
+ * Deleting a missing key is not an error, so a run that died before writing
+ * costs one no-op delete. Each file is deleted before its row is cleared, so
+ * a failure leaves the row for the next run; a failure doesn't stop the
+ * others, and the run throws at the end if any failed. Returns how many it
+ * removed.
  */
 export async function expireExports(
   db: Db,
   now: Date,
   store: ExportStore,
 ): Promise<number> {
+  const dayAgo = new Date(now.getTime() - DAY_MS);
   const due = await db
-    .select({ id: privacyRequests.id, key: privacyRequests.exportObjectKey })
+    .select({ id: privacyRequests.id })
     .from(privacyRequests)
     .innerJoin(profiles, eq(profiles.userId, privacyRequests.userId))
     .where(
       and(
+        eq(privacyRequests.kind, "export"),
         isNotNull(privacyRequests.exportObjectKey),
         or(
           lte(privacyRequests.exportExpiresAt, now),
           eq(profiles.status, "deleted"),
+          eq(privacyRequests.status, "failed"),
+          and(
+            inArray(privacyRequests.status, OPEN),
+            lte(privacyRequests.requestedAt, dayAgo),
+          ),
         ),
       ),
     );
   let removed = 0;
   let failed = 0;
-  for (const { id, key } of due) {
+  for (const { id } of due) {
     try {
-      await store.delete(key!);
+      await store.delete(exportObjectKey(id));
       await db
         .update(privacyRequests)
         .set({ exportObjectKey: null, exportUrl: null })
-        .where(
-          and(
-            eq(privacyRequests.id, id),
-            eq(privacyRequests.exportObjectKey, key!),
-          ),
-        );
+        .where(eq(privacyRequests.id, id));
       removed++;
     } catch {
       failed++;

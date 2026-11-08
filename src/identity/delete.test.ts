@@ -50,7 +50,7 @@ import { runDue } from "@/jobs/runner";
 import { simulatedClock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
-import { completeSignUp } from "./consent";
+import { completeSignUp, purgeIncompleteAccountsCounted } from "./consent";
 import { pruneIdentity } from "./daily";
 import {
   confirmDeletion,
@@ -173,6 +173,10 @@ describe("account deletion (DM 6.7)", () => {
       const { requestId } = await requestExport(t.db, NOW, { userId });
 
       await scrubAccount(t.db, NOW, { userId, actor: self(userId) });
+      // The scrub ran: the check below can't fail on its own, since the
+      // database enforces those keys and the row is never deleted.
+      expect((await userRow(t.db, userId)).email).toBe(tombstoneEmail(userId));
+      expect((await profileRow(t.db, userId)).status).toBe("deleted");
 
       // Every foreign key to users, read from the schema, still resolves.
       for (const table of Object.values(schema) as unknown[]) {
@@ -440,6 +444,37 @@ describe("account deletion (DM 6.7)", () => {
       ]);
     });
 
+    it("a staff deletion needs a reason", async () => {
+      const moderator = await seedUser(t.db, { role: "moderator" });
+      const userId = await seedUser(t.db);
+      for (const reason of [undefined, "  "]) {
+        await expect(
+          scrubAccount(t.db, NOW, {
+            userId,
+            actor: { kind: "moderator", userId: moderator, label: "mod_one" },
+            reason,
+          }),
+        ).rejects.toThrow(/reason/);
+      }
+      expect((await profileRow(t.db, userId)).status).toBe("active");
+    });
+
+    it("the purge of unfinished sign-ups leaves a tombstone older than 7 days", async () => {
+      const userId = await seedUser(t.db);
+      await scrubAccount(t.db, NOW, { userId, actor: self(userId) });
+      // The scrub clears the age confirmation, and the seeded account is
+      // months old: it looks like an unfinished sign-up.
+      expect((await profileRow(t.db, userId)).ageConfirmedAt).toBeNull();
+      const counted = await purgeIncompleteAccountsCounted(
+        t.db,
+        after(8 * DAY),
+      );
+      expect(counted).toEqual({ purged: 0, skipped: 0 });
+      expect(await userRow(t.db, userId)).toMatchObject({
+        email: tombstoneEmail(userId),
+      });
+    });
+
     it("the audit row has no email", async () => {
       const userId = await seedUser(t.db, {
         username: "Ada_Fan",
@@ -550,6 +585,54 @@ describe("account deletion (DM 6.7)", () => {
       ).toEqual({ confirm: "email" });
     });
 
+    it("an account with no username confirms by typing its email address", async () => {
+      const userId = await seedUser(t.db, { email: "Ada@Example.test" });
+      await t.db
+        .update(users)
+        .set({ username: null, displayUsername: null })
+        .where(eq(users.id, userId));
+      const viewer = await viewerWithSession(t.db, userId, NOW);
+      for (const typed of ["", "ada", "bob@example.test"]) {
+        expect(
+          await errorCode(() =>
+            requestDeletion(
+              t.db,
+              NOW,
+              { viewer, typedUsername: typed },
+              deps(),
+            ),
+          ),
+          typed,
+        ).toBe("wrong_username");
+      }
+      expect(
+        await requestDeletion(
+          t.db,
+          NOW,
+          { viewer, typedUsername: " ada@EXAMPLE.test " },
+          deps(),
+        ),
+      ).toEqual({ confirm: "email" });
+    });
+
+    it("an account with a username can't confirm by its email address", async () => {
+      const userId = await seedUser(t.db, {
+        username: "Ada_Fan",
+        email: "ada@example.test",
+      });
+      const viewer = await viewerWithSession(t.db, userId, NOW);
+      expect(
+        await errorCode(() =>
+          requestDeletion(
+            t.db,
+            NOW,
+            { viewer, typedUsername: "ada@example.test" },
+            deps(),
+          ),
+        ),
+      ).toBe("wrong_username");
+    });
+
     it("an impersonated session can't ask", async () => {
       const userId = await seedUser(t.db, { username: "Ada_Fan" });
       const admin = await seedUser(t.db, { role: "admin" });
@@ -559,7 +642,12 @@ describe("account deletion (DM 6.7)", () => {
       };
       expect(
         await errorCode(() =>
-          requestDeletion(t.db, NOW, { viewer, typedUsername: "Ada_Fan" }),
+          requestDeletion(
+            t.db,
+            NOW,
+            { viewer, typedUsername: "Ada_Fan" },
+            deps(),
+          ),
         ),
       ).toBe("read_only");
     });
