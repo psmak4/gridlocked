@@ -52,12 +52,17 @@ jobs:
         run: pnpm test
 
       # A deployed build never has the flag. Build it the way a host does, with
-      # no auth secrets, and fail if the local database code got in.
+      # no auth secrets, and fail if the local database code or the test email
+      # sender (memory sender and /api/test/emails) got in.
       - name: Build without the local database
         run: |
           pnpm build
           if grep -rq migrationsFolder .output/server; then
             echo "::error::.output/server contains the local-db code"
+            exit 1
+          fi
+          if grep -rq test-email-capture .output/server; then
+            echo "::error::.output/server contains the test email sender"
             exit 1
           fi
 

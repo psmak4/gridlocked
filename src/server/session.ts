@@ -6,6 +6,8 @@ import { and, eq } from "drizzle-orm";
 import { getSessionCookie } from "better-auth/cookies";
 import { authSessions, profiles, users } from "@/db/schema";
 import { createAuth, ensureProfile, type Auth } from "@/identity/auth";
+import { createResendSender } from "@/identity/email/resend";
+import type { EmailSender } from "@/identity/email/sender";
 import { parseAuthEnv, type AuthEnv } from "@/identity/env";
 import { touchViewer, type Viewer } from "@/identity/viewer";
 import { clockModeFromEnv, resolveClock } from "@/lib/resolve-clock";
@@ -16,6 +18,8 @@ export type SessionDeps = {
   env: () => AuthEnv;
   /** The request's "now", resolved once (HLD decision 20). */
   now: (db: ServerDb) => Promise<Date>;
+  /** Where account emails go; unset means none (they queue). */
+  sender?: () => Promise<EmailSender | null>;
 };
 
 let parsedEnv: AuthEnv | undefined;
@@ -30,9 +34,25 @@ function authEnv(): AuthEnv {
   return parsedEnv;
 }
 
+/**
+ * The email sender for this host. Local builds capture mail in memory for the
+ * e2e tests (the flag is replaced at build time, so a normal build drops that
+ * code); a deployed host sends through Resend once both variables are set,
+ * and until then emails stay queued.
+ */
+async function defaultSender(): Promise<EmailSender | null> {
+  if (import.meta.env.VITE_LOCAL_DB === "1") {
+    return import("./local-db").then((m) => m.memorySender);
+  }
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM;
+  return apiKey && from ? createResendSender({ apiKey, from, fetch }) : null;
+}
+
 const defaultDeps: SessionDeps = {
   withDb,
   env: authEnv,
+  sender: defaultSender,
   now: async (db) =>
     (
       await resolveClock({
@@ -49,7 +69,8 @@ export function withAuth<T>(
 ): Promise<T> {
   return deps.withDb(async (db) => {
     const now = await deps.now(db);
-    return fn(createAuth(db, { env: deps.env(), now: () => now }));
+    const sender = (await deps.sender?.()) ?? null;
+    return fn(createAuth(db, { env: deps.env(), now: () => now, sender }));
   });
 }
 
@@ -65,7 +86,11 @@ export async function getViewer(
   if (!getSessionCookie(request)) return null;
   return deps.withDb(async (db) => {
     const now = await deps.now(db);
-    const auth = createAuth(db, { env: deps.env(), now: () => now });
+    const auth = createAuth(db, {
+      env: deps.env(),
+      now: () => now,
+      sender: null,
+    });
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session) return null;
 

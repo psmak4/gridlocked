@@ -15,6 +15,10 @@ export type AuthEnv = {
   baseUrl: string | null;
   /** When set, only these (lowercase) addresses may sign up. */
   signUpAllowlist: string[] | null;
+  /** Discord sign-in; null unless both variables are set. */
+  discord: { clientId: string; clientSecret: string } | null;
+  /** Turnstile's secret key. Always set outside local mode; optional there. */
+  turnstileSecret: string | null;
   local: boolean;
 };
 
@@ -35,6 +39,12 @@ function fail(name: string, error: z.ZodError): never {
   );
 }
 
+function discordFrom(env: Record<string, string | undefined>) {
+  const clientId = env.DISCORD_CLIENT_ID?.trim();
+  const clientSecret = env.DISCORD_CLIENT_SECRET?.trim();
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
 export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
   const local = env.VITE_LOCAL_DB === "1";
   const signUpAllowlist = fromList(env.SIGN_UP_ALLOWED_EMAILS);
@@ -46,6 +56,8 @@ export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
         : `${crypto.randomUUID()}${crypto.randomUUID()}`,
       baseUrl: env.BETTER_AUTH_URL ? z.url().parse(env.BETTER_AUTH_URL) : null,
       signUpAllowlist,
+      discord: discordFrom(env),
+      turnstileSecret: env.TURNSTILE_SECRET_KEY?.trim() || null,
       local,
     };
   }
@@ -53,10 +65,21 @@ export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
   if (!parsedSecret.success) fail("BETTER_AUTH_SECRET", parsedSecret.error);
   const parsedUrl = z.url().safeParse(env.BETTER_AUTH_URL);
   if (!parsedUrl.success) fail("BETTER_AUTH_URL", parsedUrl.error);
+  // Without it the bot check would be off in production, so it is required.
+  const parsedTurnstile = z
+    .string()
+    .trim()
+    .min(1, "must be set")
+    .safeParse(env.TURNSTILE_SECRET_KEY);
+  if (!parsedTurnstile.success) {
+    fail("TURNSTILE_SECRET_KEY", parsedTurnstile.error);
+  }
   return {
     secret: parsedSecret.data,
     baseUrl: parsedUrl.data,
     signUpAllowlist,
+    discord: discordFrom(env),
+    turnstileSecret: parsedTurnstile.data,
     local,
   };
 }

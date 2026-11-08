@@ -1847,7 +1847,7 @@ The username is held in `username_history` for 90 days and then released.
 | Email and password sign-up | Launch | Turnstile, age confirmation, terms accepted. Verification email through the outbox (5.11); no posting until verified (HLD §7.4) |
 | Launch-day rush beyond 100 sign-ups | Free email cap (HLD §10) | Verification emails queue; Discord sign-in is nudged; magic links and resets jump the queue (5.11) |
 | Magic link expires before it arrives | Queue delays | Magic links go first; an expired link offers "send a new one" |
-| Discord sign-in with an email that matches an existing account | Common | Linked only if Discord says the email is verified; otherwise the user must sign in to the existing account to link (Better Auth account linking with trusted providers) |
+| Discord sign-in with an email that matches an existing account | Common | Linked only if both emails are verified: Discord says its email is verified, and the existing account's is too. Discord is not a trusted provider (Better Auth links a trusted provider's unverified email, which would let anyone take over an account by setting that email on their Discord profile). Otherwise sign-in is refused, and the user signs in to the existing account to link (M5 plan, finding 1) |
 | Discord account whose email isn't verified | Discord allows it | `email_verified = false`; the user verifies by email before posting |
 | Email change | Common | Confirmation to the new address, a notice to the old one, audited (Better Auth `changeEmail`) |
 | Username that looks official | "F1_Official", "MaxVerstappen" | Reserved patterns (6.3) |

@@ -12,7 +12,24 @@ import { ltree } from "@electric-sql/pglite/contrib/ltree";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "@/db/schema";
+import type { EmailSender } from "@/identity/email/sender";
 import type { ServerDb } from "./db";
+
+/** What the memory sender has taken, for Playwright to read. Local builds only. */
+export type CapturedEmail = { to: string; subject: string; text: string };
+export const capturedEmails: CapturedEmail[] = [];
+
+/** Keeps mail in memory instead of sending it. `test-email-capture` marks this code for the CI build check. */
+export const memorySender: EmailSender = {
+  async send(message) {
+    capturedEmails.push({
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+    });
+    return { id: `test-email-capture-${capturedEmails.length}` };
+  },
+};
 
 export async function localDb(): Promise<ServerDb> {
   const client = new PGlite({ extensions: { btree_gist, ltree } });
