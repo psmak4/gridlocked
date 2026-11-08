@@ -1,0 +1,65 @@
+import { renderToString } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { Checkbox } from "./checkbox";
+
+describe("Checkbox", () => {
+  it("renders its label", () => {
+    expect(
+      renderToString(<Checkbox id="tos" label="I accept the terms" />),
+    ).toContain("I accept the terms");
+  });
+
+  it("is disabled when asked to", () => {
+    expect(
+      renderToString(<Checkbox id="tos" label="Terms" disabled />),
+    ).toMatch(/disabled/);
+  });
+
+  it("has a row at least 48 px tall", () => {
+    expect(renderToString(<Checkbox id="tos" label="Terms" />)).toContain(
+      "min-h-[48px]",
+    );
+  });
+
+  it("links the hint and the error with aria-describedby", () => {
+    const html = renderToString(
+      <Checkbox
+        id="tos"
+        label="Terms"
+        hint="Read them first"
+        error="Required"
+      />,
+    );
+    expect(html).toContain('aria-describedby="tos-hint tos-error"');
+    expect(html).toContain("Required");
+    expect(html).toContain("text-fall");
+  });
+
+  it("uses a line-strong border and an ink fill when checked", () => {
+    const html = renderToString(<Checkbox id="tos" label="Terms" />);
+    expect(html).toContain("border-line-strong");
+    expect(html).toContain("data-checked:bg-ink");
+  });
+});
+
+describe("Checkbox disabled row", () => {
+  it("dims the whole row, label included", () => {
+    const html = renderToString(<Checkbox id="t" label="Terms" disabled />);
+    expect(html).toMatch(/data-slot="checkbox-row" class="[^"]*opacity-45/);
+  });
+});
+
+describe("Checkbox describedby merge", () => {
+  it("keeps a caller's aria-describedby beside the hint and error", () => {
+    const html = renderToString(
+      <Checkbox
+        id="t"
+        label="Terms"
+        hint="Hint"
+        error="Err"
+        aria-describedby="outside"
+      />,
+    );
+    expect(html).toContain('aria-describedby="outside t-hint t-error"');
+  });
+});
