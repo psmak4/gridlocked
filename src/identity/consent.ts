@@ -2,27 +2,14 @@
  * Age confirmation and the legal documents (DM 6.2, 6.8). We keep that a user
  * confirmed they are 16 or older, never a birth date.
  */
+import { and, asc, desc, eq, exists, isNull, lt, or, sql } from "drizzle-orm";
 import {
-  and,
-  asc,
-  desc,
-  eq,
-  exists,
-  inArray,
-  isNull,
-  lt,
-  or,
-  sql,
-} from "drizzle-orm";
-import {
-  auditLog,
   authAccounts,
   authSessions,
   authVerifications,
   emailOutbox,
   legalAcceptances,
   legalDocuments,
-  leagues,
   profiles,
   teams,
   usernameHistory,
@@ -107,10 +94,28 @@ export async function completeSignUp(
     accepted: true;
     username?: string;
   },
+  // Only here so a test can stub the check; callers never pass it.
+  deps: { check?: typeof checkUsername } = {},
 ): Promise<void> {
+  const check = deps.check ?? checkUsername;
   if (input.ageConfirmed !== true || input.accepted !== true) {
     throw new IdentityError("incomplete");
   }
+  try {
+    await completeSignUpTransaction(db, now, input, check);
+  } catch (error) {
+    // Someone else claimed the name between the check and the write.
+    if (isUniqueViolation(error)) throw new IdentityError("taken");
+    throw error;
+  }
+}
+
+async function completeSignUpTransaction(
+  db: Db,
+  now: Date,
+  input: { userId: string; username?: string },
+  check: typeof checkUsername,
+): Promise<void> {
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
     const [user] = await t
@@ -121,7 +126,7 @@ export async function completeSignUp(
     if (!user) throw new IdentityError("unauthenticated");
 
     if (!user.username && input.username !== undefined) {
-      const problem = await checkUsername(t, now, input.username, {
+      const problem = await check(t, now, input.username, {
         userId: input.userId,
       });
       if (problem) throw new IdentityError(problem);
@@ -166,13 +171,20 @@ export async function completeSignUp(
   });
 }
 
-/** Re-acceptance: the user agrees to these documents. */
+/**
+ * Re-acceptance: the user agrees to these documents. Each must be the current
+ * version of its kind, otherwise `invalid_document`.
+ */
 export async function acceptDocuments(
   db: Db,
   now: Date,
   input: { userId: string; documentIds: string[] },
 ): Promise<void> {
   if (input.documentIds.length === 0) return;
+  const current = new Set((await currentDocuments(db)).map((d) => d.id));
+  if (!input.documentIds.every((id) => current.has(id))) {
+    throw new IdentityError("invalid_document");
+  }
   await db
     .insert(legalAcceptances)
     .values(
@@ -185,12 +197,57 @@ export async function acceptDocuments(
     .onConflictDoNothing();
 }
 
+const FOREIGN_KEY_VIOLATION = "23503";
+const UNIQUE_VIOLATION = "23505";
+
+/** Drivers wrap the Postgres error as a `cause`, so look down the chain. */
+function hasPgCode(error: unknown, code: string): boolean {
+  for (let e: unknown = error, i = 0; e && i < 5; i++, e = (e as Error).cause) {
+    if ((e as { code?: unknown }).code === code) return true;
+  }
+  return false;
+}
+const isUniqueViolation = (error: unknown) =>
+  hasPgCode(error, UNIQUE_VIOLATION);
+
+/**
+ * True when some row that must keep its user points at `id`: every RESTRICT
+ * foreign key to `users` that the purge doesn't itself delete (DM 0.7).
+ */
+function isReferenced(t: Db, id: string) {
+  const none = (table: string, column: string) =>
+    sql`not exists (select 1 from ${sql.identifier(table)} where ${sql.identifier(column)} = ${id})`;
+  return and(
+    sql`not ${exists(
+      t
+        .select({ one: sql`1` })
+        .from(teams)
+        .where(eq(teams.userId, id)),
+    )}`,
+    none("leagues", "owner_user_id"),
+    none("privacy_requests", "user_id"),
+    none("trust_level_changes", "user_id"),
+    none("trust_level_changes", "changed_by"),
+    none("filter_rules", "created_by"),
+    none("game_session_exceptions", "decided_by"),
+    none("settings", "updated_by"),
+    none("result_overrides", "created_by"),
+    none("result_overrides", "revoked_by"),
+    none("review_items", "resolved_by"),
+    none("audit_log", "actor_user_id"),
+    none("audit_log", "impersonating_user_id"),
+    none("audit_log", "entity_id"),
+  );
+}
+
 /**
  * Hard-deletes accounts that never confirmed their age and are older than
  * `olderThanDays`: the user and its sign-in rows, profile, acceptances and old
- * usernames. A user with a team, a league, or any audit row that names them
- * (as actor, as the one impersonated, or as the entity) is left alone, because
- * those rows must keep their user (DM 0.7). Returns how many were removed.
+ * usernames. A user that any restricting foreign key names (a team, a league,
+ * a privacy request, a trust change, a staff column, or an audit row) is left
+ * alone in SQL. Each account is its own transaction; one that still hits a
+ * foreign-key violation is skipped and logged by code, and the rest go on.
+ * Returns how many were removed.
  */
 export async function purgeIncompleteAccounts(
   db: Db,
@@ -201,7 +258,7 @@ export async function purgeIncompleteAccounts(
   const candidates = await db
     .select({ id: users.id })
     .from(users)
-    .innerJoin(profiles, eq(profiles.userId, users.id))
+    .leftJoin(profiles, eq(profiles.userId, users.id))
     .where(
       and(
         eq(users.role, "user"),
@@ -213,88 +270,68 @@ export async function purgeIncompleteAccounts(
 
   let removed = 0;
   for (const { id } of candidates) {
-    const deleted = await db.transaction(async (tx) => {
-      const t = tx as unknown as Db;
-      // The same test again under a lock: a sign-up finished since the read
-      // is not removed.
-      const [eligible] = await t
-        .select({ id: users.id, email: users.email })
-        .from(users)
-        .innerJoin(profiles, eq(profiles.userId, users.id))
-        .where(
-          and(
-            eq(users.id, id),
-            isNull(profiles.ageConfirmedAt),
-            sql`not ${exists(
-              t
-                .select({ one: sql`1` })
-                .from(teams)
-                .where(eq(teams.userId, id)),
-            )}`,
-            sql`not ${exists(
-              t
-                .select({ one: sql`1` })
-                .from(leagues)
-                .where(eq(leagues.ownerUserId, id)),
-            )}`,
-            sql`not ${exists(
-              t
-                .select({ one: sql`1` })
-                .from(auditLog)
-                .where(
-                  or(
-                    eq(auditLog.actorUserId, id),
-                    eq(auditLog.impersonatingUserId, id),
-                    eq(auditLog.entityId, id),
-                  ),
-                ),
-            )}`,
-          ),
-        )
-        .for("update", { of: users });
-      if (!eligible) return false;
+    try {
+      const deleted = await db.transaction(async (tx) => {
+        const t = tx as unknown as Db;
+        // Both rows locked, then the test again in a new statement (so a new
+        // snapshot): a sign-up finished since the read is not removed.
+        const [user] = await t
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(and(eq(users.id, id), isReferenced(t, id)))
+          .for("update");
+        if (!user) return false;
+        const [profile] = await t
+          .select({ ageConfirmedAt: profiles.ageConfirmedAt })
+          .from(profiles)
+          .where(eq(profiles.userId, id))
+          .for("update");
+        if (profile && profile.ageConfirmedAt !== null) return false;
 
-      await t.delete(authSessions).where(eq(authSessions.userId, id));
-      await t.delete(authAccounts).where(eq(authAccounts.userId, id));
-      // Reset and verification tokens hold the user's id or email.
-      await t
-        .delete(authVerifications)
-        .where(
-          or(
-            eq(authVerifications.value, id),
-            eq(authVerifications.identifier, eligible.email),
-          ),
-        );
-      await t
-        .delete(emailOutbox)
-        .where(
-          and(
-            eq(emailOutbox.status, "queued"),
-            sql`lower(${emailOutbox.toEmail}) = ${eligible.email.toLowerCase()}`,
-          ),
-        );
-      await t.delete(legalAcceptances).where(eq(legalAcceptances.userId, id));
-      await t.delete(usernameHistory).where(eq(usernameHistory.userId, id));
-      await t.delete(profiles).where(eq(profiles.userId, id));
-      await t.delete(users).where(inArray(users.id, [id]));
-      return true;
-    });
-    if (deleted) {
-      removed++;
-      // Written after the delete, so this row does not name a user who is
-      // still there (it would only be skipped on a later run, but be exact).
-      await writeAudit(db, now, {
-        actorUserId: null,
-        actorKind: "job",
-        actorLabel: "purge incomplete accounts",
-        action: "user.purge_incomplete",
-        entityType: "user",
-        entityId: id,
-        before: null,
-        after: { olderThanDays },
-        reason: null,
-        requestId: null,
+        await t.delete(authSessions).where(eq(authSessions.userId, id));
+        await t.delete(authAccounts).where(eq(authAccounts.userId, id));
+        // Reset and verification tokens hold the user's id or email.
+        await t
+          .delete(authVerifications)
+          .where(
+            or(
+              eq(authVerifications.value, id),
+              eq(authVerifications.identifier, user.email),
+            ),
+          );
+        await t
+          .delete(emailOutbox)
+          .where(
+            and(
+              eq(emailOutbox.status, "queued"),
+              sql`lower(${emailOutbox.toEmail}) = ${user.email.toLowerCase()}`,
+            ),
+          );
+        await t.delete(legalAcceptances).where(eq(legalAcceptances.userId, id));
+        await t.delete(usernameHistory).where(eq(usernameHistory.userId, id));
+        await t.delete(profiles).where(eq(profiles.userId, id));
+        await t.delete(users).where(eq(users.id, id));
+        // `entity_id` has no foreign key, so this can name the deleted user.
+        await writeAudit(t, now, {
+          actorUserId: null,
+          actorKind: "job",
+          actorLabel: "purge incomplete accounts",
+          action: "user.purge_incomplete",
+          entityType: "user",
+          entityId: id,
+          before: null,
+          after: { olderThanDays },
+          reason: null,
+          requestId: null,
+        });
+        return true;
       });
+      if (deleted) removed++;
+    } catch (error) {
+      if (!hasPgCode(error, FOREIGN_KEY_VIOLATION)) throw error;
+      console.error(
+        `purge incomplete accounts: skipped (${FOREIGN_KEY_VIOLATION})`,
+      );
     }
   }
   return removed;

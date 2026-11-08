@@ -148,12 +148,50 @@ describe("the profile (DM 6.2, 6.11)", () => {
     [{ countryCode: "QQ" }, "invalid_country"],
     [{ countryCode: "ZZ" }, "invalid_country"],
     [{ countryCode: "GB1" }, "invalid_country"],
+    [{ countryCode: "USA" }, "invalid_country"],
+    [{ countryCode: "XYZ" }, "invalid_country"],
     [{ timezone: "Mars/Base" }, "invalid_timezone"],
     [{ timezone: "" }, "invalid_timezone"],
   ])("a bad country or timezone is refused: %j", async (over, code) => {
     const before = await profile();
     await expect(save(over)).rejects.toMatchObject({ code });
     expect(await profile()).toEqual(before);
+  });
+
+  it("a game that isn't running keeps its memberships", async () => {
+    const otherTeam = await createTeam(t.db, NOW, {
+      gameId: seeded.otherGameId,
+      userId,
+      name: "Other",
+    });
+    await save({
+      favoriteConstructorId: seeded.constructorIds[0]!,
+      countryCode: "GB",
+    });
+    const rows = await t.db
+      .select()
+      .from(leagueMemberships)
+      .where(eq(leagueMemberships.teamId, otherTeam));
+    expect(rows).toEqual([]);
+    const kinds = await t.db
+      .select({ kind: leagues.kind })
+      .from(leagues)
+      .where(eq(leagues.gameId, seeded.otherGameId));
+    expect(kinds.filter((k) => k.kind.startsWith("auto_"))).toEqual([]);
+  });
+
+  it("a timezone-only change writes no membership", async () => {
+    await save({
+      favoriteConstructorId: seeded.constructorIds[0]!,
+      countryCode: "GB",
+    });
+    const before = await t.db.select().from(leagueMemberships);
+    await updateProfile(t.db, new Date("2026-03-01T00:00:00Z"), {
+      userId,
+      expectedVersion: (await profile()).version,
+      timezone: "Europe/London",
+    });
+    expect(await t.db.select().from(leagueMemberships)).toEqual(before);
   });
 
   it("a good country and timezone are saved, the country upper-cased", async () => {

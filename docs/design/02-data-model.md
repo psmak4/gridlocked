@@ -1728,7 +1728,7 @@ erDiagram
 | avatar_seed | text | For the generated default avatar (HLD §9). There are no uploads at launch, so no images to moderate |
 | favorite_constructor_id | uuid FK, nullable | Flair, plus the auto constructor league (4.6) |
 | favorite_driver_id | uuid FK, nullable | Flair, plus the auto driver league |
-| country_code | text (ISO 3166-1 alpha-2), nullable | Optional and self-declared; country league only (decided, HLD §9). `updateProfile` upper-cases it and refuses a 2-letter code the runtime's region data doesn't know (`invalid_country`) |
+| country_code | text (ISO 3166-1 alpha-2), nullable | Optional and self-declared; country league only (decided, HLD §9). `updateProfile` upper-cases it and refuses anything but a 2-letter code the runtime's region data knows (`invalid_country`) |
 | timezone | text (IANA) | Defaults from the browser at sign-up. `updateProfile` refuses a name `Intl.DateTimeFormat` rejects (`invalid_timezone`) |
 | spoiler_protection | boolean, default true | Off means everything is revealed (5.7) |
 | age_confirmed_at | timestamptz | **We record that the user confirmed they're 16 or older, not their birth date.** It's data minimization, and enough for the decided age gate (HLD §9). It's set by `completeSignUp` (6.8). An account still without it after 7 days is removed by `purgeIncompleteAccounts` (a daily job), unless it has a team, a league or an audit row; `Viewer.complete` needs it |
@@ -1874,7 +1874,7 @@ The username is held in `username_history` for 90 days and then released.
 | Admin investigates a user's issue | Support | Time-limited, audited, read-only impersonation (6.4) |
 | Two admins edit the same setting | Busy weekend | `version` check (0.7) |
 | A moderator's level shouldn't change | Policy | `trust_level_locked` (6.2) |
-| Favorite team leaves F1 | Teams come and go | The favorite stays as flair. Since there's no constructor in the new game, there's no auto league, and the user is prompted to pick again | (`favoriteIsStale`; the profile is not cleared)
+| Favorite team leaves F1 | Teams come and go | The favorite stays as flair. Since there's no constructor in the new game, there's no auto league, and the user is prompted to pick again (`favoriteIsStale`; the profile is not cleared) |
 | Terms updated | Lawyer review (HLD §13) | A new version with `requires_reacceptance` (6.8) |
 | Ads switched on later | HLD §16 | Consent records and a feature flag are ready (6.9) |
 | Better Auth upgrade adds columns | Normal upgrades | Its tables are separate from `profiles`; the migration only touches auth tables |

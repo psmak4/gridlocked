@@ -27,15 +27,13 @@ const regions = new Intl.DisplayNames(["en"], {
 });
 
 /**
- * The upper-cased code, or null when it is not one: two or three letters, and
- * if two, a region that ISO 3166-1 (through the runtime's CLDR data) knows.
+ * The upper-cased ISO 3166-1 alpha-2 code, or null when it is not one: two
+ * letters that the runtime's CLDR region data knows.
  */
 export function normalizeCountryCode(raw: string): string | null {
   const code = raw.trim().toUpperCase();
-  if (!/^[A-Z]{2,3}$/.test(code)) return null;
-  if (code.length === 2 && (code === "ZZ" || regions.of(code) === undefined)) {
-    return null;
-  }
+  if (!/^[A-Z]{2}$/.test(code)) return null;
+  if (code === "ZZ" || regions.of(code) === undefined) return null;
   return code;
 }
 
@@ -83,48 +81,53 @@ export async function updateProfile(
     set.spoilerProtection = input.spoilerProtection;
   }
 
-  const [before] = await db
-    .select()
-    .from(profiles)
-    .where(eq(profiles.userId, input.userId));
-  if (!before) throw new IdentityError("unauthenticated");
+  // The compare-and-set and the league sync are one transaction: the profile
+  // row lock queues two saves, and a failed sync rolls the save back.
+  await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    const [before] = await t
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, input.userId));
+    if (!before) throw new IdentityError("unauthenticated");
 
-  const [after] = await db
-    .update(profiles)
-    .set({ ...set, updatedAt: now, version: sql`${profiles.version} + 1` })
-    .where(
-      and(
-        eq(profiles.userId, input.userId),
-        eq(profiles.version, input.expectedVersion),
-      ),
-    )
-    .returning();
-  if (!after) throw new IdentityError("version_conflict");
+    const [after] = await t
+      .update(profiles)
+      .set({ ...set, updatedAt: now, version: sql`${profiles.version} + 1` })
+      .where(
+        and(
+          eq(profiles.userId, input.userId),
+          eq(profiles.version, input.expectedVersion),
+        ),
+      )
+      .returning();
+    if (!after) throw new IdentityError("version_conflict");
 
-  const leaguesChanged =
-    after.favoriteConstructorId !== before.favoriteConstructorId ||
-    after.favoriteDriverId !== before.favoriteDriverId ||
-    after.countryCode !== before.countryCode;
-  if (!leaguesChanged) return;
+    const leaguesChanged =
+      after.favoriteConstructorId !== before.favoriteConstructorId ||
+      after.favoriteDriverId !== before.favoriteDriverId ||
+      after.countryCode !== before.countryCode;
+    if (!leaguesChanged) return;
 
-  const running = await db
-    .select({ id: games.id })
-    .from(games)
-    .where(eq(games.status, "running"));
-  for (const game of running) {
-    const constructorId =
-      after.favoriteConstructorId !== null &&
-      (await gameHasConstructor(db, game.id, after.favoriteConstructorId))
-        ? after.favoriteConstructorId
-        : null;
-    await syncAutoLeagues(db, now, {
-      userId: input.userId,
-      gameId: game.id,
-      constructorId,
-      driverId: after.favoriteDriverId,
-      countryCode: after.countryCode,
-    });
-  }
+    const running = await t
+      .select({ id: games.id })
+      .from(games)
+      .where(eq(games.status, "running"));
+    for (const game of running) {
+      const constructorId =
+        after.favoriteConstructorId !== null &&
+        (await gameHasConstructor(t, game.id, after.favoriteConstructorId))
+          ? after.favoriteConstructorId
+          : null;
+      await syncAutoLeagues(t, now, {
+        userId: input.userId,
+        gameId: game.id,
+        constructorId,
+        driverId: after.favoriteDriverId,
+        countryCode: after.countryCode,
+      });
+    }
+  });
 }
 
 async function gameHasConstructor(

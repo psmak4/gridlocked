@@ -41,7 +41,8 @@ export type IdentityErrorCode =
   // The profile (DM 6.2): a stale form, and values that aren't real.
   | "version_conflict"
   | "invalid_country"
-  | "invalid_timezone";
+  | "invalid_timezone"
+  | "invalid_document";
 
 /** Carries a code and nothing personal: it can be logged and shown. */
 export class IdentityError extends Error {
