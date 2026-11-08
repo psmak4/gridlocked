@@ -397,6 +397,28 @@ export function createAuth(db: Db, deps: AuthDeps) {
             });
           }
         }
+        // The display name is the username with the user's capitals (DM 6.3),
+        // so it can't carry a name the username check would refuse.
+        if (ctx.path === "/sign-up/email") {
+          const body: unknown = ctx.body;
+          const record =
+            typeof body === "object" && body !== null
+              ? (body as Record<string, unknown>)
+              : {};
+          const display = record.displayUsername;
+          if (display !== undefined) {
+            const typed = record.username;
+            if (
+              typeof display !== "string" ||
+              typeof typed !== "string" ||
+              typed.toLowerCase() !== display.toLowerCase()
+            ) {
+              throw new APIError("BAD_REQUEST", {
+                message: "The display name must be the username.",
+              });
+            }
+          }
+        }
         const field = ADDRESS_FIELD[ctx.path];
         const body: unknown = ctx.body;
         if (!field || typeof body !== "object" || body === null) return;

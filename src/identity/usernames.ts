@@ -40,19 +40,29 @@ export function isValidUsernameFormat(name: string): boolean {
   );
 }
 
+/** Lower case, accents dropped, separators removed, `0` read as `o`. */
+function stripForCheck(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[_.\s-]/g, "")
+    .replaceAll("0", "o");
+}
+
 /**
  * A name as the reserved-name check compares it: lower case, accents
  * dropped, separators (`_`, `.`, spaces, hyphens) removed, `0` read as `o`
  * and `1` as `l`. For matching only: it is never stored or shown.
  */
 export function normalizeForCheck(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[_.\s-]/g, "")
-    .replaceAll("0", "o")
-    .replaceAll("1", "l");
+  return stripForCheck(name).replaceAll("1", "l");
+}
+
+/** Every reading of a name: `1` as `l` and as `i`. A match on any is a match. */
+function normalForms(name: string): string[] {
+  const stripped = stripForCheck(name);
+  return [stripped.replaceAll("1", "l"), stripped.replaceAll("1", "i")];
 }
 
 /**
@@ -63,15 +73,17 @@ export function normalizeForCheck(name: string): string {
 function ruleMatches(
   rule: { pattern: string; matchType: string },
   forms: string[],
+  normalized: string[],
 ): boolean {
   if (rule.matchType === "word") {
-    const word = rule.pattern.toLowerCase();
-    return forms.some((form) => form === word);
+    // The rule's word is read the same way as the name.
+    const words = normalForms(rule.pattern);
+    return normalized.some((form) => words.includes(form));
   }
   if (rule.matchType === "regex") {
     try {
       const re = new RegExp(rule.pattern, "i");
-      return forms.some((form) => re.test(form));
+      return [...forms, ...normalized].some((form) => re.test(form));
     } catch {
       // A bad pattern blocks nothing; it must not break sign-up either.
       return false;
@@ -82,8 +94,8 @@ function ruleMatches(
 
 async function isReserved(db: Db, name: string): Promise<boolean> {
   const lower = name.toLowerCase();
-  const normalized = normalizeForCheck(name);
-  const forms = [lower, lower.replaceAll("0", "o"), normalized];
+  const normalized = normalForms(name);
+  const forms = [lower, lower.replaceAll("0", "o")];
 
   const rules = await db
     .select({ pattern: filterRules.pattern, matchType: filterRules.matchType })
@@ -95,7 +107,7 @@ async function isReserved(db: Db, name: string): Promise<boolean> {
         eq(filterRules.effect, "block"),
       ),
     );
-  if (rules.some((rule) => ruleMatches(rule, forms))) return true;
+  if (rules.some((rule) => ruleMatches(rule, forms, normalized))) return true;
 
   // Read live, so a new driver or team is covered without a seed.
   const driverRows = await db
@@ -117,14 +129,17 @@ async function isReserved(db: Db, name: string): Promise<boolean> {
       d.displayName,
       `${d.givenName}${d.familyName}`,
     ]) {
-      if (spelling) reserved.add(normalizeForCheck(spelling));
+      if (spelling) normalForms(spelling).forEach((f) => reserved.add(f));
     }
   }
   for (const c of constructorRows) {
-    reserved.add(normalizeForCheck(c.slug));
-    reserved.add(normalizeForCheck(c.name));
+    for (const f of [...normalForms(c.slug), ...normalForms(c.name)]) {
+      reserved.add(f);
+    }
   }
-  return normalized.length >= USERNAME_MIN_LENGTH && reserved.has(normalized);
+  return normalized.some(
+    (form) => form.length >= USERNAME_MIN_LENGTH && reserved.has(form),
+  );
 }
 
 /**
@@ -190,6 +205,7 @@ export async function changeUsername(
   db: Db,
   now: Date,
   input: { userId: string; username: string },
+  // Only here so a test can stub the check; callers never pass it.
   deps: {
     check?: typeof checkUsername;
   } = {},

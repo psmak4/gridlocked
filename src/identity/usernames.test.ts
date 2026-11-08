@@ -46,7 +46,7 @@ describe("usernames", () => {
     expect(normalizeForCheck("F1_0fficial")).toBe(
       normalizeForCheck("f1official"),
     );
-    expect(normalizeForCheck("Adm1n")).toBe(normalizeForCheck("admln"));
+    expect(normalizeForCheck("Adm1n")).toBe("admln");
   });
 
   it.each([
@@ -104,6 +104,31 @@ describe("usernames", () => {
     expect(await check("Gridl0cked")).toBe("reserved");
     expect(await check("0fficial_pick")).toBe("reserved");
     expect(await check("adm_in")).toBe("reserved");
+  });
+
+  it("1 read as i gets no one past the rules", async () => {
+    for (const name of ["Adm1n", "Gr1dlocked", "Gr1dl0cked"]) {
+      expect(await check(name)).toBe("reserved");
+    }
+    await t.db.insert(constructors).values({
+      id: newId(),
+      slug: "red_bull",
+      name: "Red Bull",
+      nationality: "Austrian",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await t.db.insert(drivers).values({
+      id: newId(),
+      slug: "gasly",
+      givenName: "Pierre",
+      familyName: "Gasly",
+      nationality: "French",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    expect(await check("P1erreGasly")).toBe("reserved");
+    expect(await check("Red_Bu11")).toBe("reserved");
   });
 
   it("a rule turned off stops applying", async () => {
@@ -206,6 +231,23 @@ describe("usernames", () => {
       expect(profile?.usernameChangedAt).toEqual(NOW);
     });
 
+    it("a first username writes no history and starts no wait", async () => {
+      const id = await seedUser(t.db, { username: "tmp_first" });
+      await t.db
+        .update(users)
+        .set({ username: null, displayUsername: null })
+        .where(eq(users.id, id));
+      await changeUsername(t.db, NOW, { userId: id, username: "First_One" });
+      const [row] = await t.db.select().from(users).where(eq(users.id, id));
+      expect(row?.username).toBe("first_one");
+      expect(await t.db.select().from(usernameHistory)).toHaveLength(0);
+      const [profile] = await t.db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.userId, id));
+      expect(profile?.usernameChangedAt).toBeNull();
+    });
+
     it("refuses a name the check refuses", async () => {
       const id = await seedUser(t.db, { username: "before_x" });
       await seedUser(t.db, { username: "taken_one" });
@@ -280,6 +322,48 @@ describe("usernames", () => {
         signUpRequest("bob@example.test", { username: "ADA_FAN" }),
       );
       expect(again.status).toBeGreaterThanOrEqual(400);
+    });
+
+    it("a reserved display name on a plain username is refused at sign-up", async () => {
+      const auth = testAuth(t.db);
+      const response = await auth.handler(
+        signUpRequest("ada@example.test", {
+          username: "plain_guy",
+          displayUsername: "F1_Official",
+        }),
+      );
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(
+        (await t.db.select().from(users)).filter((u) => u.role !== "system"),
+      ).toHaveLength(0);
+    });
+
+    it("a display name that isn't the username is refused", async () => {
+      const auth = testAuth(t.db);
+      const response = await auth.handler(
+        signUpRequest("ada@example.test", {
+          username: "plain_guy",
+          displayUsername: "Other_Guy",
+        }),
+      );
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      const ok = await auth.handler(
+        signUpRequest("bob@example.test", {
+          username: "plain_guy",
+          displayUsername: "Plain_Guy",
+        }),
+      );
+      expect(ok.status).toBe(200);
+    });
+
+    it("the username sign-in and availability paths answer 404", async () => {
+      const auth = testAuth(t.db);
+      for (const path of ["/sign-in/username", "/is-username-available"]) {
+        const response = await auth.handler(
+          authPost(path, { username: "plain_guy", password: "x" }),
+        );
+        expect(response.status).toBe(404);
+      }
     });
 
     it("renaming through update-user is refused", async () => {
