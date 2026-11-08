@@ -19,7 +19,9 @@ import {
   eventEntries,
   resultOverrides,
   reviewItems,
+  users,
 } from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
 import { advanceStatus } from "@/results/status";
 import { parseStaffEnv, runStaffCommand } from "./cli";
 
@@ -506,6 +508,90 @@ describe("pnpm staff insert", () => {
       ),
     ).rejects.toThrow(error);
     expect(await t.db.select().from(resultOverrides)).toEqual([]);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+});
+
+describe("pnpm staff set-role", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let ada: string;
+  const SET_ROLE = {
+    STAFF_CHANGE: JSON.stringify({ username: "Ada_R", role: "admin" }),
+    STAFF_REASON: "Runs the beta league",
+    STAFF_ACTOR: "psmak4",
+    STAFF_REQUEST_ID: "gh-run:9",
+  };
+  const roleOf = async () =>
+    (await t.db.select().from(users).where(eq(users.id, ada)))[0]!.role;
+  beforeEach(async () => {
+    t = await createTestDb();
+    await seedUser(t.db, { username: "boss", role: "admin" });
+    ada = await seedUser(t.db, {
+      username: "Ada_R",
+      email: "ada.private@example.test",
+    });
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("set-role resolves a username, dry run writes nothing, and the output has no email", async () => {
+    // The one command with no STAFF_EVENT; the workflow sends it empty.
+    const cmd = parseStaffEnv("set-role", { ...SET_ROLE, STAFF_EVENT: "" });
+    expect(cmd).toMatchObject({ command: "set-role", dryRun: true });
+    const report = await runStaffCommand(t.db, T1, cmd);
+    expect(report).toEqual({
+      dryRun: true,
+      command: "set-role",
+      resolved: { username: "Ada_R", role: { from: "user", to: "admin" } },
+    });
+    const printed = JSON.stringify(report);
+    expect(printed).not.toContain("example.test");
+    expect(printed).not.toContain(ada);
+    expect(await roleOf()).toBe("user");
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+
+    const real = await runStaffCommand(
+      t.db,
+      T1,
+      parseStaffEnv("set-role", { ...SET_ROLE, STAFF_DRY_RUN: "false" }),
+    );
+    expect(real).toEqual({
+      dryRun: false,
+      command: "set-role",
+      resolved: { username: "Ada_R", role: { from: "user", to: "admin" } },
+    });
+    expect(JSON.stringify(real)).not.toContain("example.test");
+    expect(await roleOf()).toBe("admin");
+    expect(await t.db.select().from(auditLog)).toMatchObject([
+      {
+        action: "user.role.update",
+        actorLabel: "psmak4",
+        actorUserId: null,
+        entityId: ada,
+        reason: "Runs the beta league",
+        requestId: "gh-run:9",
+      },
+    ]);
+  });
+
+  it("set-role refuses an unknown username and the system role", async () => {
+    await expect(
+      runStaffCommand(
+        t.db,
+        T1,
+        parseStaffEnv("set-role", {
+          ...SET_ROLE,
+          STAFF_CHANGE: JSON.stringify({ username: "nobody", role: "admin" }),
+        }),
+      ),
+    ).rejects.toThrow(/no user nobody/);
+    expect(() =>
+      parseStaffEnv("set-role", {
+        ...SET_ROLE,
+        STAFF_CHANGE: JSON.stringify({ username: "Ada_R", role: "system" }),
+      }),
+    ).toThrow(/STAFF_CHANGE/);
     expect(await t.db.select().from(auditLog)).toEqual([]);
   });
 });

@@ -12,6 +12,10 @@ name: Staff action (staging)
 # - insert: a driver the provider left out of a session. change = {"session":
 #   "qualifying", "driver": "<driver>", "team": "<team>", "car": <n>,
 #   "position": <n> | null, "classification": "classified"}
+# - set-role: a user's role. change = {"username": "<username>", "role":
+#   "user" | "moderator" | "admin"}. No event (leave it empty). It refuses
+#   `system` and demoting the last admin, and signs the user out everywhere.
+#   The output shows only the username and the role change.
 # Keys are Jolpica's (`ocon`, `haas`); event is `season/round`. A dry run by
 # default. Every write is audited with the reason and the login of whoever
 # started the run. Run the deploy first: this does not migrate.
@@ -21,11 +25,11 @@ on:
       command:
         description: The action
         type: choice
-        options: [substitute, seats, override, insert]
+        options: [substitute, seats, override, insert, set-role]
       event:
-        description: Event as season/round, e.g. 2026/19
+        description: Event as season/round, e.g. 2026/19 (empty for set-role)
         type: string
-        required: true
+        required: false
       change:
         description: The change, as JSON (see the top of this workflow)
         type: string

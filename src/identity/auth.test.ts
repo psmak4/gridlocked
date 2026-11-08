@@ -110,25 +110,20 @@ describe("Better Auth on the real tables", () => {
     }
   });
 
-  it("an admin path other than impersonation is 404 over HTTP", async () => {
+  it("every admin path is 404 over HTTP", async () => {
     for (const path of [
       "/admin/set-role",
       "/admin/ban-user",
       "/admin/create-user",
       "/admin/remove-user",
       "/admin/set-user-password",
-    ]) {
-      const response = await auth.handler(authPost(path, {}));
-      expect(response.status, path).toBe(404);
-    }
-    // The two impersonation paths stay routed: they refuse (no admin session)
-    // rather than answering 404.
-    for (const path of [
+      // Impersonation too: only `startImpersonation` and `stopImpersonating`
+      // reach these, through `auth.api`, with the two-step and the audit.
       "/admin/impersonate-user",
       "/admin/stop-impersonating",
     ]) {
       const response = await auth.handler(authPost(path, {}));
-      expect(response.status, path).not.toBe(404);
+      expect(response.status, path).toBe(404);
     }
   });
 
@@ -173,8 +168,8 @@ describe("Better Auth on the real tables", () => {
   });
 
   it("an impersonation session records the admin's uuid", async () => {
-    // The one admin route left over HTTP, and the one column that is a uuid
-    // foreign key here where Better Auth says string.
+    // The one column that is a uuid foreign key here where Better Auth says
+    // string. Called through `auth.api`, as `startImpersonation` does.
     await auth.handler(signUpRequest("boss@example.test"));
     await auth.handler(signUpRequest("ada@example.test"));
     const byEmail = async (email: string) =>
@@ -192,14 +187,10 @@ describe("Better Auth on the real tables", () => {
         password: PASSWORD,
       }),
     );
-    const response = await auth.handler(
-      authPost(
-        "/admin/impersonate-user",
-        { userId: ada.id },
-        { cookie: cookieHeader(signIn) },
-      ),
-    );
-    expect(response.status).toBe(200);
+    await auth.api.impersonateUser({
+      body: { userId: ada.id },
+      headers: new Headers({ cookie: cookieHeader(signIn) }),
+    });
     const rows = await t.db
       .select()
       .from(authSessions)
@@ -253,16 +244,16 @@ describe("Better Auth on the real tables", () => {
     expect(logged.join("\n")).not.toContain(address);
   });
 
-  it("closes every admin endpoint but the two impersonation ones", () => {
-    expect(DISABLED_AUTH_PATHS).not.toContain("/admin/impersonate-user");
-    expect(DISABLED_AUTH_PATHS).not.toContain("/admin/stop-impersonating");
+  it("closes every admin endpoint over HTTP", () => {
+    expect(DISABLED_AUTH_PATHS).toContain("/admin/impersonate-user");
+    expect(DISABLED_AUTH_PATHS).toContain("/admin/stop-impersonating");
     expect(DISABLED_AUTH_PATHS).toContain("/admin/set-role");
     expect(DISABLED_AUTH_PATHS).toContain("/delete-user");
     expect(DISABLED_AUTH_PATHS).toContain("/sign-in/username");
     expect(DISABLED_AUTH_PATHS).toContain("/is-username-available");
     expect(
       DISABLED_AUTH_PATHS.filter((p) => p.startsWith("/admin/")).length,
-    ).toBe(13);
+    ).toBe(15);
   });
 });
 
