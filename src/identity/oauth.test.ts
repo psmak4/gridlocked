@@ -2,7 +2,11 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
+  authPost,
+  clickLink,
   cookieHeader,
+  linkIn,
+  recordingSender,
   signUpRequest,
   TEST_NOW,
   testAuth,
@@ -10,7 +14,13 @@ import {
   type TestAuth,
 } from "../../tests/helpers/auth";
 import { signInWithDiscord } from "../../tests/helpers/discord";
-import { authAccounts, profiles, users } from "@/db/schema";
+import {
+  auditLog,
+  authAccounts,
+  authSessions,
+  profiles,
+  users,
+} from "@/db/schema";
 import { handleAuth } from "@/server/auth-handler";
 import { getViewer, type SessionDeps } from "@/server/session";
 import { canPost, IdentityError } from "./viewer";
@@ -120,6 +130,19 @@ describe("Discord sign-in", () => {
     expect(await people()).toHaveLength(1);
   });
 
+  it("an unverified Discord email can't link to an unverified local account", async () => {
+    await localAccount("both@example.test", false);
+
+    const response = await signInWithDiscord(auth, fetchStub, {
+      id: "1007",
+      email: "both@example.test",
+      verified: false,
+    });
+    expect(hasSession(response)).toBe(false);
+    expect(await discordAccounts()).toHaveLength(0);
+    expect(await people()).toHaveLength(1);
+  });
+
   it("a brand-new Discord user with an unverified email has email_verified false", async () => {
     const response = await signInWithDiscord(auth, fetchStub, {
       id: "1004",
@@ -187,5 +210,138 @@ describe("Discord sign-in", () => {
       }),
     );
     expect(response.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("a Discord sign-in made before the address was proved", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let auth: TestAuth;
+  let mail: ReturnType<typeof recordingSender>;
+  let fetchStub: ReturnType<typeof vi.fn<typeof fetch>>;
+  const VICTIM = "victim@example.test";
+  const attacker = { id: "6666", email: VICTIM, verified: false };
+  const victim = async () =>
+    (await t.db.select().from(users).where(eq(users.email, VICTIM)))[0]!;
+  const discordAccounts = async () =>
+    (await t.db.select().from(authAccounts)).filter(
+      (a) => a.providerId === "discord",
+    );
+  const hasSession = (response: Response) =>
+    response.headers.getSetCookie().some((c) => c.includes("session_token"));
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    mail = recordingSender();
+    auth = testAuth(t.db, { env: { discord: DISCORD }, sender: mail.sender });
+    fetchStub = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchStub);
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await t.close();
+  });
+
+  /** The attacker signs in with Discord on the victim's address. */
+  const squat = async () => {
+    const response = await signInWithDiscord(auth, fetchStub, attacker);
+    expect(hasSession(response)).toBe(true);
+    const row = await victim();
+    expect(row.emailVerified).toBe(false);
+    expect(await discordAccounts()).toHaveLength(1);
+    return row;
+  };
+
+  const attackAgain = async (squatterId: string) => {
+    const response = await signInWithDiscord(auth, fetchStub, attacker);
+    // Refused, or a different user: never the victim's account.
+    expect(hasSession(response)).toBe(false);
+    expect(await discordAccounts()).toHaveLength(0);
+    const sessions = await t.db.select().from(authSessions);
+    expect(sessions.filter((s) => s.userId === squatterId)).toHaveLength(
+      sessions.length,
+    );
+  };
+
+  it("a Discord squat on an unverified address is removed when the owner verifies by email", async () => {
+    const squatted = await squat();
+    // The owner is mailed a link (at sign-up, or when they ask for one).
+    if (!mail.last(VICTIM, "Confirm your email")) {
+      await auth.handler(
+        authPost(
+          "/send-verification-email",
+          { email: VICTIM },
+          { "x-forwarded-for": "203.0.113.50" },
+        ),
+      );
+    }
+    const link = linkIn(mail.last(VICTIM, "Confirm your email"));
+    const verified = await auth.handler(clickLink(link));
+    expect(verified.status).toBeLessThan(400);
+
+    expect((await victim()).emailVerified).toBe(true);
+    expect(await discordAccounts()).toHaveLength(0);
+    // The only session left is the one the verification made.
+    const sessions = await t.db.select().from(authSessions);
+    expect(sessions).toHaveLength(1);
+    expect(hasSession(verified)).toBe(true);
+    const audit = (await t.db.select().from(auditLog)).filter(
+      (r) => r.action === "user.accounts.revoke_unproven",
+    );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      entityId: squatted.id,
+      after: { count: 1, providers: ["discord"] },
+    });
+    expect(JSON.stringify(audit)).not.toContain(VICTIM);
+
+    await attackAgain(squatted.id);
+  });
+
+  it("a Discord squat is removed when the owner resets the password instead", async () => {
+    const squatted = await squat();
+    await auth.handler(
+      authPost(
+        "/request-password-reset",
+        { email: VICTIM },
+        { "x-forwarded-for": "203.0.113.51" },
+      ),
+    );
+    const token = new URL(linkIn(mail.last(VICTIM, "Reset your"))).pathname
+      .split("/")
+      .pop()!;
+    const reset = await auth.handler(
+      authPost("/reset-password", {
+        newPassword: "the owner's new password",
+        token,
+      }),
+    );
+    expect(reset.status).toBe(200);
+
+    expect(await discordAccounts()).toHaveLength(0);
+    expect(await t.db.select().from(authSessions)).toHaveLength(0);
+    await attackAgain(squatted.id);
+  });
+
+  it("a genuine verified Discord link survives a later password reset", async () => {
+    await signInWithDiscord(auth, fetchStub, { ...attacker, verified: true });
+    expect((await victim()).emailVerified).toBe(true);
+
+    await auth.handler(
+      authPost(
+        "/request-password-reset",
+        { email: VICTIM },
+        { "x-forwarded-for": "203.0.113.52" },
+      ),
+    );
+    const token = new URL(linkIn(mail.last(VICTIM, "Reset your"))).pathname
+      .split("/")
+      .pop()!;
+    await auth.handler(
+      authPost("/reset-password", {
+        newPassword: "the owner's new password",
+        token,
+      }),
+    );
+    expect(await discordAccounts()).toHaveLength(1);
   });
 });

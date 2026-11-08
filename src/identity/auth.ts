@@ -16,8 +16,9 @@ import {
 } from "better-auth/api";
 import { admin, captcha, magicLink } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import * as schema from "@/db/schema";
-import { profiles } from "@/db/schema";
+import { authAccounts, authSessions, profiles, users } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { writeAudit } from "@/audit/log";
 import { newId } from "@/lib/ids";
@@ -148,6 +149,74 @@ function auditUserChange(
   });
 }
 
+/**
+ * Better Auth's magic link strips every link and session an unverified account
+ * gathered before its address was proved (revokeUnprovenAccountAccess); a
+ * verification link or a reset does not. Without this, someone who signed in
+ * with Discord on an address they don't own (Discord allows an unverified
+ * email) keeps that way in after the owner proves the address. Credentials
+ * stay: a reset or sign-up password is the owner's to choose. Call it while
+ * the account is still unverified.
+ */
+async function revokeUnprovenSignIns(
+  db: Db,
+  now: Date,
+  userId: string,
+): Promise<void> {
+  const linked = await db
+    .select({ id: authAccounts.id, providerId: authAccounts.providerId })
+    .from(authAccounts)
+    .where(
+      and(
+        eq(authAccounts.userId, userId),
+        ne(authAccounts.providerId, "credential"),
+      ),
+    );
+  if (linked.length === 0) return;
+  await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    await t.delete(authAccounts).where(
+      inArray(
+        authAccounts.id,
+        linked.map((a) => a.id),
+      ),
+    );
+    await t.delete(authSessions).where(eq(authSessions.userId, userId));
+    await writeAudit(t, now, {
+      actorUserId: null,
+      actorKind: "system",
+      actorLabel: "email proof",
+      action: "user.accounts.revoke_unproven",
+      entityType: "user",
+      entityId: userId,
+      before: null,
+      after: {
+        count: linked.length,
+        providers: linked.map((a) => a.providerId),
+      },
+      reason: null,
+      requestId: null,
+    });
+  });
+}
+
+/** The claims of a verification token, read without checking it: Better Auth checks it, and the caller checks the outcome. */
+function tokenClaims(
+  token: unknown,
+): { email?: string; updateTo?: string; requestType?: string } | null {
+  if (typeof token !== "string") return null;
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const claims: unknown = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    );
+    return typeof claims === "object" && claims !== null ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createAuth(db: Db, deps: AuthDeps) {
   const { env, now, sender } = deps;
   // Sign-up calls its email callback inside its transaction. The outbox
@@ -185,6 +254,12 @@ export function createAuth(db: Db, deps: AuthDeps) {
         },
       },
     );
+  // Verification tokens of email changes in flight on this request, by token.
+  const changesInFlight = new Set<string>();
+  const hostnames = (() => {
+    const hosts = env.baseUrl ? [new URL(env.baseUrl).hostname] : [];
+    return env.local ? [...hosts, "localhost", "127.0.0.1"] : hosts;
+  })();
   return betterAuth({
     secret: env.secret,
     logger: { log: logAuthEvent },
@@ -235,6 +310,10 @@ export function createAuth(db: Db, deps: AuthDeps) {
         await mail(user.email, "password_reset", url, EMAIL_LINK_SECONDS);
       },
       onPasswordReset: async ({ user }) => {
+        // `user` is as it was before the reset.
+        if (!user.emailVerified) {
+          await revokeUnprovenSignIns(db, now(), user.id);
+        }
         await auditUserChange(db, now(), "user.password.update", user.id);
       },
     },
@@ -242,6 +321,11 @@ export function createAuth(db: Db, deps: AuthDeps) {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       expiresIn: EMAIL_LINK_SECONDS,
+      // Runs only for an unverified account, before it is marked verified and
+      // before the sign-in this link makes.
+      beforeEmailVerification: async (user) => {
+        await revokeUnprovenSignIns(db, now(), user.id);
+      },
       sendVerificationEmail: async ({ user, url }) => {
         await mail(user.email, "verify_email", url, EMAIL_LINK_SECONDS);
       },
@@ -271,6 +355,13 @@ export function createAuth(db: Db, deps: AuthDeps) {
       // The same refusal as sign-up, so a reply says nothing about whether
       // an account exists and carries no address.
       before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/verify-email") {
+          const claims = tokenClaims(ctx.query?.token);
+          if (claims?.requestType === "change-email-verification") {
+            changesInFlight.add(String(ctx.query?.token));
+          }
+          return;
+        }
         const field = ADDRESS_FIELD[ctx.path];
         const body: unknown = ctx.body;
         if (!field || typeof body !== "object" || body === null) return;
@@ -280,17 +371,54 @@ export function createAuth(db: Db, deps: AuthDeps) {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        const returned = ctx.context.returned;
+        // A redirect is a success or a failure by where it goes; the checks
+        // below read the outcome from the database instead.
+        if (
+          returned instanceof APIError &&
+          Number(returned.statusCode) >= 400
+        ) {
+          return;
+        }
+        if (ctx.path === "/verify-email") {
+          // The new address confirmed: the change takes effect here.
+          const token = String(ctx.query?.token);
+          if (!changesInFlight.delete(token)) return;
+          const claims = tokenClaims(token);
+          if (!claims?.updateTo) return;
+          const [row] = await db
+            .select({ id: users.id, email: users.email })
+            .from(users)
+            .where(eq(users.email, claims.updateTo.toLowerCase()));
+          if (!row) return;
+          await auditUserChange(db, now(), "user.email.update", row.id, {
+            before: { email: claims.email },
+            after: { email: claims.updateTo, stage: "applied", applied: true },
+          });
+          return;
+        }
         const changesEmail = ctx.path === "/change-email";
         if (!changesEmail && ctx.path !== "/change-password") return;
-        if (ctx.context.returned instanceof Error) return;
         const session = await getSessionFromCtx(ctx);
         if (!session) return;
         const { user } = session;
         if (changesEmail) {
+          // What happened, read back: a new address that already belongs to
+          // someone changes nothing, and a confirmed account waits for the
+          // new address.
+          const newEmail = String(ctx.body.newEmail).toLowerCase();
+          const [row] = await db
+            .select({ email: users.email })
+            .from(users)
+            .where(eq(users.id, user.id));
+          const applied = row?.email === newEmail;
           await auditUserChange(db, now(), "user.email.update", user.id, {
             before: { email: user.email },
-            // `applied` is false while the new address is yet to confirm.
-            after: { email: ctx.body.newEmail, applied: !user.emailVerified },
+            after: {
+              email: newEmail,
+              stage: applied ? "applied" : "requested",
+              applied,
+            },
           });
           if (user.emailVerified) {
             const origin = new URL(ctx.context.baseURL).origin;
@@ -343,6 +471,9 @@ export function createAuth(db: Db, deps: AuthDeps) {
               provider: "cloudflare-turnstile",
               secretKey: env.turnstileSecret,
               endpoints: CAPTCHA_PATHS,
+              // The widget reports where it ran; a token earned elsewhere
+              // fails.
+              allowedHostnames: hostnames,
             }),
           ]
         : []),

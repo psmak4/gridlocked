@@ -28,11 +28,13 @@ describe("Turnstile", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
   let auth: TestAuth;
   let fetchStub: ReturnType<typeof vi.fn<typeof fetch>>;
-  const verified = (success: boolean) =>
+  const verified = (success: boolean, hostname = "localhost") =>
     fetchStub.mockImplementation(async (input) => {
       expect(String(input)).toBe(SITEVERIFY);
       return Response.json(
-        success ? { success: true } : { success: false, "error-codes": ["x"] },
+        success
+          ? { success: true, hostname }
+          : { success: false, "error-codes": ["x"] },
       );
     });
   const people = async () =>
@@ -72,6 +74,15 @@ describe("Turnstile", () => {
     });
   });
 
+  it("a token earned on another hostname is refused", async () => {
+    verified(true, "elsewhere.example");
+    const response = await auth.handler(
+      signUpRequest("ada@example.test", {}, { "x-captcha-response": "other" }),
+    );
+    expect(response.status).toBe(403);
+    expect(await people()).toHaveLength(0);
+  });
+
   it("a bad one is refused", async () => {
     verified(false);
     const response = await auth.handler(
@@ -100,7 +111,7 @@ describe("Turnstile", () => {
     const response = await pending;
     vi.useRealTimers();
 
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBe(500);
     expect(response.headers.getSetCookie()).toHaveLength(0);
     expect(await people()).toHaveLength(0);
   });

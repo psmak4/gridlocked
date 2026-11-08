@@ -6,6 +6,7 @@ import {
   clickLink,
   cookieHeader,
   linkIn,
+  PASSWORD,
   recordingSender,
   signUpRequest,
   testAuth,
@@ -95,5 +96,101 @@ describe("changing the email address", () => {
     expect(text).not.toContain(OLD);
     expect(text).not.toContain(NEW);
     expect(text).toContain("[redacted]");
+  });
+
+  it("a verified address change is audited when the new address confirms", async () => {
+    await t.db
+      .update(users)
+      .set({ emailVerified: true })
+      .where(eq(users.id, adaId));
+    await change();
+    const rows = () =>
+      t.db
+        .select()
+        .from(auditLog)
+        .then((all) => all.filter((r) => r.action === "user.email.update"));
+    expect((await rows())[0]?.after).toMatchObject({
+      stage: "requested",
+      applied: false,
+    });
+
+    await auth.handler(
+      clickLink(linkIn(mail.last(NEW, "Confirm your email")), cookie),
+    );
+    const all = await rows();
+    expect(all).toHaveLength(2);
+    expect(all[1]).toMatchObject({
+      actorKind: "user",
+      actorUserId: adaId,
+      entityId: adaId,
+      after: { stage: "applied", applied: true },
+    });
+    const text = JSON.stringify(all);
+    expect(text).not.toContain(OLD);
+    expect(text).not.toContain(NEW);
+  });
+
+  it("an address that belongs to someone else changes nothing, and the audit says so", async () => {
+    await auth.handler(signUpRequest("taken@example.test"));
+    const response = await auth.handler(
+      authPost("/change-email", { newEmail: "taken@example.test" }, { cookie }),
+    );
+    expect(response.status).toBe(200);
+    expect((await ada()).email).toBe(OLD);
+    const rows = (await t.db.select().from(auditLog)).filter(
+      (r) => r.action === "user.email.update",
+    );
+    expect(rows[0]?.after).toMatchObject({
+      stage: "requested",
+      applied: false,
+    });
+  });
+
+  it("a .invalid address is refused", async () => {
+    const response = await auth.handler(
+      authPost(
+        "/change-email",
+        { newEmail: "ghost@example.invalid" },
+        { cookie },
+      ),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain("ghost@example.invalid");
+    expect((await ada()).email).toBe(OLD);
+  });
+
+  it("changing the password is audited without the passwords", async () => {
+    const response = await auth.handler(
+      authPost(
+        "/change-password",
+        { currentPassword: PASSWORD, newPassword: "another long password" },
+        { cookie },
+      ),
+    );
+    expect(response.status).toBe(200);
+    const rows = (await t.db.select().from(auditLog)).filter(
+      (r) => r.action === "user.password.update",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ actorUserId: adaId, entityId: adaId });
+    expect(JSON.stringify(rows)).not.toContain("another long password");
+  });
+
+  it("a password reset is audited", async () => {
+    await auth.handler(authPost("/request-password-reset", { email: OLD }));
+    const token = new URL(linkIn(mail.last(OLD, "Reset your"))).pathname
+      .split("/")
+      .pop()!;
+    await auth.handler(
+      authPost("/reset-password", {
+        newPassword: "a brand new password",
+        token,
+      }),
+    );
+    const rows = (await t.db.select().from(auditLog)).filter(
+      (r) => r.action === "user.password.update",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ actorUserId: adaId, entityId: adaId });
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -321,6 +322,9 @@ describe("magic link, verification and reset", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.identifier).toMatch(/^magic-link:/);
     expect(rows[0]!.identifier).not.toContain(token);
+    // Better Auth's own hash: SHA-256 of the token, base64url, no padding.
+    const hash = createHash("sha256").update(token).digest("base64url");
+    expect(rows[0]!.identifier).toBe(`magic-link:${hash}`);
     // And it still works: the hash is of the token in the link.
     expect(hasSession(await auth.handler(clickLink(link.toString())))).toBe(
       true,
