@@ -21,6 +21,7 @@ import {
   teamAdjustmentLines,
   teamBaseLines,
   teamEventStates,
+  teamEventTotals,
 } from "@/db/schema";
 import { seedUser } from "../../tests/helpers/users";
 import { SYSTEM_USER_ID } from "@/identity/system";
@@ -29,11 +30,12 @@ import { addOverride } from "@/results/overrides";
 import { scoreSession } from "@/scoring/engine";
 import { SCORING_RULES_2026 } from "@/scoring/rules";
 import type { StaffActor } from "@/staff/roster";
-import { setSessionException } from "./cancellations";
+import { clearSessionException, setSessionException } from "./cancellations";
 import { playChip, saveFinalFix } from "./chips";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { RULESET_2026 } from "./ruleset";
 import {
+  failRun,
   finishRun,
   inputFingerprint,
   startRun,
@@ -41,6 +43,7 @@ import {
   writeTeamAdjustments,
 } from "./scoring-runs";
 import { createTeam } from "./teams";
+import { recomputeTotals } from "./totals";
 
 // Scoring runs and the two-tier ledger (DM 4.1-4.3) over the recorded 2026
 // game: five teams locked into round 1 (Australia), whose recorded race is
@@ -179,6 +182,24 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
     return complete(started.runId);
   };
 
+  /** Rebuilds the totals, and returns each team's points for round 1. */
+  const published = async () => {
+    await recomputeTotals(t.db, scoredAt, {
+      gameId,
+      fromEventId: round1.id,
+    });
+    return new Map(
+      (
+        await t.db
+          .select({
+            teamId: teamEventTotals.teamId,
+            points: teamEventTotals.points,
+          })
+          .from(teamEventTotals)
+          .where(eq(teamEventTotals.eventId, round1.id))
+      ).map((row) => [row.teamId, row.points]),
+    );
+  };
   const runOf = async (runId: string) =>
     (
       await t.db.select().from(scoringRuns).where(eq(scoringRuns.id, runId))
@@ -442,6 +463,7 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
 
   it("an override changes the fingerprint and re-scores", async () => {
     const first = await score(race1.id);
+    await published();
     await addOverride(t.db, scoredAt, {
       sessionId: race1.id,
       driverId: await driverOf("norris"),
@@ -492,6 +514,7 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
 
   it("a skip exception leaves the session with no lines", async () => {
     await score(race1.id);
+    await published();
     const before = await nonZero(race1.id);
     await setSessionException(t.db, scoredAt, {
       gameId,
@@ -731,6 +754,7 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
 
   it("re-scoring is idempotent", async () => {
     const first = await score(race1.id);
+    await published();
     /** Each row without its own id and its run's. */
     const strip = <T extends { id?: string; runId?: string }>(rows: T[]) =>
       rows.map((row) => {
@@ -804,6 +828,231 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
     await finishRun(t.db, scoredAt, runId);
     expect((await runOf(runId)).diffSummary).toMatchObject({
       teamsChanged: 5,
+    });
+  });
+
+  describe("a run's diff compares with what was published", () => {
+    type Diff = {
+      previousRunId: string | null;
+      assetsChanged: number;
+      teamsChanged: number;
+      biggest: { kind: string; id: string; before: number; after: number }[];
+      assets: { assetId: string; before: number; after: number }[];
+    };
+    const diffOf = async (runId: string) =>
+      (await runOf(runId)).diffSummary as Diff;
+    const fastestLap = async (key: string) =>
+      patch(key, { fastest_lap_rank: 1 });
+    const classify = async (key: string) =>
+      patch(key, { classification: "classified", position: 3 });
+    const patch = async (
+      key: string,
+      fields: Parameters<typeof addOverride>[2]["fields"],
+    ) =>
+      addOverride(t.db, scoredAt, {
+        sessionId: race1.id,
+        driverId: await driverOf(key),
+        kind: "patch",
+        fields,
+        reason: "Stewards: lap time reinstated",
+        createdBy: SYSTEM_USER_ID,
+      });
+    /** A run that wrote its asset lines and stopped there. */
+    const writeThenStop = async (trigger: Run["trigger"] = "override") => {
+      const started = await start(race1.id, { trigger });
+      if (!("runId" in started)) throw new Error("the run was skipped");
+      expect(await writeAssetLines(t.db, scoredAt, started.runId)).toBe(
+        "written",
+      );
+      return started.runId;
+    };
+    const assetOf = (diff: Diff, assetId: string) =>
+      diff.assets.find((a) => a.assetId === assetId);
+    /** Every team's change is its new points less the published ones. */
+    const expectTeamChanges = async (
+      runId: string,
+      before: Map<string, number>,
+    ) => {
+      const after = await published();
+      const diff = await diffOf(runId);
+      let changed = 0;
+      for (const [teamId, points] of after) {
+        const was = before.get(teamId) ?? 0;
+        if (points === was) continue;
+        changed += 1;
+        expect(diff.biggest).toContainEqual(
+          expect.objectContaining({
+            kind: "team",
+            id: teamId,
+            before: was,
+            after: points,
+            change: points - was,
+          }),
+        );
+      }
+      expect(changed).toBeGreaterThan(0);
+      expect(diff.teamsChanged).toBe(changed);
+    };
+
+    it("a superseded run's lines don't hide the change", async () => {
+      const a = await score(race1.id);
+      const norris = await game.assetId("norris");
+      const hulkenberg = await game.assetId("hulkenberg");
+      const totals = await totalsFromLines(race1.id);
+      const [n, p] = [totals.get(norris)!, totals.get(hulkenberg) ?? 0];
+      const was = await published();
+
+      await fastestLap("norris");
+      const b = await writeThenStop();
+      await classify("hulkenberg");
+      const c = await score(race1.id, { trigger: "override" });
+
+      expect((await runOf(b)).status).not.toBe("succeeded");
+      const diff = await diffOf(c);
+      expect(diff.previousRunId).toBe(a);
+      expect(assetOf(diff, norris)).toEqual({
+        assetId: norris,
+        before: n,
+        after: n + 10,
+      });
+      const after = (await totalsFromLines(race1.id)).get(hulkenberg) ?? 0;
+      expect(after).not.toBe(p);
+      expect(assetOf(diff, hulkenberg)).toEqual({
+        assetId: hulkenberg,
+        before: p,
+        after,
+      });
+      await expectTeamChanges(c, was);
+    });
+
+    it("the same after a failed run", async () => {
+      const a = await score(race1.id);
+      const norris = await game.assetId("norris");
+      const n = (await totalsFromLines(race1.id)).get(norris)!;
+      const was = await published();
+
+      await fastestLap("norris");
+      const b = await writeThenStop();
+      await failRun(t.db, scoredAt, b);
+      await classify("hulkenberg");
+      const c = await score(race1.id, { trigger: "override" });
+
+      expect((await runOf(b)).status).toBe("failed");
+      const diff = await diffOf(c);
+      expect(diff.previousRunId).toBe(a);
+      expect(assetOf(diff, norris)).toEqual({
+        assetId: norris,
+        before: n,
+        after: n + 10,
+      });
+      await expectTeamChanges(c, was);
+    });
+
+    it("a chain of two superseded runs still reaches the published figure", async () => {
+      const a = await score(race1.id);
+      const norris = await game.assetId("norris");
+      const n = (await totalsFromLines(race1.id)).get(norris)!;
+      const was = await published();
+
+      await fastestLap("norris");
+      await writeThenStop();
+      await classify("hulkenberg");
+      await writeThenStop();
+      await fastestLap("hadjar");
+      const d = await score(race1.id, { trigger: "override" });
+
+      const diff = await diffOf(d);
+      expect(diff.previousRunId).toBe(a);
+      expect(assetOf(diff, norris)).toEqual({
+        assetId: norris,
+        before: n,
+        after: n + 10,
+      });
+      await expectTeamChanges(d, was);
+    });
+
+    it("an ordinary second run reports what it did before", async () => {
+      await score(race1.id);
+      const hulkenberg = await game.assetId("hulkenberg");
+      const p = (await totalsFromLines(race1.id)).get(hulkenberg) ?? 0;
+      await fastestLap("norris");
+      const b = await score(race1.id, { trigger: "override" });
+      const was = await published();
+
+      await classify("hulkenberg");
+      const c = await score(race1.id, { trigger: "override" });
+
+      const diff = await diffOf(c);
+      expect(diff.previousRunId).toBe(b);
+      expect(assetOf(diff, await game.assetId("norris"))).toBeUndefined();
+      const after = (await totalsFromLines(race1.id)).get(hulkenberg) ?? 0;
+      expect(after).not.toBe(p);
+      expect(assetOf(diff, hulkenberg)).toEqual({
+        assetId: hulkenberg,
+        before: p,
+        after,
+      });
+      await expectTeamChanges(c, was);
+    });
+
+    it("a run that ends where the published figure was reports no change", async () => {
+      const a = await score(race1.id);
+      await published();
+      await setSessionException(t.db, scoredAt, {
+        gameId,
+        sessionId: race1.id,
+        policy: "skip",
+        reason: "Race voided",
+        actor: ACTOR,
+      });
+      const b = await writeThenStop("exception");
+      expect(await linesOf(race1.id)).toEqual([]);
+      await clearSessionException(t.db, scoredAt, {
+        gameId,
+        sessionId: race1.id,
+        reason: "Race stands",
+        actor: ACTOR,
+      });
+      const c = await score(race1.id, { trigger: "exception" });
+
+      expect((await runOf(b)).status).not.toBe("succeeded");
+      expect(await diffOf(c)).toEqual({
+        previousRunId: a,
+        assetsChanged: 0,
+        teamsChanged: 0,
+        biggest: [],
+        assets: [],
+      });
+    });
+
+    it("a dry run still writes no lines", async () => {
+      const a = await score(race1.id);
+      const norris = await game.assetId("norris");
+      const n = (await totalsFromLines(race1.id)).get(norris)!;
+      await published();
+      await fastestLap("norris");
+      const b = await writeThenStop();
+      const linesBefore = await linesOf(race1.id);
+
+      const dry = await startRun(t.db, scoredAt, {
+        gameId,
+        sessionId: race1.id,
+        trigger: "admin",
+        mode: "dry_run",
+      });
+      if (!("runId" in dry)) throw new Error("the run was skipped");
+      expect(await writeAssetLines(t.db, scoredAt, dry.runId)).toBe("written");
+
+      expect(await linesOf(race1.id)).toEqual(linesBefore);
+      expect(await runOf(dry.runId)).toMatchObject({ isCurrent: false });
+      expect(await runOf(b)).toMatchObject({ isCurrent: true });
+      const diff = await diffOf(dry.runId);
+      expect(diff.previousRunId).toBe(a);
+      expect(assetOf(diff, norris)).toEqual({
+        assetId: norris,
+        before: n,
+        after: n + 10,
+      });
     });
   });
 });

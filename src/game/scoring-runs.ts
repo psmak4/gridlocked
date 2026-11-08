@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import {
   and,
   asc,
+  desc,
   eq,
   getTableColumns,
   gt,
   inArray,
   isNotNull,
   lt,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -270,6 +272,16 @@ async function assetStep(
           )
       ).map((row) => [row.assetId, row.points]),
     );
+    // The current lines are only what was published when the current run
+    // finished. One that didn't (superseded, failed, or stopped mid-way)
+    // recorded what it replaced, and that goes back to the published figure.
+    if (previous && previous.status !== "succeeded") {
+      const { diffSummary } = await loadRun(tx, previous.id);
+      for (const a of diffSchema.parse(diffSummary).assets) {
+        before.set(a.assetId, a.before);
+      }
+    }
+    const published = await publishedRun(tx, run);
     const after = assetTotals(lines);
     const assets = [...new Set([...before.keys(), ...after.keys()])]
       .sort(byText)
@@ -280,7 +292,7 @@ async function assetStep(
       }))
       .filter((a) => a.before !== a.after);
     const diff: DiffSummary = {
-      previousRunId: previous?.id ?? null,
+      previousRunId: published?.id ?? null,
       assetsChanged: assets.length,
       teamsChanged: 0,
       biggest: biggestOf(
@@ -399,30 +411,26 @@ export async function writeTeamAdjustments(
 
     const ledger = await eventLedger(tx, gameId, eventId);
     const inputs = await teamInputs(tx, ledger, eventId, batch);
-    const oldPoints = new Map<string, number>();
-    for (const line of await tx
-      .select({
-        teamId: teamAdjustmentLines.teamId,
-        points: teamAdjustmentLines.points,
-      })
-      .from(teamAdjustmentLines)
-      .where(
-        and(
-          eq(teamAdjustmentLines.eventId, eventId),
-          inArray(teamAdjustmentLines.teamId, teamIds),
-        ),
-      )) {
-      oldPoints.set(
-        line.teamId,
-        (oldPoints.get(line.teamId) ?? 0) + line.points,
-      );
-    }
+    // What the team's event total stood at: only a finished run moves it.
+    const published = new Map(
+      (
+        await tx
+          .select({
+            teamId: teamEventTotals.teamId,
+            points: teamEventTotals.points,
+          })
+          .from(teamEventTotals)
+          .where(
+            and(
+              eq(teamEventTotals.eventId, eventId),
+              inArray(teamEventTotals.teamId, teamIds),
+            ),
+          )
+      ).map((row) => [row.teamId, row.points]),
+    );
 
     const diff = diffSchema.parse(run.diffSummary);
     const countedThrough = diff.teamsThrough ?? null;
-    const assetChange = new Map(
-      diff.assets.map((a) => [a.assetId, a.after - a.before]),
-    );
     const rows: (typeof teamAdjustmentLines.$inferInsert)[] = [];
     const changes: Change[] = [];
     for (const state of batch) {
@@ -443,22 +451,13 @@ export async function writeTeamAdjustments(
         });
       }
 
-      // Before this run, the scored session's assets had their previous
-      // totals and the team its previous lines.
-      const adjusted = lines.reduce((sum, l) => sum + l.points, 0);
       const after = teamEventPoints(input, lines);
-      const change =
-        effectiveLineup(input, run.sessionId).reduce(
-          (sum, pick) => sum + (assetChange.get(pick.assetId) ?? 0),
-          0,
-        ) +
-        adjusted -
-        (oldPoints.get(state.teamId) ?? 0);
+      const before = published.get(state.teamId) ?? 0;
       if (
-        change !== 0 &&
+        after !== before &&
         (countedThrough === null || state.teamId > countedThrough)
       ) {
-        changes.push(teamChange(state.teamId, after - change, after));
+        changes.push(teamChange(state.teamId, before, after));
       }
     }
 
@@ -879,6 +878,25 @@ async function loadRun(db: Db, runId: string) {
   return run;
 }
 type LoadedRun = Awaited<ReturnType<typeof loadRun>>;
+
+/** The session's latest live run that `succeeded`, other than `run` itself. */
+async function publishedRun(db: Db, run: LoadedRun) {
+  const [published] = await db
+    .select({ id: scoringRuns.id })
+    .from(scoringRuns)
+    .where(
+      and(
+        eq(scoringRuns.gameId, run.gameId),
+        eq(scoringRuns.sessionId, run.sessionId),
+        eq(scoringRuns.mode, "live"),
+        eq(scoringRuns.status, "succeeded"),
+        ne(scoringRuns.id, run.id),
+      ),
+    )
+    .orderBy(desc(scoringRuns.startedAt), desc(scoringRuns.id))
+    .limit(1);
+  return published ?? null;
+}
 
 async function currentRun(db: Db, gameId: string, sessionId: string) {
   const [run] = await db
