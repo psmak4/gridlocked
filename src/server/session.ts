@@ -68,6 +68,17 @@ const defaultDeps: SessionDeps = {
     ).now(),
 };
 
+/**
+ * Runs `fn` with the request's database and its "now" (HLD decision 20), for
+ * the server functions that read or write outside Better Auth.
+ */
+export function withRequestNow<T>(
+  fn: (db: ServerDb, now: Date) => Promise<T>,
+  deps: SessionDeps = defaultDeps,
+): Promise<T> {
+  return deps.withDb(async (db) => fn(db, await deps.now(db)));
+}
+
 /** Runs `fn` with an auth instance on this request's database. */
 export function withAuth<T>(
   fn: (auth: Auth) => Promise<T>,

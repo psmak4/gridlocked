@@ -10,8 +10,20 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthErrorRouteImport } from './routes/auth-error'
+import { Route as CheckEmailRouteImport } from './routes/check-email'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
+import { Route as LegalKindRouteImport } from './routes/legal.$kind'
+import { Route as SignUpIndexRouteImport } from './routes/sign-up.index'
+import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
+import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
+import { Route as WelcomeFavoritesRouteImport } from './routes/welcome.favorites'
+import { Route as WelcomeSpoilersRouteImport } from './routes/welcome.spoilers'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
+import { Route as ApiTestBanRouteImport } from './routes/api/test.ban'
 import { Route as ApiTestEmailsRouteImport } from './routes/api/test.emails'
 
 const IndexRoute = IndexRouteImport.update({
@@ -19,14 +31,74 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthErrorRoute = AuthErrorRouteImport.update({
+  id: '/auth-error',
+  path: '/auth-error',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CheckEmailRoute = CheckEmailRouteImport.update({
+  id: '/check-email',
+  path: '/check-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DevComponentsRoute = DevComponentsRouteImport.update({
   id: '/_dev/components',
   path: '/components',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LegalKindRoute = LegalKindRouteImport.update({
+  id: '/legal/$kind',
+  path: '/legal/$kind',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpIndexRoute = SignUpIndexRouteImport.update({
+  id: '/sign-up/',
+  path: '/sign-up/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpEmailRoute = SignUpEmailRouteImport.update({
+  id: '/sign-up/email',
+  path: '/sign-up/email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WelcomeIndexRoute = WelcomeIndexRouteImport.update({
+  id: '/welcome/',
+  path: '/welcome/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WelcomeFavoritesRoute = WelcomeFavoritesRouteImport.update({
+  id: '/welcome/favorites',
+  path: '/welcome/favorites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WelcomeSpoilersRoute = WelcomeSpoilersRouteImport.update({
+  id: '/welcome/spoilers',
+  path: '/welcome/spoilers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestBanRoute = ApiTestBanRouteImport.update({
+  id: '/api/test/ban',
+  path: '/api/test/ban',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
@@ -37,35 +109,132 @@ const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/auth-error': typeof AuthErrorRoute
+  '/check-email': typeof CheckEmailRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/sign-in': typeof SignInRoute
   '/components': typeof DevComponentsRoute
+  '/legal/$kind': typeof LegalKindRoute
+  '/sign-up/email': typeof SignUpEmailRoute
+  '/welcome/favorites': typeof WelcomeFavoritesRoute
+  '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/sign-up/': typeof SignUpIndexRoute
+  '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/auth-error': typeof AuthErrorRoute
+  '/check-email': typeof CheckEmailRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/sign-in': typeof SignInRoute
   '/components': typeof DevComponentsRoute
+  '/legal/$kind': typeof LegalKindRoute
+  '/sign-up/email': typeof SignUpEmailRoute
+  '/welcome/favorites': typeof WelcomeFavoritesRoute
+  '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/sign-up': typeof SignUpIndexRoute
+  '/welcome': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/auth-error': typeof AuthErrorRoute
+  '/check-email': typeof CheckEmailRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/sign-in': typeof SignInRoute
   '/_dev/components': typeof DevComponentsRoute
+  '/legal/$kind': typeof LegalKindRoute
+  '/sign-up/email': typeof SignUpEmailRoute
+  '/welcome/favorites': typeof WelcomeFavoritesRoute
+  '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/sign-up/': typeof SignUpIndexRoute
+  '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/components' | '/api/auth/$' | '/api/test/emails'
+  fullPaths:
+    | '/'
+    | '/auth-error'
+    | '/check-email'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/sign-in'
+    | '/components'
+    | '/legal/$kind'
+    | '/sign-up/email'
+    | '/welcome/favorites'
+    | '/welcome/spoilers'
+    | '/sign-up/'
+    | '/welcome/'
+    | '/api/auth/$'
+    | '/api/test/ban'
+    | '/api/test/emails'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/components' | '/api/auth/$' | '/api/test/emails'
-  id: '__root__' | '/' | '/_dev/components' | '/api/auth/$' | '/api/test/emails'
+  to:
+    | '/'
+    | '/auth-error'
+    | '/check-email'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/sign-in'
+    | '/components'
+    | '/legal/$kind'
+    | '/sign-up/email'
+    | '/welcome/favorites'
+    | '/welcome/spoilers'
+    | '/sign-up'
+    | '/welcome'
+    | '/api/auth/$'
+    | '/api/test/ban'
+    | '/api/test/emails'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth-error'
+    | '/check-email'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/sign-in'
+    | '/_dev/components'
+    | '/legal/$kind'
+    | '/sign-up/email'
+    | '/welcome/favorites'
+    | '/welcome/spoilers'
+    | '/sign-up/'
+    | '/welcome/'
+    | '/api/auth/$'
+    | '/api/test/ban'
+    | '/api/test/emails'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthErrorRoute: typeof AuthErrorRoute
+  CheckEmailRoute: typeof CheckEmailRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  SignInRoute: typeof SignInRoute
   DevComponentsRoute: typeof DevComponentsRoute
+  LegalKindRoute: typeof LegalKindRoute
+  SignUpEmailRoute: typeof SignUpEmailRoute
+  WelcomeFavoritesRoute: typeof WelcomeFavoritesRoute
+  WelcomeSpoilersRoute: typeof WelcomeSpoilersRoute
+  SignUpIndexRoute: typeof SignUpIndexRoute
+  WelcomeIndexRoute: typeof WelcomeIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiTestBanRoute: typeof ApiTestBanRoute
   ApiTestEmailsRoute: typeof ApiTestEmailsRoute
 }
 
@@ -78,6 +247,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth-error': {
+      id: '/auth-error'
+      path: '/auth-error'
+      fullPath: '/auth-error'
+      preLoaderRoute: typeof AuthErrorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/check-email': {
+      id: '/check-email'
+      path: '/check-email'
+      fullPath: '/check-email'
+      preLoaderRoute: typeof CheckEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_dev/components': {
       id: '/_dev/components'
       path: '/components'
@@ -85,11 +289,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevComponentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/legal/$kind': {
+      id: '/legal/$kind'
+      path: '/legal/$kind'
+      fullPath: '/legal/$kind'
+      preLoaderRoute: typeof LegalKindRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up/': {
+      id: '/sign-up/'
+      path: '/sign-up'
+      fullPath: '/sign-up/'
+      preLoaderRoute: typeof SignUpIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up/email': {
+      id: '/sign-up/email'
+      path: '/sign-up/email'
+      fullPath: '/sign-up/email'
+      preLoaderRoute: typeof SignUpEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome/': {
+      id: '/welcome/'
+      path: '/welcome'
+      fullPath: '/welcome/'
+      preLoaderRoute: typeof WelcomeIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome/favorites': {
+      id: '/welcome/favorites'
+      path: '/welcome/favorites'
+      fullPath: '/welcome/favorites'
+      preLoaderRoute: typeof WelcomeFavoritesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome/spoilers': {
+      id: '/welcome/spoilers'
+      path: '/welcome/spoilers'
+      fullPath: '/welcome/spoilers'
+      preLoaderRoute: typeof WelcomeSpoilersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/ban': {
+      id: '/api/test/ban'
+      path: '/api/test/ban'
+      fullPath: '/api/test/ban'
+      preLoaderRoute: typeof ApiTestBanRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/test/emails': {
@@ -104,8 +357,20 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthErrorRoute: AuthErrorRoute,
+  CheckEmailRoute: CheckEmailRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  SignInRoute: SignInRoute,
   DevComponentsRoute: DevComponentsRoute,
+  LegalKindRoute: LegalKindRoute,
+  SignUpEmailRoute: SignUpEmailRoute,
+  WelcomeFavoritesRoute: WelcomeFavoritesRoute,
+  WelcomeSpoilersRoute: WelcomeSpoilersRoute,
+  SignUpIndexRoute: SignUpIndexRoute,
+  WelcomeIndexRoute: WelcomeIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiTestBanRoute: ApiTestBanRoute,
   ApiTestEmailsRoute: ApiTestEmailsRoute,
 }
 export const routeTree = rootRouteImport
