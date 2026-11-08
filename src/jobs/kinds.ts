@@ -255,9 +255,14 @@ export const gameOpenRecheckKey = (
 ) =>
   `${sweep === undefined ? gameOpenKey(gameId, eventId) : gameOpenSweepKey(gameId, eventId, sweep)}:${n}`;
 
-/** The email flush carries nothing: the outbox is the state. */
-export const emailFlushPayload = z.object({});
-export type EmailFlushPayload = z.infer<typeof emailFlushPayload>;
-/** One flush per UTC hour: `at` is when it is due. */
-export const emailFlushKey = (at: Date) =>
-  `email_flush:${at.toISOString().slice(0, 13)}`;
+/**
+ * One flush per UTC hour: `at` is when it is due. A flush due part-way through
+ * an hour (a backlog the last flush did not finish) gets the minute in its key,
+ * because the queue ignores an enqueue for a key whose job already ran, and the
+ * hour's own job is the one running.
+ */
+export const emailFlushKey = (at: Date) => {
+  const stamp = at.toISOString();
+  const onTheHour = stamp.slice(13, 19) === ":00:00";
+  return `email_flush:${onTheHour ? stamp.slice(0, 13) : stamp.slice(0, 16)}`;
+};

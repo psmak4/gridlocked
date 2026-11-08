@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { enqueue } from "@/jobs/queue";
 import { createTestDb } from "../../../tests/helpers/test-db";
 import {
   authRateLimits,
@@ -518,14 +519,19 @@ describe("the email outbox", () => {
       expect(f.sent).toHaveLength(1);
     });
 
-    it("the flush job with no sender leaves rows queued", async () => {
+    it("the flush job with no sender leaves rows queued, but expires old ones", async () => {
       await seedQueued("a@example.test", "magic_link");
       await seedQueued("b@example.test", "verify_email");
+      await seedQueued("old@example.test", "password_reset", {
+        expiresAt: new Date(NOW.getTime() - MIN),
+      });
       const lines: string[] = [];
       const handler = createEmailFlushHandler(null, (l) => lines.push(l));
       const job = { id: "j", payload: {} } as Parameters<typeof handler>[0];
       await handler(job, { db, clock: { now: () => NOW } });
       expect(await queued()).toHaveLength(2);
+      const gone = (await rows()).find((r) => r.status === "expired");
+      expect(gone).toMatchObject({ toEmail: null, payload: {} });
       expect(lines).toHaveLength(1);
       expect(lines[0]).toContain("2");
       expect(lines[0]).not.toContain("example.test");
@@ -545,6 +551,148 @@ describe("the email outbox", () => {
         kind: "email_flush",
         runAt: new Date("2026-11-09T00:00:00Z"),
       });
+    });
+  });
+
+  describe("bounds and boundaries", () => {
+    it("a verify_email row with no expiresAt is expired and scrubbed after 24 hours, not sent", async () => {
+      await queueEmail(db, NOW, request("a@example.test"), null);
+      const [row] = await queued();
+      expect(row!.expiresAt).toEqual(new Date(NOW.getTime() + 24 * 3600_000));
+      const f = fakeSender();
+      const later = new Date(NOW.getTime() + 24 * 3600_000);
+      const result = await flushEmail(db, later, f.sender, {});
+      expect(result).toMatchObject({ sent: 0, expired: 1, left: 0 });
+      expect(f.calls()).toBe(0);
+      const [done] = await rows();
+      expect(done).toMatchObject({
+        status: "expired",
+        toEmail: null,
+        payload: {},
+      });
+    });
+
+    it("an urgent email goes at 99 sent today and is queued at 100", async () => {
+      await seedSent(99, new Date("2026-11-08T08:00:00Z"));
+      const f = fakeSender();
+      expect(
+        await queueEmail(
+          db,
+          NOW,
+          request("a@example.test", "magic_link"),
+          f.sender,
+        ),
+      ).toEqual({ status: "sent" });
+      expect(
+        await queueEmail(
+          db,
+          NOW,
+          request("b@example.test", "magic_link"),
+          f.sender,
+        ),
+      ).toEqual({ status: "queued" });
+    });
+
+    it("the month's cap goes from 2999 to 3000", async () => {
+      await seedSent(2999, new Date("2026-11-03T08:00:00Z"));
+      const f = fakeSender();
+      expect(
+        await queueEmail(
+          db,
+          NOW,
+          request("a@example.test", "magic_link"),
+          f.sender,
+        ),
+      ).toEqual({ status: "sent" });
+      expect(
+        await queueEmail(
+          db,
+          NOW,
+          request("b@example.test", "magic_link"),
+          f.sender,
+        ),
+      ).toEqual({ status: "queued" });
+    });
+
+    it("a retry after a passing failure uses the same Idempotency-Key", async () => {
+      const keys: string[] = [];
+      const f = fakeSender((m, n) => {
+        keys.push(m.idempotencyKey);
+        if (n === 1) throw new Error("boom");
+      });
+      await queueEmail(db, NOW, request("a@example.test"), f.sender);
+      await flushEmail(db, new Date("2026-11-08T11:00:00Z"), f.sender, {});
+      expect(keys).toHaveLength(2);
+      expect(keys[1]).toBe(keys[0]);
+    });
+
+    it("a sent email stays sent when the cap alert breaks", async () => {
+      await seedSent(79, new Date("2026-11-08T08:00:00Z"));
+      await db.execute(
+        sql`alter table review_items rename to review_items_gone`,
+      );
+      const f = fakeSender();
+      const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(
+          await queueEmail(
+            db,
+            NOW,
+            request("a@example.test", "magic_link"),
+            f.sender,
+          ),
+        ).toEqual({ status: "sent" });
+        expect(quiet).toHaveBeenCalledWith(
+          "email outbox: the cap alert could not be checked",
+        );
+        expect(JSON.stringify(quiet.mock.calls)).not.toContain("example.test");
+      } finally {
+        quiet.mockRestore();
+      }
+    });
+  });
+
+  describe("the next flush", () => {
+    it("a batch that hit its limit schedules the next flush within a minute, even when this hour's job is done", async () => {
+      for (let i = 0; i < 3; i++) {
+        await seedQueued(`u${i}@example.test`, "magic_link");
+      }
+      // This hour's flush job is the one now running.
+      await enqueue(db, {
+        kind: "email_flush",
+        dedupeKey: "email_flush:2026-11-08T10",
+        runAt: new Date("2026-11-08T10:00:00Z"),
+        payload: {},
+      });
+      await db.update(jobs).set({ status: "succeeded" });
+      const f = fakeSender();
+      const handler = createEmailFlushHandler(f.sender, () => {}, { limit: 2 });
+      const job = { id: "j", payload: {} } as Parameters<typeof handler>[0];
+      const at = new Date("2026-11-08T10:03:30Z");
+      await handler(job, { db, clock: { now: () => at } });
+      expect(f.sent).toHaveLength(2);
+      const pending = (await db.select().from(jobs)).filter(
+        (j) => j.status === "pending",
+      );
+      expect(pending).toHaveLength(1);
+      expect(pending[0]!.runAt).toEqual(new Date("2026-11-08T10:04:00Z"));
+      // And that flush sends the last one.
+      await handler(job, {
+        db,
+        clock: { now: () => pending[0]!.runAt },
+      });
+      expect(f.sent).toHaveLength(3);
+    });
+
+    it("a queued row always has a live flush job in a future hour", async () => {
+      const f = fakeSender(() => {
+        throw new Error("boom");
+      });
+      await queueEmail(db, NOW, request("a@example.test"), f.sender);
+      const live = (await db.select().from(jobs)).filter(
+        (j) => j.status === "pending" && j.runAt > NOW,
+      );
+      expect(live).toHaveLength(1);
     });
   });
 

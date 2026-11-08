@@ -44,6 +44,9 @@ const isUrgent = (template: EmailTemplate) =>
 /** Better Auth limits by IP; this limits by address: 3 per template in 10 minutes. */
 const ADDRESS_LIMIT = { windowSeconds: 600, max: 3 };
 
+/** Every row expires: a retry can't outlive Resend's idempotency window (~24 h). */
+const DEFAULT_LIFETIME_MS = 24 * 3_600_000;
+
 /** The advisory lock every allowance decision takes (transaction-scoped). */
 const OUTBOX_LOCK = 481_516_234_201;
 
@@ -64,6 +67,10 @@ const startOfNextMonth = (d: Date) =>
 /** The start of the next UTC hour: later than `d`, and in a different flush key. */
 const startOfNextHour = (d: Date) =>
   new Date((Math.floor(d.getTime() / 3_600_000) + 1) * 3_600_000);
+
+/** The next whole minute: soon, but never the instant the flush is running. */
+const startOfNextMinute = (d: Date) =>
+  new Date((Math.floor(d.getTime() / 60_000) + 1) * 60_000);
 
 // --- The allowance ----------------------------------------------------------
 
@@ -124,6 +131,15 @@ function blockedUntil(
     : caps.perDay - caps.reservedForUrgent;
   if (counts.usedToday >= dayLimit) return startOfNextDay(now);
   return null;
+}
+
+/** The alert is a nicety: if it fails, a sent email must not turn into an error. */
+async function alertSafely(db: Db, now: Date, caps: Caps): Promise<void> {
+  try {
+    await alertIfNear(db, now, caps);
+  } catch {
+    console.error("email outbox: the cap alert could not be checked");
+  }
 }
 
 /** Opens `email_cap_near` once per UTC day, even if an admin resolved it. */
@@ -288,7 +304,7 @@ export async function queueEmail(
     // payload differs) and does not touch `created_at`.
     await t.execute(sql`
       insert into email_outbox (id, to_email, template, payload, status, attempts, send_after, expires_at)
-      values (${id}, ${to}, ${email.template}, ${JSON.stringify(email.payload)}::jsonb, 'queued', 0, ${iso(now)}::timestamptz, ${email.expiresAt ? iso(email.expiresAt) : null}::timestamptz)
+      values (${id}, ${to}, ${email.template}, ${JSON.stringify(email.payload)}::jsonb, 'queued', 0, ${iso(now)}::timestamptz, ${iso(email.expiresAt ?? new Date(now.getTime() + DEFAULT_LIFETIME_MS))}::timestamptz)
       on conflict (lower(to_email), template) where status = 'queued'
       do update set id = excluded.id, to_email = excluded.to_email, payload = excluded.payload,
         attempts = 0, last_error = null, send_after = excluded.send_after, expires_at = excluded.expires_at`);
@@ -326,7 +342,7 @@ export async function queueEmail(
     return result.status;
   });
 
-  if (status === "sent") await alertIfNear(db, now, caps);
+  if (status === "sent") await alertSafely(db, now, caps);
   return { status };
 }
 
@@ -398,14 +414,36 @@ export async function flushEmail(
     .select({ sendAfter: emailOutbox.sendAfter })
     .from(emailOutbox)
     .where(eq(emailOutbox.status, "queued"));
-  const next = startOfNextHour(now);
   let retryAt: Date | null = null;
   for (const { sendAfter } of remaining) {
-    const at = sendAfter > now ? sendAfter : next;
+    // Due rows still here means the batch hit its limit: go again soon.
+    const at = sendAfter > now ? sendAfter : startOfNextMinute(now);
     if (!retryAt || at < retryAt) retryAt = at;
   }
-  if (result.sent > 0) await alertIfNear(db, now, caps);
+  if (result.sent > 0) await alertSafely(db, now, caps);
   return { ...result, left: remaining.length, retryAt };
+}
+
+/**
+ * Marks queued rows past `expires_at` as `expired` and scrubs them. Needs no
+ * sender, so a flush with Resend not set up still bounds how long an address
+ * is kept. Returns how many it expired.
+ */
+export async function expireEmail(db: Db, now: Date): Promise<number> {
+  return db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    await t.execute(
+      sql`select pg_advisory_xact_lock(${sql.raw(String(OUTBOX_LOCK))})`,
+    );
+    const rows = await t
+      .update(emailOutbox)
+      .set({ ...SCRUBBED, status: "expired" })
+      .where(
+        and(eq(emailOutbox.status, "queued"), lte(emailOutbox.expiresAt, now)),
+      )
+      .returning({ id: emailOutbox.id });
+    return rows.length;
+  });
 }
 
 /**
@@ -416,19 +454,23 @@ export async function flushEmail(
 export function createEmailFlushHandler(
   sender: EmailSender | null,
   log: (line: string) => void = console.log,
+  { limit }: { limit?: number } = {},
 ): JobHandler {
   return async (_job, ctx) => {
     const db = ctx.db as Db;
     const now = ctx.clock.now();
     if (!sender) {
+      const expired = await expireEmail(db, now);
       const queued = await db
         .select({ id: emailOutbox.id })
         .from(emailOutbox)
         .where(eq(emailOutbox.status, "queued"));
-      log(`email_flush: no sender configured, ${queued.length} queued`);
+      log(
+        `email_flush: no sender configured, ${queued.length} queued, ${expired} expired`,
+      );
       return;
     }
-    const { retryAt, ...counts } = await flushEmail(db, now, sender, {});
+    const { retryAt, ...counts } = await flushEmail(db, now, sender, { limit });
     if (retryAt) {
       await enqueue(db, {
         kind: "email_flush",

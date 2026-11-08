@@ -80,6 +80,61 @@ describe("createResendSender", () => {
     expect(error).not.toBeInstanceOf(EmailRejectedError);
   });
 
+  it("a validation_error on any status but 422 is an ordinary error", async () => {
+    // Resend uses it for account faults (an unverified domain, a bad `from`).
+    for (const status of [400, 403]) {
+      const { sender: s } = sender(() =>
+        json(status, { name: "validation_error", message: "domain" }),
+      );
+      const error = await s.send(MESSAGE).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(EmailCapError);
+      expect(error).not.toBeInstanceOf(EmailRejectedError);
+    }
+  });
+
+  it("a quota name on a 403 is an ordinary error", async () => {
+    const { sender: s } = sender(() =>
+      json(403, { name: "daily_quota_exceeded", message: "quota" }),
+    );
+    const error = await s.send(MESSAGE).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(EmailCapError);
+  });
+
+  it("the request times out after 10 seconds, as an ordinary error", async () => {
+    const timeout = new AbortController();
+    const spy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(timeout.signal);
+    try {
+      let seen: AbortSignal | null | undefined;
+      const hang = vi.fn((_url: string, init?: RequestInit) => {
+        seen = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "TimeoutError")),
+          );
+        });
+      });
+      const s = createResendSender({
+        apiKey: "k",
+        from: "a@b.test",
+        fetch: hang,
+      });
+      const pending = s.send(MESSAGE).catch((e: unknown) => e);
+      expect(spy).toHaveBeenCalledWith(10_000);
+      expect(seen).toBe(timeout.signal);
+      timeout.abort();
+      const error = (await pending) as Error;
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(EmailCapError);
+      expect(error).not.toBeInstanceOf(EmailRejectedError);
+      expect(error.message).not.toContain("example.test");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("a 500 throws an ordinary error", async () => {
     const { sender: s } = sender(() => json(500, { message: "boom" }));
     const error = await s.send(MESSAGE).catch((e: unknown) => e);
