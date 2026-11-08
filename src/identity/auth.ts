@@ -163,25 +163,27 @@ async function revokeUnprovenSignIns(
   now: Date,
   userId: string,
 ): Promise<void> {
-  const linked = await db
-    .select({ id: authAccounts.id, providerId: authAccounts.providerId })
-    .from(authAccounts)
-    .where(
-      and(
-        eq(authAccounts.userId, userId),
-        ne(authAccounts.providerId, "credential"),
-      ),
-    );
-  if (linked.length === 0) return;
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
+    const linked = await t
+      .select({ id: authAccounts.id, providerId: authAccounts.providerId })
+      .from(authAccounts)
+      .where(
+        and(
+          eq(authAccounts.userId, userId),
+          ne(authAccounts.providerId, "credential"),
+        ),
+      );
+    // Every session goes, links or not: nothing that predates the proof is
+    // known to be the owner's. The sign-in the proof makes comes after.
+    await t.delete(authSessions).where(eq(authSessions.userId, userId));
+    if (linked.length === 0) return;
     await t.delete(authAccounts).where(
       inArray(
         authAccounts.id,
         linked.map((a) => a.id),
       ),
     );
-    await t.delete(authSessions).where(eq(authSessions.userId, userId));
     await writeAudit(t, now, {
       actorUserId: null,
       actorKind: "system",
@@ -200,7 +202,10 @@ async function revokeUnprovenSignIns(
   });
 }
 
-/** The claims of a verification token, read without checking it: Better Auth checks it, and the caller checks the outcome. */
+/**
+ * The claims of a verification token, read without checking the signature. Only
+ * ever a lookup key: nothing is recorded because a claim says so.
+ */
 function tokenClaims(
   token: unknown,
 ): { email?: string; updateTo?: string; requestType?: string } | null {
@@ -254,8 +259,10 @@ export function createAuth(db: Db, deps: AuthDeps) {
         },
       },
     );
-  // Verification tokens of email changes in flight on this request, by token.
-  const changesInFlight = new Set<string>();
+  // For a /verify-email request: who held the token's address before Better
+  // Auth ran, so the after-hook can compare with the database. Keyed by the
+  // request object, so it lives and dies with the request.
+  const emailBefore = new WeakMap<Request, { id: string; email: string }>();
   const hostnames = (() => {
     const hosts = env.baseUrl ? [new URL(env.baseUrl).hostname] : [];
     return env.local ? [...hosts, "localhost", "127.0.0.1"] : hosts;
@@ -357,8 +364,12 @@ export function createAuth(db: Db, deps: AuthDeps) {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === "/verify-email") {
           const claims = tokenClaims(ctx.query?.token);
-          if (claims?.requestType === "change-email-verification") {
-            changesInFlight.add(String(ctx.query?.token));
+          if (ctx.request && claims?.updateTo && claims.email) {
+            const [holder] = await db
+              .select({ id: users.id, email: users.email })
+              .from(users)
+              .where(eq(users.email, claims.email.toLowerCase()));
+            if (holder) emailBefore.set(ctx.request, holder);
           }
           return;
         }
@@ -371,30 +382,29 @@ export function createAuth(db: Db, deps: AuthDeps) {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/verify-email") {
+          // The database decides: the change took effect if the user who held
+          // the address now holds another one. A failed, forged or replayed
+          // link changes nothing, so it writes nothing.
+          const held = ctx.request && emailBefore.get(ctx.request);
+          if (!held || !ctx.request) return;
+          emailBefore.delete(ctx.request);
+          const [row] = await db
+            .select({ email: users.email })
+            .from(users)
+            .where(eq(users.id, held.id));
+          if (!row || row.email === held.email) return;
+          await auditUserChange(db, now(), "user.email.update", held.id, {
+            before: { email: held.email },
+            after: { email: row.email, stage: "applied", applied: true },
+          });
+          return;
+        }
         const returned = ctx.context.returned;
-        // A redirect is a success or a failure by where it goes; the checks
-        // below read the outcome from the database instead.
         if (
           returned instanceof APIError &&
           Number(returned.statusCode) >= 400
         ) {
-          return;
-        }
-        if (ctx.path === "/verify-email") {
-          // The new address confirmed: the change takes effect here.
-          const token = String(ctx.query?.token);
-          if (!changesInFlight.delete(token)) return;
-          const claims = tokenClaims(token);
-          if (!claims?.updateTo) return;
-          const [row] = await db
-            .select({ id: users.id, email: users.email })
-            .from(users)
-            .where(eq(users.email, claims.updateTo.toLowerCase()));
-          if (!row) return;
-          await auditUserChange(db, now(), "user.email.update", row.id, {
-            before: { email: claims.email },
-            after: { email: claims.updateTo, stage: "applied", applied: true },
-          });
           return;
         }
         const changesEmail = ctx.path === "/change-email";

@@ -415,6 +415,23 @@ describe("magic link, verification and reset", () => {
     expect(after?.emailVerified).toBe(true);
   });
 
+  it("verifying an account ends the sessions it had, even with no sign-in link", async () => {
+    await auth.handler(signUpRequest(EMAIL));
+    await auth.handler(
+      authPost("/sign-in/email", { email: EMAIL, password: PASSWORD }),
+    );
+    const stray = (await t.db.select().from(authSessions)).map((s) => s.id);
+    expect(stray).toHaveLength(2);
+
+    const link = linkIn(mail.last(EMAIL, "Confirm your email"));
+    const response = await auth.handler(clickLink(link));
+    expect(response.status).toBeLessThan(400);
+    const after = await t.db.select().from(authSessions);
+    expect(after).toHaveLength(1);
+    expect(stray).not.toContain(after[0]!.id);
+    expect(hasSession(response)).toBe(true);
+  });
+
   it("a resend inside 40 seconds is refused", async () => {
     await auth.handler(signUpRequest(EMAIL));
     const resend = () =>

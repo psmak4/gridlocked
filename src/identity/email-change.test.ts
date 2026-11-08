@@ -130,6 +130,48 @@ describe("changing the email address", () => {
     expect(text).not.toContain(NEW);
   });
 
+  it("a forged change-email token writes no audit row", async () => {
+    // An unsigned payload that names a real user's address, with a
+    // callbackURL so the failure is a redirect, not an error status.
+    const b64 = (value: unknown) =>
+      Buffer.from(JSON.stringify(value)).toString("base64url");
+    const forged = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({
+      email: OLD,
+      updateTo: "someone.else@example.test",
+      requestType: "change-email-verification",
+      userId: adaId,
+    })}.${b64("not a signature")}`;
+    const response = await auth.handler(
+      clickLink(
+        `http://localhost:3000/api/auth/verify-email?token=${forged}&callbackURL=%2F`,
+      ),
+    );
+    expect(response.status).toBe(302);
+    expect((await ada()).email).toBe(OLD);
+    const rows = (await t.db.select().from(auditLog)).filter(
+      (r) => r.action === "user.email.update",
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("a replayed change-email link writes one applied row, not two", async () => {
+    await t.db
+      .update(users)
+      .set({ emailVerified: true })
+      .where(eq(users.id, adaId));
+    await change();
+    const link = linkIn(mail.last(NEW, "Confirm your email"));
+    await auth.handler(clickLink(link, cookie));
+    await auth.handler(clickLink(link, cookie));
+    await auth.handler(clickLink(link));
+    const applied = (await t.db.select().from(auditLog)).filter(
+      (r) =>
+        r.action === "user.email.update" &&
+        (r.after as { stage?: string }).stage === "applied",
+    );
+    expect(applied).toHaveLength(1);
+  });
+
   it("an address that belongs to someone else changes nothing, and the audit says so", async () => {
     await auth.handler(signUpRequest("taken@example.test"));
     const response = await auth.handler(
