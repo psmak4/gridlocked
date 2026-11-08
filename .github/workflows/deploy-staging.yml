@@ -32,7 +32,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Holds the staging secrets: NEON_API_KEY_STAGING and DATABASE_URL_STAGING.
+    # Holds the staging secrets: NEON_API_KEY_STAGING, DATABASE_URL_STAGING and,
+    # once Resend is approved, RESEND_API_KEY and EMAIL_FROM (neon.ts declares
+    # them for the function only when both are set).
     environment: staging
     steps:
       - name: Check out
@@ -77,15 +79,22 @@ jobs:
         run: neon config plan --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH"
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+          # Same as the deploy below, so the plan matches it.
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
 
       # Applies neon.ts: the `scheduler` bucket, the `tick` function (bundled
-      # from src/jobs/functions/tick.ts) and the two schedule triggers.
+      # from src/jobs/functions/tick.ts) and the two schedule triggers. The
+      # email secrets reach the function through neon.ts; a missing secret is
+      # passed as "" and neon.ts treats it as unset.
       # No --yes: if it would override branch settings or touch a protected
       # branch, it stops and names the flag.
       - name: Deploy the function and triggers
         run: neon deploy --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH" --no-env-pull
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
 
       # The function URL and the trigger ids only; never the environment.
       - name: Show the function and triggers

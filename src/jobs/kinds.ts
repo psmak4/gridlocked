@@ -6,7 +6,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * `game_lock` and `game_open` are the game layer's (handlers in
  * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
  * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
- * daily checks (handler in `src/game/corrections.ts`). `normalize` and `validate`
+ * daily checks (handler in `src/game/corrections.ts`). `email_flush` sends the
+ * queued account emails (handler in `src/identity/email/outbox.ts`). `normalize` and `validate`
  * are reserved: the poll and finalize jobs run both steps inline, so nothing
  * enqueues them yet.
  *
@@ -26,6 +27,7 @@ export const JOB_KINDS = [
   "score_session",
   "game_finalize",
   "game_checks",
+  "email_flush",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -252,3 +254,15 @@ export const gameOpenRecheckKey = (
   sweep?: string,
 ) =>
   `${sweep === undefined ? gameOpenKey(gameId, eventId) : gameOpenSweepKey(gameId, eventId, sweep)}:${n}`;
+
+/**
+ * One flush per UTC hour: `at` is when it is due. A flush due part-way through
+ * an hour (a backlog the last flush did not finish) gets the minute in its key,
+ * because the queue ignores an enqueue for a key whose job already ran, and the
+ * hour's own job is the one running.
+ */
+export const emailFlushKey = (at: Date) => {
+  const stamp = at.toISOString();
+  const onTheHour = stamp.slice(13, 19) === ":00:00";
+  return `email_flush:${onTheHour ? stamp.slice(0, 13) : stamp.slice(0, 16)}`;
+};

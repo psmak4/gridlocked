@@ -23,6 +23,8 @@
  */
 import { createDb } from "@/db/client";
 import { createGameHandlers } from "@/game/jobs";
+import { createEmailFlushHandler } from "@/identity/email/outbox";
+import { senderFromEnv } from "@/identity/email/resend";
 import { systemTimer } from "@/lib/clock";
 import { clockModeFromEnv } from "@/lib/resolve-clock";
 import { createPipelineHandlers } from "@/providers/pipeline";
@@ -182,6 +184,9 @@ export function depsFromEnv(
   // One limiter per provider for this isolate, re-seeded from the request log
   // at each wake, so overlapping invocations on one warm process share them.
   const limiters = createSharedLimiters(systemTimer);
+  // Null until RESEND_API_KEY and EMAIL_FROM are set (neon.ts declares them
+  // only then); the flush job then leaves the outbox rows queued.
+  const emailSender = senderFromEnv(env, (input, init) => fetch(input, init));
   return {
     db: () => database.db(),
     store,
@@ -200,6 +205,7 @@ export function depsFromEnv(
       ),
       // The game's lock and open jobs; they read the database only.
       ...createGameHandlers(),
+      email_flush: createEmailFlushHandler(emailSender),
     }),
   };
 }

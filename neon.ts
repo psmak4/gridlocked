@@ -6,8 +6,12 @@
  *   create the bucket and inject AWS_ENDPOINT_URL_S3, AWS_REGION and the
  *   access keys into the function, so the tick holds no secret of its own.
  * - `tick` function: bundled from the entry file by the CLI (esbuild). Neon
- *   injects DATABASE_URL, so no `env` is declared and no secret passes
- *   through this file.
+ *   injects DATABASE_URL. The only `env` declared is the email sender's
+ *   (RESEND_API_KEY and EMAIL_FROM), read from the deploy's own environment
+ *   (the staging workflow passes them from the `staging` secrets). When
+ *   either is unset or empty (GitHub passes a missing secret as ""), no `env`
+ *   is declared and the function leaves queued emails queued. No value is
+ *   ever written in this file.
  * - two schedule triggers (UTC), both on the `tick` function: a tick every
  *   minute, and the safety tick at minute 7 of every sixth hour (M1 result).
  *
@@ -15,6 +19,13 @@
  * closure, so branch settings (compute size, protection) stay as they are.
  */
 import { defineConfig } from "@neon/config/v1";
+
+const resendApiKey = process.env.RESEND_API_KEY;
+const emailFrom = process.env.EMAIL_FROM;
+const emailEnv =
+  resendApiKey && emailFrom
+    ? { RESEND_API_KEY: resendApiKey, EMAIL_FROM: emailFrom }
+    : undefined;
 
 export default defineConfig({
   buckets: {
@@ -24,6 +35,7 @@ export default defineConfig({
     tick: {
       name: "Scheduler tick",
       source: "./src/jobs/functions/tick.ts",
+      ...(emailEnv ? { env: emailEnv } : {}),
     },
   },
   triggers: {

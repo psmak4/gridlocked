@@ -346,6 +346,24 @@ describe("the tick function", () => {
       ).toThrow("AWS_ENDPOINT_URL_S3");
     });
 
+    it("registers the email_flush handler, with or without an email sender", async () => {
+      for (const extra of [
+        {},
+        { RESEND_API_KEY: "k", EMAIL_FROM: "Gridlocked <a@b.invalid>" },
+      ]) {
+        const deps = depsFromEnv({ ...env, ...extra });
+        const handlers = await deps.handlers(
+          t.db as never,
+          { now: () => T0 },
+          {
+            timer: { now: () => 0, sleep: async () => {} },
+            deadlineAt: undefined,
+          },
+        );
+        expect(typeof handlers.email_flush).toBe("function");
+      }
+    });
+
     it("exports a fetch handler as the function's default", () => {
       expect(typeof tickFunction.fetch).toBe("function");
     });
