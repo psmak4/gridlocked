@@ -6,6 +6,7 @@ import { defineConfig } from "vitest/config";
 const dbTests = [
   "src/db/**/*.test.{ts,tsx}",
   "src/identity/**/*.test.{ts,tsx}",
+  "src/server/**/*.test.{ts,tsx}",
   "src/game/score-jobs.test.ts",
   "src/game/scoring-invariants.test.ts",
   "src/audit/**/*.test.{ts,tsx}",

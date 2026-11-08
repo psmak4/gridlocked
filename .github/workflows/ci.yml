@@ -51,8 +51,12 @@ jobs:
       - name: Unit and database tests
         run: pnpm test
 
+      # The e2e tests run the auth routes on an in-memory PGlite, which only
+      # a build made with this flag contains.
       - name: Build
         run: pnpm build
+        env:
+          VITE_LOCAL_DB: "1"
 
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
