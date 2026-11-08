@@ -224,7 +224,7 @@ The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1z
 |---|---|
 | Forum | Categories · Threads in a category (pinned weekend threads, a hidden spoiler thread) · New thread (spoiler title check) · Report (sheet) |
 | Notifications | The list (unread, grouped replies, spoiler-safe scores, a correction, moderation) · Turn on push (sheet) |
-| Sign-up and onboarding | Choose a way in · Sign up with email · Check your email (with the "busy day" queue message) · Favorites · Spoiler choice |
+| Sign-up and onboarding | Choose a way in · Sign up with email · Check your email (with the "busy day" queue message) · Favorites · Spoiler choice · Finish signing up (added in M5, below) |
 | Profile and settings | Profile (trust level in plain words) · Settings · Delete account |
 | Dark theme | Thread list |
 
@@ -243,6 +243,16 @@ The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1z
 - **"Check your email"** lets people look around and build a team before confirming. Posting and chat wait for confirmation. On busy days it says emails are queued and offers Discord.
 - **Onboarding** is 2 short steps after the account: favorites (team, driver, optional country), then spoilers ("Hide results until I've watched" is preselected, with a live example).
 - **The spoiler title check** warns when a new thread's title may give away a result and offers "Contains spoilers for qualifying" (on by default once warned).
+- **Finish signing up (added in M5, decision 3).** A short screen at `/welcome` for anyone who arrives by Discord or a magic link, and for anyone the signed-in gate catches with an unfinished account. It has no new parts: the username field and the two checkboxes from Sign up with email, a "Finish signing up" button in the bottom bar, and a quiet "Sign out" under it.
+  - It is the only way forward until it is done. Every other page sends the person back here, except the terms (`/legal/…`), "Check your email", the reset-password page and the sign-in error page.
+  - The page title and its one line of help read: "Finish signing up" and "You're signed in. Choose a username and agree to the rules to get started." If the account already has a username (an email sign-up whose boxes were lost), the username field is left out.
+  - Each box shows its own message when it is left unchecked ("Confirm you're 16 or older." and "Accept the terms, privacy policy and community rules to continue."), and a username the server refuses says why in the field, without a reload.
+  - After it, the person goes on to Favorites (Step 1), so Discord and magic-link people get the same two onboarding steps as the email path.
+- **Choose a way in** no longer says "By continuing you agree", because on this path nothing is agreed yet. Its footer reads "You'll accept the terms in the next step. You must be 16 or older." The unofficial line stays, once, in the site footer. "Continue with Discord" shows only when Discord sign-in is set up.
+- **"Email me a sign-in link"** opens the sign-in page in its link form (an email field and "Send link"), then Check your email. Its copy says "sign in", not "finish signing up", and it has no "Look around" button, because that person isn't signed in yet.
+- **Check your email** has three small additions the board didn't need: a real countdown on "Send it again", an inline "Correct email address" field behind "Wrong address? Change it", and a bot check for those two actions (the server guards them with Turnstile). The busy notice shows only for the confirmation email, because magic links and resets are the emails the daily allowance keeps in reserve. "Continue with Discord instead" shows only when Discord is set up.
+- **Sign in, reset password and the link error page** reuse the same parts. A link that has expired or been used says "That link has expired" and offers an email field to send a new one. A banned account sees "This account can't sign in." and nothing about why.
+- **Favorites** lists the running game's teams (as colored name tiles, until the team badge component exists), its drivers and every country. The team and driver choices are left out of the screen when no game is running. **Spoilers** uses two native radio buttons dressed as the board's cards, so arrow keys work; "What hidden looks like" is a plain static sample until the spoiler cover component is built.
 - **Trust levels** show as a plain name ("Member") with one sentence on what it allows and how to reach the next level. The numbers stay internal.
 - **Delete account** spells out your choice of "always anonymize":
   - posts stay as "deleted user";

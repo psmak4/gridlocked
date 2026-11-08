@@ -1,10 +1,12 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 type CheckboxProps = Omit<CheckboxPrimitive.Root.Props, "id" | "className"> & {
   /** A stable id; ties the label, hint and error to the checkbox. */
   id: string;
-  label: string;
+  /** Text, or text with links in it ("I agree to the Terms"). */
+  label: ReactNode;
   hint?: string;
   error?: string;
   className?: string;

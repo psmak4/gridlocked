@@ -39,7 +39,8 @@ function fail(name: string, error: z.ZodError): never {
   );
 }
 
-function discordFrom(env: Record<string, string | undefined>) {
+/** Discord sign-in is on when both variables are set. */
+export function discordFrom(env: Record<string, string | undefined>) {
   const clientId = env.DISCORD_CLIENT_ID?.trim();
   const clientSecret = env.DISCORD_CLIENT_SECRET?.trim();
   return clientId && clientSecret ? { clientId, clientSecret } : null;

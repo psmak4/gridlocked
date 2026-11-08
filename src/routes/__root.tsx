@@ -4,12 +4,28 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
+  redirect,
 } from "@tanstack/react-router";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeScript } from "@/components/theme-script";
+import { gateRedirect } from "@/lib/auth-gate";
+import { privateHeaders } from "@/lib/private-headers";
+import { getAccount } from "@/server/account";
 import appCss from "@/styles/globals.css?url";
 
 export const Route = createRootRoute({
+  // The signed-in gate. With no session cookie `getAccount` answers null
+  // without touching the database, and a logged-out visitor is never
+  // redirected, so public pages stay public and cacheable.
+  beforeLoad: async ({ location }) => {
+    const account = await getAccount();
+    const to = gateRedirect(location.pathname, account);
+    if (to) throw redirect({ to });
+    return { account };
+  },
+  // A page built for someone signed in is for them alone.
+  headers: ({ match }) =>
+    match.context.account ? privateHeaders() : undefined,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
