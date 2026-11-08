@@ -9,6 +9,7 @@ import { republishIfEarlier, type DueStore } from "./due-times";
 import { planEventJobs } from "./plan-event";
 import {
   gameChecksKey,
+  identityDailyKey,
   syncCalendarKey,
   syncCalendarPayload,
   type GameChecksPayload,
@@ -109,10 +110,11 @@ export async function ensureCalendarSync(
  * retry does, and the safety tick (`ensureCalendarSync`) restarts a chain
  * that has been lost.
  *
- * Last, each of the season's `running` games gets its `game_checks` job for the
+ * Then each of the season's `running` games gets its `game_checks` job for the
  * day, due now. They come after the next day's sync so that nothing about them
  * can stop the chain, and they are jobs of their own so that a check that
- * fails is retried on its own.
+ * fails is retried on its own. Last, the day's `identity_daily` job (trust
+ * levels, purge and prune), once a day however many games there are.
  */
 export function createSyncCalendarHandler(
   source: CalendarSyncSource,
@@ -178,5 +180,13 @@ export function createSyncCalendarHandler(
         payload,
       });
     }
+
+    // The day's identity upkeep: one job a day, however many games there are.
+    await enqueue(db, {
+      kind: "identity_daily",
+      dedupeKey: identityDailyKey(now.toISOString().slice(0, 10)),
+      runAt: now,
+      payload: {},
+    });
   };
 }

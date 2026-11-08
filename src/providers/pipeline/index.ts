@@ -1,3 +1,4 @@
+import { createIdentityDailyHandler } from "@/identity/daily";
 import { createGameChecksHandler } from "@/game/corrections";
 import { createScoreHandlers } from "@/game/score-jobs";
 import { createFinalizeHandler } from "@/jobs/finalize";
@@ -29,7 +30,8 @@ export type PipelineHandlers = Record<
   | "roster_check"
   | "score_session"
   | "game_finalize"
-  | "game_checks",
+  | "game_checks"
+  | "identity_daily",
   JobHandler
 >;
 
@@ -51,5 +53,7 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
     ),
     ...createScoreHandlers({ batchSize: deps.scoreBatchSize }),
     game_checks: createGameChecksHandler(),
+    // Database only, like the game's: no provider is involved.
+    identity_daily: createIdentityDailyHandler(),
   };
 }

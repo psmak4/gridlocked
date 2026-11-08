@@ -7,7 +7,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
  * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
  * daily checks (handler in `src/game/corrections.ts`). `email_flush` sends the
- * queued account emails (handler in `src/identity/email/outbox.ts`). `normalize` and `validate`
+ * queued account emails (handler in `src/identity/email/outbox.ts`). `identity_daily` is the day's
+ * trust, purge and prune steps (handler in `src/identity/daily.ts`). `normalize` and `validate`
  * are reserved: the poll and finalize jobs run both steps inline, so nothing
  * enqueues them yet.
  *
@@ -28,6 +29,7 @@ export const JOB_KINDS = [
   "game_finalize",
   "game_checks",
   "email_flush",
+  "identity_daily",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -266,3 +268,6 @@ export const emailFlushKey = (at: Date) => {
   const onTheHour = stamp.slice(13, 19) === ":00:00";
   return `email_flush:${onTheHour ? stamp.slice(0, 13) : stamp.slice(0, 16)}`;
 };
+
+/** One identity job per UTC day, however many games there are. */
+export const identityDailyKey = (day: string) => `identity_daily:${day}`;

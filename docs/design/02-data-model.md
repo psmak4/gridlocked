@@ -1777,9 +1777,21 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
   - the impersonated session is read-only. `hooks.before` refuses every non-GET auth path for a session with `impersonated_by` except `/sign-out` and `/admin/stop-impersonating` (so email, password, 2FA and account changes, whatever endpoint a later release adds), and `requireWritable` refuses our own writes (`read_only`).
 
 ### 6.5 Trust levels (HLD §7.4)
-- **A nightly job** recomputes each active user's level from their counts: days visited, posts, reputation, upheld flags and account age. The thresholds are settings. It skips `trust_level_locked` users.
-- **Automatic demotion** only happens after upheld moderation actions. Going quiet never lowers a level.
-- **`trust_level_changes`** (`user_id`, `from_level`, `to_level`, `source`: `auto` or `moderator`, `changed_by`, `reason`, `changed_at`) gives a readable history, and the user can see their own.
+- **A daily job** recomputes the level of each active profile seen in the last 30 days (`last_seen_at`), in batches of 1,000 ordered by user id. The level comes from days visited, posts, reputation, upheld flags and account age. It skips `trust_level_locked` users and deleted profiles.
+- **The thresholds are the `trust_thresholds` setting.** A level needs all four numbers: days visited, posts, reputation and account age. The starting values (M5, a call to revisit once real forum use exists):
+
+  | Level | Days visited | Posts | Reputation | Account age (days) |
+  |---|---|---|---|---|
+  | TL1 | 3 | 10 | 0 | 3 |
+  | TL2 | 15 | 50 | 25 | 15 |
+  | TL3 | 60 | 200 | 200 | 60 |
+
+  A user gets the highest level whose numbers they all meet.
+- **Posts and upheld actions come from the forum (M7).** Until then the job's counts return zeros, so everyone stays at TL0; the forum passes real counts without changing the job.
+- **Automatic demotion** only happens after upheld moderation actions (the level is then recomputed from the counts, so it can fall). Going quiet never lowers a level.
+- **A moderator's change** (`setTrustLevel`) sets the level, sets `trust_level_locked`, and writes the history row (source `moderator`, `changed_by`, a required reason) and an `audit_log` row (`user.trust_level.set`) in one transaction. Clearing the lock (`user.trust_level.unlock`) is audited too and leaves the level as it is.
+- **`trust_level_changes`** (`user_id`, `from_level`, `to_level`, `source`: `auto` or `moderator`, `changed_by`, `reason`, `changed_at`) gives a readable history, and the user can see their own. The job writes a row only when the level moves, so a second run the same day writes nothing.
+- **The daily identity job** (`identity_daily`, key `identity_daily:<yyyy-mm-dd>`) is queued by `sync_calendar` once a UTC day, however many games there are. It runs these steps in order, each in its own transaction: trust levels, the purge of incomplete accounts (5.1), and the prune. A step that fails is logged by name and error name only, the rest still run, and the job then fails so the runner retries. The prune deletes expired `auth_sessions`, `auth_verifications` and `auth_rate_limits`; finished `email_outbox` rows (`sent`, `failed`, `expired`) older than 35 days, so the month's cap count (5.11) is unaffected; and the `username_history` of deleted profiles older than 90 days, which releases a tombstone's old names (6.3). A live user's history is never pruned.
 
 ### 6.6 `audit_log` (everything staff change; decided, HLD §3.3)
 | Column | Type | Notes |

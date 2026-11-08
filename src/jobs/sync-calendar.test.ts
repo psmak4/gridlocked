@@ -66,14 +66,20 @@ describe("the sync_calendar handler", () => {
   async function syncAt(at: Date) {
     clock.set(at);
     await enqueueCalendarSync(t.db, clock.now(), 2026);
-    return runDue(t.db, clock, pipeline.handlers, {
+    const result = await runDue(t.db, clock, pipeline.handlers, {
       maxJobs: 1,
       leaseMs: 5 * MIN,
     });
+    // The day's identity job is covered on its own below; here it would be
+    // the next job a later call claims.
+    await t.db.delete(jobs).where(eq(jobs.kind, "identity_daily"));
+    return result;
   }
 
   const planned = async () =>
-    (await allJobs(t.db)).filter((j) => j.kind !== "sync_calendar");
+    (await allJobs(t.db)).filter(
+      (j) => j.kind !== "sync_calendar" && j.kind !== "identity_daily",
+    );
 
   it("enqueues one job per season per day", async () => {
     const a = await enqueueCalendarSync(t.db, T0, 2026);
@@ -472,5 +478,42 @@ describe("the sync_calendar handler", () => {
     expect(
       (await t.db.select().from(jobs).where(ne(jobs.kind, "x"))).length,
     ).toBe(1);
+  });
+
+  describe("the daily identity job", () => {
+    const daily = async () =>
+      (await allJobs(t.db)).filter((j) => j.kind === "identity_daily");
+
+    /** Queues and runs the day's sync, then lets anything else due run too. */
+    async function syncKeeping(at: Date) {
+      clock.set(at);
+      await enqueueCalendarSync(t.db, clock.now(), 2026);
+      await runDue(
+        t.db,
+        clock,
+        { ...pipeline.handlers, identity_daily: async () => {} },
+        { maxJobs: 5, leaseMs: 5 * MIN },
+      );
+    }
+
+    it("sync_calendar queues one identity_daily a day", async () => {
+      await syncKeeping(T0);
+      expect(await daily()).toMatchObject([
+        {
+          dedupeKey: "identity_daily:2026-02-01",
+          runAt: T0,
+          payload: {},
+        },
+      ]);
+      // A second sync the same day adds none.
+      await syncKeeping(new Date(T0.getTime() + 2 * HOUR));
+      expect(await daily()).toHaveLength(1);
+      // The next day's sync queues the next day's.
+      await syncKeeping(new Date(T0.getTime() + DAY));
+      expect((await daily()).map((j) => j.dedupeKey).sort()).toEqual([
+        "identity_daily:2026-02-01",
+        "identity_daily:2026-02-02",
+      ]);
+    });
   });
 });
