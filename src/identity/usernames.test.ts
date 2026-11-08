@@ -107,7 +107,7 @@ describe("usernames", () => {
   });
 
   it("1 read as i gets no one past the rules", async () => {
-    for (const name of ["Adm1n", "Gr1dlocked", "Gr1dl0cked"]) {
+    for (const name of ["Adm1n", "Gr1dlocked", "Gr1dl0cked", "Gr1d1ocked"]) {
       expect(await check(name)).toBe("reserved");
     }
     await t.db.insert(constructors).values({
@@ -128,6 +128,9 @@ describe("usernames", () => {
       updatedAt: NOW,
     });
     expect(await check("P1erreGasly")).toBe("reserved");
+    expect(await check("P1erreGas1y")).toBe("reserved");
+    expect(await check("Lily_Fan")).toBeNull();
+    expect(await check("Gasly_Fan")).toBeNull();
     expect(await check("Red_Bu11")).toBe("reserved");
   });
 
@@ -354,6 +357,17 @@ describe("usernames", () => {
         }),
       );
       expect(ok.status).toBe(200);
+    });
+
+    it("a display name sent without a username is refused at sign-up", async () => {
+      const auth = testAuth(t.db);
+      const response = await auth.handler(
+        signUpRequest("ada@example.test", { displayUsername: "Plain_Guy" }),
+      );
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(
+        (await t.db.select().from(users)).filter((u) => u.role !== "system"),
+      ).toHaveLength(0);
     });
 
     it("the username sign-in and availability paths answer 404", async () => {

@@ -59,6 +59,14 @@ export function normalizeForCheck(name: string): string {
   return stripForCheck(name).replaceAll("1", "l");
 }
 
+/**
+ * One skeleton for word rules and entity names: separators and accents gone,
+ * `0`/`o` alike and `1`/`i`/`l` alike, so any mix of look-alikes meets.
+ */
+function skeleton(name: string): string {
+  return stripForCheck(name).replace(/[il1]/g, "l");
+}
+
 /** Every reading of a name: `1` as `l` and as `i`. A match on any is a match. */
 function normalForms(name: string): string[] {
   const stripped = stripForCheck(name);
@@ -74,11 +82,11 @@ function ruleMatches(
   rule: { pattern: string; matchType: string },
   forms: string[],
   normalized: string[],
+  skel: string,
 ): boolean {
   if (rule.matchType === "word") {
     // The rule's word is read the same way as the name.
-    const words = normalForms(rule.pattern);
-    return normalized.some((form) => words.includes(form));
+    return skeleton(rule.pattern) === skel;
   }
   if (rule.matchType === "regex") {
     try {
@@ -95,6 +103,7 @@ function ruleMatches(
 async function isReserved(db: Db, name: string): Promise<boolean> {
   const lower = name.toLowerCase();
   const normalized = normalForms(name);
+  const skel = skeleton(name);
   const forms = [lower, lower.replaceAll("0", "o")];
 
   const rules = await db
@@ -107,7 +116,8 @@ async function isReserved(db: Db, name: string): Promise<boolean> {
         eq(filterRules.effect, "block"),
       ),
     );
-  if (rules.some((rule) => ruleMatches(rule, forms, normalized))) return true;
+  if (rules.some((rule) => ruleMatches(rule, forms, normalized, skel)))
+    return true;
 
   // Read live, so a new driver or team is covered without a seed.
   const driverRows = await db
@@ -129,17 +139,14 @@ async function isReserved(db: Db, name: string): Promise<boolean> {
       d.displayName,
       `${d.givenName}${d.familyName}`,
     ]) {
-      if (spelling) normalForms(spelling).forEach((f) => reserved.add(f));
+      if (spelling) reserved.add(skeleton(spelling));
     }
   }
   for (const c of constructorRows) {
-    for (const f of [...normalForms(c.slug), ...normalForms(c.name)]) {
-      reserved.add(f);
-    }
+    reserved.add(skeleton(c.slug));
+    reserved.add(skeleton(c.name));
   }
-  return normalized.some(
-    (form) => form.length >= USERNAME_MIN_LENGTH && reserved.has(form),
-  );
+  return skel.length >= USERNAME_MIN_LENGTH && reserved.has(skel);
 }
 
 /**
