@@ -42,6 +42,22 @@ test.describe("components", () => {
     await expect(toast).toBeHidden({ timeout: 8000 });
   });
 
+  test("hover alone holds the Toast, and leaving restarts the full timer", async ({
+    page,
+  }) => {
+    const toast = page.getByRole("status").filter({ hasText: "Team saved" });
+    await expect(toast).toBeVisible();
+    await toast.hover();
+    await expect(page.getByRole("button", { name: "Undo" })).not.toBeFocused();
+    await page.waitForTimeout(4600);
+    await expect(toast).toBeVisible();
+    await page.mouse.move(0, 0);
+    // The timer starts over: still there 2 s later, gone within 4 s of leaving.
+    await page.waitForTimeout(2000);
+    await expect(toast).toBeVisible();
+    await expect(toast).toBeHidden({ timeout: 3000 });
+  });
+
   test("touch targets are at least 44 px", async ({ page }) => {
     expect(
       await height(page.getByRole("button", { name: "Save team" })),

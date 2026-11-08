@@ -48,3 +48,18 @@ describe("Checkbox disabled row", () => {
     expect(html).toMatch(/data-slot="checkbox-row" class="[^"]*opacity-45/);
   });
 });
+
+describe("Checkbox describedby merge", () => {
+  it("keeps a caller's aria-describedby beside the hint and error", () => {
+    const html = renderToString(
+      <Checkbox
+        id="t"
+        label="Terms"
+        hint="Hint"
+        error="Err"
+        aria-describedby="outside"
+      />,
+    );
+    expect(html).toContain('aria-describedby="outside t-hint t-error"');
+  });
+});
