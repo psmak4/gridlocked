@@ -8,6 +8,7 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 import { oneOf } from "./helpers";
+import { users } from "./identity";
 
 export const AUDIT_ACTOR_KINDS = [
   "admin",
@@ -27,13 +28,17 @@ export const auditLog = pgTable(
   {
     /** UUIDv7, so ordered by time. */
     id: uuid("id").primaryKey(),
-    // FK to users added in M5
-    actorUserId: uuid("actor_user_id"),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     actorKind: text("actor_kind", { enum: AUDIT_ACTOR_KINDS }).notNull(),
-    /** Who acted while there are no user rows (the staff workflow's GitHub login). */
+    /** Who acted when no user row stands for them (the staff workflow's GitHub login). */
     actorLabel: text("actor_label"),
-    // FK to users added in M5
-    impersonatingUserId: uuid("impersonating_user_id"),
+    /** The user an admin was acting as, when impersonating. */
+    impersonatingUserId: uuid("impersonating_user_id").references(
+      () => users.id,
+      { onDelete: "restrict" },
+    ),
     /** Dotted names, e.g. `event_entry.create`, `seat_assignment.close`. */
     action: text("action").notNull(),
     entityType: text("entity_type").notNull(),

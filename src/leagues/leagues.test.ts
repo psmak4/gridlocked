@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { GameError } from "@/game/errors";
 import { createTeam, removeTeam } from "@/game/teams";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import {
   createLeague,
@@ -41,8 +42,8 @@ describe("leagues (DM 4.5, 4.6)", () => {
     t = await createTestDb();
     seeded = await seedLeagueGames(t.db, NOW);
     ({ gameId, otherGameId } = seeded);
-    userA = newId();
-    userB = newId();
+    userA = await seedUser(t.db);
+    userB = await seedUser(t.db);
     teamA = await team(userA);
     teamB = await team(userB);
   });
@@ -364,7 +365,7 @@ describe("leagues (DM 4.5, 4.6)", () => {
     await joinLeague(t.db, LATER, { joinCode, teamId: teamB, userId: userB });
     expect(await currentLeagues(teamB)).toEqual(["Small"]);
     // With teamB seated, the league is full for an active team.
-    const userC = newId();
+    const userC = await seedUser(t.db);
     const teamC = await team(userC);
     await expectGameError(
       joinLeague(t.db, LATEST, { joinCode, teamId: teamC, userId: userC }),

@@ -20,7 +20,7 @@ import {
   teamEventStates,
   teams,
 } from "@/db/schema";
-import { newId } from "@/lib/ids";
+import { seedUser } from "../../tests/helpers/users";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
 import { clearSessionException, setSessionException } from "./cancellations";
@@ -75,8 +75,8 @@ describe("cancellations (DM 3.9)", () => {
   });
 
   /** A team for a new user, so slots never run out. */
-  const team = (name: string) =>
-    createTeam(t.db, NOW, { gameId, userId: newId(), name });
+  const team = async (name: string) =>
+    createTeam(t.db, NOW, { gameId, userId: await seedUser(t.db), name });
 
   const picksOf = async (
     drivers = DRIVERS,
@@ -902,7 +902,7 @@ describe("cancellations (DM 3.9)", () => {
     const leagueOn = async (from: number, to?: number) => {
       const { leagueId } = await createLeague(t.db, NOW, {
         gameId,
-        ownerUserId: newId(),
+        ownerUserId: await seedUser(t.db),
         kind: "private",
         name: "Range",
         startSequence: await sequenceOf(await round2026(t.db, from)),

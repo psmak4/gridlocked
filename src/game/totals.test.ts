@@ -24,6 +24,8 @@ import {
   teamEventStates,
   teamEventTotals,
 } from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { addOverride } from "@/results/overrides";
@@ -86,8 +88,8 @@ describe("event totals (DM 4.4)", () => {
   });
 
   /** A team for a new user, so slots never run out. */
-  const team = (name: string) =>
-    createTeam(t.db, NOW, { gameId, userId: newId(), name });
+  const team = async (name: string) =>
+    createTeam(t.db, NOW, { gameId, userId: await seedUser(t.db), name });
   const picksOf = async (boost: string): Promise<LineupPick[]> => [
     ...(await Promise.all(
       DRIVERS.map(async (key) => ({
@@ -710,7 +712,7 @@ describe("event totals (DM 4.4)", () => {
       kind: "patch",
       fields: { position: 1 },
       reason: "Stewards: Hadjar's pole lap reinstated",
-      createdBy: newId(),
+      createdBy: SYSTEM_USER_ID,
     });
     await scoreWholeSession(t.db, corrected, {
       gameId,

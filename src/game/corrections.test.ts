@@ -40,6 +40,8 @@ import {
 import { enqueue, reapExpired } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
 import { simulatedClock } from "@/lib/clock";
+import { seedUser } from "../../tests/helpers/users";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { newId } from "@/lib/ids";
 import { createLeague, joinLeague } from "@/leagues/leagues";
 import { recomputeStandings } from "@/leagues/standings";
@@ -118,7 +120,7 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
     await setSimulatedClock(t.db, instant);
   }
   const team = async (name: string) => {
-    const userId = newId();
+    const userId = await seedUser(t.db);
     const id = await createTeam(t.db, NOW, { gameId, userId, name });
     users.set(id, userId);
     return id;
@@ -173,7 +175,7 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
       kind: "patch",
       fields: { classification: "disqualified", position: null },
       reason: "Stewards",
-      createdBy: newId(),
+      createdBy: SYSTEM_USER_ID,
     });
 
   const gameEvent = async (eventId: string) =>
@@ -552,7 +554,7 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
 
       it("a higher limit opens no slot in createTeam", async () => {
         await withLimit(5);
-        const userId = newId();
+        const userId = await seedUser(t.db);
         for (const name of ["One", "Two", "Three"]) {
           await create(userId, name);
         }
@@ -563,12 +565,12 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
 
       it("a higher limit opens no slot in the trigger", async () => {
         await withLimit(5);
-        await expect(insertTeam(newId(), 4)).rejects.toThrow();
+        await expect(insertTeam(await seedUser(t.db), 4)).rejects.toThrow();
       });
 
       it("a lower limit closes no slot in createTeam or the trigger", async () => {
         await withLimit(1);
-        const userId = newId();
+        const userId = await seedUser(t.db);
         await create(userId, "One");
         await create(userId, "Two");
         await insertTeam(userId, 3);
@@ -1081,7 +1083,7 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
     it("rebuilds the standings too", async () => {
       const { leagueId, joinCode } = await createLeague(t.db, clock.now(), {
         gameId,
-        ownerUserId: newId(),
+        ownerUserId: await seedUser(t.db),
         kind: "private",
         name: "League",
       });

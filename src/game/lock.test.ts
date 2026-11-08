@@ -17,6 +17,7 @@ import {
   teamEventStates,
   teams,
 } from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
@@ -65,8 +66,8 @@ describe("lockEvent (DM 3.8)", () => {
   });
 
   /** A team for a new user, so slots never run out. */
-  const team = (name: string) =>
-    createTeam(t.db, NOW, { gameId, userId: newId(), name });
+  const team = async (name: string) =>
+    createTeam(t.db, NOW, { gameId, userId: await seedUser(t.db), name });
 
   const picksOf = async (
     drivers = DRIVERS,
@@ -331,7 +332,7 @@ describe("lockEvent (DM 3.8)", () => {
     await setSimulatedClock(t.db, after);
     const late = await createTeam(t.db, after, {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "Late",
     });
     // The lock job runs after the team was created.

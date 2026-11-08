@@ -1,3 +1,4 @@
+import { seedUser } from "../../tests/helpers/users";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
@@ -86,6 +87,8 @@ describe("addOverride and revokeOverride", () => {
 
   beforeEach(async () => {
     t = await createTestDb();
+    await seedUser(t.db, { id: ADMIN });
+    await seedUser(t.db, { id: ADMIN2 });
     await seedWorldWithSeats(t.db);
     sessionId = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
     antonelli = await idFor(t.db, "driver", "antonelli");

@@ -18,6 +18,7 @@ import {
   seasons,
   teams,
 } from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import type { StaffActor } from "@/staff/roster";
@@ -31,7 +32,6 @@ import { createTeam, removeTeam } from "./teams";
 // the lock is the database's (app_now()), not the app's.
 
 const NOW = new Date("2026-02-01T09:00:00.000Z");
-const USER = newId();
 const ACTOR: StaffActor = { kind: "admin", label: "staff" };
 const SECOND_MS = 1000;
 // 280 + 250 + 95 + 85 + 80 + 90 + 70 = 950, within the $100M budget.
@@ -44,6 +44,7 @@ describe("lineups (DM 3.7)", () => {
   let gameId: string;
   let round1: { id: string; lockAt: Date };
   let teamId: string;
+  let USER: string;
 
   beforeEach(async () => {
     t = await createTestDb();
@@ -56,6 +57,7 @@ describe("lineups (DM 3.7)", () => {
       .where(eq(events.round, 1));
     round1 = first!;
     await openGame(t.db, NOW, gameId);
+    USER = await seedUser(t.db);
     teamId = await createTeam(t.db, NOW, { gameId, userId: USER, name: "One" });
   });
   afterEach(async () => {

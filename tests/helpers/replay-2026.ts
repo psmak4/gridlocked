@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { createLeague, joinLeague } from "@/leagues/leagues";
-import { newId } from "@/lib/ids";
+import { seedUser } from "./users";
 import { replayWeekend, type ReplayOptions } from "@/providers/replay/harness";
 import { applyPenalty } from "@/providers/replay/penalty";
 import { replaySeasonGame } from "@/providers/replay/season-game";
@@ -133,7 +133,7 @@ export async function createTestLeagues(
   for (const [name, [startSequence, endSequence]] of Object.entries(ranges)) {
     const { joinCode } = await createLeague(db, now, {
       gameId,
-      ownerUserId: newId(),
+      ownerUserId: await seedUser(db),
       kind: "private",
       name,
       startSequence,

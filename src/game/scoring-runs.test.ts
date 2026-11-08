@@ -22,7 +22,8 @@ import {
   teamBaseLines,
   teamEventStates,
 } from "@/db/schema";
-import { newId } from "@/lib/ids";
+import { seedUser } from "../../tests/helpers/users";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { addOverride } from "@/results/overrides";
 import { scoreSession } from "@/scoring/engine";
@@ -106,8 +107,8 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
   });
 
   /** A team for a new user, so slots never run out. */
-  const team = (name: string) =>
-    createTeam(t.db, NOW, { gameId, userId: newId(), name });
+  const team = async (name: string) =>
+    createTeam(t.db, NOW, { gameId, userId: await seedUser(t.db), name });
   const picksOf = async (boost: string): Promise<LineupPick[]> => [
     ...(await Promise.all(
       DRIVERS.map(async (key) => ({
@@ -447,7 +448,7 @@ describe("scoring runs and the ledger (DM 4.1-4.3)", () => {
       kind: "patch",
       fields: { fastest_lap_rank: 1 },
       reason: "Stewards: lap time reinstated",
-      createdBy: newId(),
+      createdBy: SYSTEM_USER_ID,
     });
     const second = await score(race1.id, { trigger: "override" });
 
