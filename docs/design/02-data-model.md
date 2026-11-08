@@ -1728,10 +1728,10 @@ erDiagram
 | avatar_seed | text | For the generated default avatar (HLD §9). There are no uploads at launch, so no images to moderate |
 | favorite_constructor_id | uuid FK, nullable | Flair, plus the auto constructor league (4.6) |
 | favorite_driver_id | uuid FK, nullable | Flair, plus the auto driver league |
-| country_code | text (ISO 3166-1 alpha-2), nullable | Optional and self-declared; country league only (decided, HLD §9) |
-| timezone | text (IANA) | Defaults from the browser at sign-up |
+| country_code | text (ISO 3166-1 alpha-2), nullable | Optional and self-declared; country league only (decided, HLD §9). `updateProfile` upper-cases it and refuses anything but a 2-letter code the runtime's region data knows (`invalid_country`) |
+| timezone | text (IANA) | Defaults from the browser at sign-up. `updateProfile` refuses a name `Intl.DateTimeFormat` rejects (`invalid_timezone`) |
 | spoiler_protection | boolean, default true | Off means everything is revealed (5.7) |
-| age_confirmed_at | timestamptz | **We record that the user confirmed they're 16 or older, not their birth date.** It's data minimization, and enough for the decided age gate (HLD §9) |
+| age_confirmed_at | timestamptz | **We record that the user confirmed they're 16 or older, not their birth date.** It's data minimization, and enough for the decided age gate (HLD §9). It's set by `completeSignUp` (6.8). An account still without it after 7 days is removed by `purgeIncompleteAccounts` (a daily job), unless it has a team, a league or an audit row; `Viewer.complete` needs it |
 | trust_level | smallint 0–3 | HLD §7.4 |
 | trust_level_locked | boolean | Set when a moderator fixes the level by hand, so the nightly job won't override it |
 | reputation | integer | From TL1+ votes (5.6) |
@@ -1739,7 +1739,7 @@ erDiagram
 | last_seen_at | timestamptz | Written at most every 15 minutes, not on every request, so idle sessions don't keep the database awake (HLD §11.4) |
 | broadcasts_read_at | timestamptz | The bell's read marker for broadcasts (5.11) |
 | username_changed_at | timestamptz, nullable | For the change limit (6.3) |
-| created_at, updated_at, version | | |
+| created_at, updated_at, version | | `updateProfile` is a compare-and-set on `version` (0.7): it takes the `expectedVersion` the form loaded and adds 1, and a stale save is `version_conflict`. Changing a favorite or the country then re-syncs the auto leagues (4.6) in every `running` game |
 
 Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC`; `age_confirmed_at` is nullable, since the system user never confirms; `trust_level`, `reputation` and `days_visited` default to 0; `trust_level_locked` to false; `version` to 1. A CHECK keeps `trust_level` between 0 and 3.
 
@@ -1834,6 +1834,9 @@ The username is held in `username_history` for 90 days and then released.
 ### 6.8 `legal_documents` and `legal_acceptances`
 - **`legal_documents`:** `id`, `kind` (`terms`, `privacy`, `community_rules`), `version`, `published_at`, `requires_reacceptance` (boolean), `url`. The documents themselves are pages on the site, written with your lawyer (HLD §13).
 - **`legal_acceptances`:** `user_id`, `document_id`, `accepted_at`. Recorded at sign-up. When a new version `requires_reacceptance`, users are asked again on their next visit.
+- **Seeded:** the migration inserts `draft-1` of `terms`, `privacy` and `community_rules`, at `/legal/<kind>`, until the lawyer's text replaces them.
+- **What is pending:** per kind, the latest document, unless the user has accepted a version at or after the newest one that `requires_reacceptance` (or the first, when none does). A new version without the flag asks nobody who already agreed to an earlier one; a user who never accepted is asked for the latest.
+- **The gate:** `Viewer.complete` needs a username, `age_confirmed_at` and nothing pending. The email form's `/sign-up/email` refuses a body without `ageConfirmed` and `accepted` both true, and `completeSignUp` (one transaction: the age, every current document, and a first username if there is none) runs after Better Auth's sign-up commits. If that is lost, the account is simply incomplete. Discord and magic-link users start incomplete and finish on "Finish signing up". `acceptDocuments` records a re-acceptance.
 
 ### 6.9 Ready for ads later (HLD §16; nothing turned on at launch)
 - **`consent_records`:**
@@ -1871,7 +1874,7 @@ The username is held in `username_history` for 90 days and then released.
 | Admin investigates a user's issue | Support | Time-limited, audited, read-only impersonation (6.4) |
 | Two admins edit the same setting | Busy weekend | `version` check (0.7) |
 | A moderator's level shouldn't change | Policy | `trust_level_locked` (6.2) |
-| Favorite team leaves F1 | Teams come and go | The favorite stays as flair. Since there's no constructor in the new game, there's no auto league, and the user is prompted to pick again |
+| Favorite team leaves F1 | Teams come and go | The favorite stays as flair. Since there's no constructor in the new game, there's no auto league, and the user is prompted to pick again (`favoriteIsStale`; the profile is not cleared) |
 | Terms updated | Lawyer review (HLD §13) | A new version with `requires_reacceptance` (6.8) |
 | Ads switched on later | HLD §16 | Consent records and a feature flag are ready (6.9) |
 | Better Auth upgrade adds columns | Normal upgrades | Its tables are separate from `profiles`; the migration only touches auth tables |

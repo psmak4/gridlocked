@@ -26,6 +26,7 @@ import type { AuthEnv } from "./env";
 import { queueEmail } from "./email/outbox";
 import type { EmailSender } from "./email/sender";
 import type { EmailTemplate } from "./email/templates";
+import { completeSignUp } from "./consent";
 import {
   checkUsername,
   isValidUsernameFormat,
@@ -405,6 +406,13 @@ export function createAuth(db: Db, deps: AuthDeps) {
             typeof body === "object" && body !== null
               ? (body as Record<string, unknown>)
               : {};
+          // Age and the legal documents are agreed to on the form (DM 6.2).
+          if (record.ageConfirmed !== true || record.accepted !== true) {
+            throw new APIError("BAD_REQUEST", {
+              message:
+                "Confirm your age and accept the terms to create an account.",
+            });
+          }
           const display = record.displayUsername;
           if (display !== undefined) {
             const typed = record.username;
@@ -503,8 +511,29 @@ export function createAuth(db: Db, deps: AuthDeps) {
               throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
             }
           },
-          after: async (user) => {
+          after: async (user, context) => {
             await ensureProfile(db, now(), user.id);
+            // Only the email form carries the two boxes (checked in the
+            // before-hook). Recording them opens a transaction of our own, so
+            // it waits for Better Auth's to commit. If it is lost, the
+            // account stays incomplete and `Viewer.complete` catches it.
+            if (context?.path !== "/sign-up/email") return;
+            queueAfterTransactionHook(
+              async () => {
+                await completeSignUp(db, now(), {
+                  userId: user.id,
+                  ageConfirmed: true,
+                  accepted: true,
+                });
+              },
+              {
+                onError: (error) => {
+                  console.error(
+                    `better-auth sign-up completion failed: ${error instanceof Error ? error.name : "unknown"}`,
+                  );
+                },
+              },
+            );
           },
         },
       },

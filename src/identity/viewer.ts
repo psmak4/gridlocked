@@ -22,7 +22,7 @@ export type Viewer = {
   impersonatedBy: string | null;
   staffVerifiedAt: Date | null;
   profile: Profile;
-  /** Has a username and has confirmed their age: nothing is left to finish. */
+  /** Has a username, has confirmed their age and has no legal document left to accept. */
   complete: boolean;
 };
 
@@ -37,7 +37,12 @@ export type IdentityErrorCode =
   | "reserved"
   | "held"
   | "taken"
-  | "username_too_soon";
+  | "username_too_soon"
+  // The profile (DM 6.2): a stale form, and values that aren't real.
+  | "version_conflict"
+  | "invalid_country"
+  | "invalid_timezone"
+  | "invalid_document";
 
 /** Carries a code and nothing personal: it can be logged and shown. */
 export class IdentityError extends Error {

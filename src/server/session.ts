@@ -8,6 +8,7 @@ import { authSessions, profiles, users } from "@/db/schema";
 import { createAuth, ensureProfile, type Auth } from "@/identity/auth";
 import { createResendSender } from "@/identity/email/resend";
 import type { EmailSender } from "@/identity/email/sender";
+import { pendingDocuments } from "@/identity/consent";
 import { parseAuthEnv, type AuthEnv } from "@/identity/env";
 import { touchViewer, type Viewer } from "@/identity/viewer";
 import { clockModeFromEnv, resolveClock } from "@/lib/resolve-clock";
@@ -125,7 +126,10 @@ export async function getViewer(
       impersonatedBy: row.impersonatedBy,
       staffVerifiedAt: row.staffVerifiedAt,
       profile,
-      complete: user.username !== null && profile.ageConfirmedAt !== null,
+      complete:
+        user.username !== null &&
+        profile.ageConfirmedAt !== null &&
+        (await pendingDocuments(db, user.id)).length === 0,
     };
     return touchViewer(db, now, viewer);
   });

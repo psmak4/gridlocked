@@ -12,7 +12,13 @@ test("a sign-up's verification email shows up on the test route, and its link wo
   const email = `e2e-${crypto.randomUUID()}@example.test`;
   const signUp = await request.post("/api/auth/sign-up/email", {
     headers: { origin: ORIGIN, ...FORWARDED },
-    data: { email, password: "correct horse battery", name: "E2E Person" },
+    data: {
+      email,
+      password: "correct horse battery",
+      name: "E2E Person",
+      ageConfirmed: true,
+      accepted: true,
+    },
   });
   expect(signUp.status()).toBe(200);
 

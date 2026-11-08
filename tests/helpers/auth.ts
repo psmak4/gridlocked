@@ -66,7 +66,15 @@ export function signUpRequest(
 ): Request {
   return authPost(
     "/sign-up/email",
-    { email, password: PASSWORD, name: "Test Person", ...over },
+    {
+      email,
+      password: PASSWORD,
+      name: "Test Person",
+      // The two boxes the form requires (DM 6.2).
+      ageConfirmed: true,
+      accepted: true,
+      ...over,
+    },
     headers,
   );
 }
