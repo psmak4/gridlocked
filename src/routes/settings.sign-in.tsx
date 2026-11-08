@@ -41,7 +41,7 @@ function SignInMethods() {
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string>();
   const only = state.methods.length <= 1;
-  const hasPassword = state.methods.some((m) => m.providerId === "credential");
+  const { hasPassword } = state;
   const hasDiscord = state.methods.some((m) => m.providerId === "discord");
 
   async function remove(providerId: string) {

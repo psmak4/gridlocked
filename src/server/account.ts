@@ -8,10 +8,8 @@ import { createServerFn } from "@tanstack/react-start";
 import {
   getCookie,
   getRequest,
-  setCookie,
   setResponseHeader,
 } from "@tanstack/react-start/server";
-import { parseSetCookieHeader, toCookieOptions } from "better-auth/cookies";
 import { z } from "zod";
 import { discordFrom } from "@/identity/env";
 import { stopImpersonating } from "@/identity/impersonation";
@@ -382,15 +380,6 @@ export const confirmMyDeletion = createServerFn({ method: "POST" })
     );
   });
 
-/** Puts each `Set-Cookie` Better Auth returned onto this response. */
-function applySetCookies(headers: Headers) {
-  const header = headers.get("set-cookie");
-  if (!header) return;
-  parseSetCookieHeader(header).forEach((value, name) => {
-    if (name) setCookie(name, value.value, toCookieOptions(value));
-  });
-}
-
 /**
  * The banner's Stop (ruling 51a): ends the impersonation and sets the
  * admin's own session cookie back. `/admin/stop-impersonating` is closed
@@ -401,10 +390,11 @@ export const stopImpersonation = createServerFn({ method: "POST" }).handler(
     privately();
     const request = getRequest();
     const viewer = await requestViewer();
-    const { headers } = await withAuth((auth, db, now) =>
+    // `tanstackStartCookies` puts Better Auth's Set-Cookie on this response,
+    // the admin's session among them: the only cookie path, so it's sent once.
+    await withAuth((auth, db, now) =>
       stopImpersonating(auth, db, now, { viewer, headers: request.headers }),
     );
-    applySetCookies(headers);
     return { ok: true };
   },
 );

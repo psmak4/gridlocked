@@ -5,7 +5,10 @@
  *
  * Reads take `requireComplete`, so an admin looking through someone's session
  * sees their pages; every write takes `requireWritable` (ruling 51b), and a
- * refusal a page can show comes back as `{ ok: false, error }`.
+ * refusal a page can show comes back as `{ ok: false, error }`. The export and
+ * deletion pages are the exception (ruling 52): an account that hasn't
+ * finished, or has a document to accept, can still take its data or leave, so
+ * they take `requireViewer` and refuse only an impersonated session.
  */
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
@@ -31,6 +34,7 @@ import { changeUsername, USERNAME_HOLD_DAYS } from "@/identity/usernames";
 import {
   IdentityError,
   requireComplete,
+  requireViewer,
   requireWritable,
   type IdentityErrorCode,
   type Viewer,
@@ -102,6 +106,16 @@ async function refusing<T extends object>(
     }
     throw error;
   }
+}
+
+/**
+ * Signed in and not an admin looking through someone's session, finished or
+ * not: for the export and deletion requests (ruling 52).
+ */
+function requireOwnSession(viewer: Viewer | null): Viewer {
+  const v = requireViewer(viewer);
+  if (v.impersonatedBy !== null) throw new IdentityError("read_only");
+  return v;
 }
 
 const shownName = (v: {
@@ -418,8 +432,14 @@ export async function changeUsernameAction(
 
 export type SignInMethodsState = {
   email: string;
+  /** A password is set: a credential row with a hash, as on the security page. */
+  hasPassword: boolean;
   methods: { providerId: string; label: string }[];
 };
+
+const holdsPassword = (
+  methods: { providerId: string; password: string | null }[],
+) => methods.some((m) => m.providerId === "credential" && m.password !== null);
 
 export async function signInMethodsState(
   db: Db,
@@ -433,6 +453,7 @@ export async function signInMethodsState(
   const methods = await linkedMethods(db, v.userId);
   return {
     email: user?.email ?? "",
+    hasPassword: holdsPassword(methods),
     methods: methods.map((m) => ({
       providerId: m.providerId,
       label: METHOD_LABEL[m.providerId] ?? m.providerId,
@@ -518,9 +539,7 @@ export async function securityState(
   const v = requireComplete(viewer);
   const methods = await linkedMethods(db, v.userId);
   return {
-    hasPassword: methods.some(
-      (m) => m.providerId === "credential" && m.password !== null,
-    ),
+    hasPassword: holdsPassword(methods),
     staff: !v.banned && hasStaffRole(v.role, "moderator"),
     twoFactorEnabled: v.twoFactorEnabled,
     staffUnlocked: v.staffVerifiedAt !== null,
@@ -539,7 +558,7 @@ export async function exportState(
   now: Date,
   viewer: Viewer | null,
 ): Promise<ExportState> {
-  const v = requireComplete(viewer);
+  const v = requireViewer(viewer);
   const [row] = await db
     .select({
       status: privacyRequests.status,
@@ -580,7 +599,7 @@ export function requestExportAction(
   return refusing(
     ["export_pending", "export_too_soon", "inactive"],
     async () => {
-      const v = requireWritable(viewer);
+      const v = requireOwnSession(viewer);
       await requestExport(db, now, { userId: v.userId });
       return { ok: true };
     },
@@ -590,7 +609,9 @@ export function requestExportAction(
 // --- Deletion ---------------------------------------------------------------
 
 export type DeletePageState = {
-  username: string;
+  /** What to type to confirm: the username, or the email before there is one. */
+  confirmWith: string;
+  confirmBy: "username" | "email";
   emailVerified: boolean;
   /** Teams that stop playing. */
   teams: string[];
@@ -602,11 +623,12 @@ export async function deletePageState(
   db: Db,
   viewer: Viewer | null,
 ): Promise<DeletePageState> {
-  const v = requireComplete(viewer);
+  const v = requireViewer(viewer);
   const [user] = await db
     .select({
       username: users.username,
       displayUsername: users.displayUsername,
+      email: users.email,
       emailVerified: users.emailVerified,
     })
     .from(users)
@@ -622,7 +644,10 @@ export async function deletePageState(
     .where(eq(leagues.ownerUserId, v.userId))
     .orderBy(asc(leagues.createdAt));
   return {
-    username: shownName(user ?? v),
+    // The same rule `requestDeletion` checks: the username, else the email.
+    ...(user?.username
+      ? { confirmWith: shownName(user), confirmBy: "username" as const }
+      : { confirmWith: user?.email ?? "", confirmBy: "email" as const }),
     emailVerified: user?.emailVerified ?? v.emailVerified,
     teams: ownTeams.map((t) => t.name),
     leagues: owned.map((l) => l.name),
@@ -649,7 +674,7 @@ export function requestDeletionAction(
       "inactive",
     ],
     async () => {
-      const v = requireWritable(viewer);
+      const v = requireOwnSession(viewer);
       const { confirm } = await requestDeletion(
         db,
         now,

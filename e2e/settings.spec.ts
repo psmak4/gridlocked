@@ -248,6 +248,50 @@ test.describe("settings", () => {
     ).toBeVisible();
   });
 
+  test("with a document to accept, the data and delete pages still work (ruling 52)", async ({
+    page,
+    request,
+  }) => {
+    const account = await createAccount(request);
+    await verifyByEmail(page, account.email);
+    // As if a new version of the terms needed accepting again.
+    const cleared = await request.post("/api/test/clear-acceptances", {
+      headers: { origin: ORIGIN },
+      data: { email: account.email },
+    });
+    expect(cleared.status()).toBe(200);
+    await page.goto("/settings");
+    await expect(page).toHaveURL(/\/welcome$/);
+
+    await page.goto("/settings/data");
+    await expect(heading(page)).toHaveText("Download my data");
+    await expect(page.getByRole("link", { name: "Back" })).toHaveAttribute(
+      "href",
+      "/welcome",
+    );
+    await page.getByRole("button", { name: "Request my data" }).click();
+    await expect(page.getByText("Ready within a few hours")).toBeVisible();
+
+    await page.goto("/settings/delete");
+    await expect(heading(page)).toHaveText("Delete your account");
+    await expect(page.getByRole("link", { name: "Back" })).toHaveAttribute(
+      "href",
+      "/welcome",
+    );
+    await page
+      .getByLabel("Type your username to confirm")
+      .fill(account.username);
+    await page.getByRole("button", { name: "Delete my account" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Check your email" }),
+    ).toBeVisible();
+    await page.goto(
+      linkIn(await emailTo(page.request, account.email, "Confirm deleting")),
+    );
+    await page.getByRole("button", { name: "Delete my account" }).click();
+    await expect(heading(page)).toHaveText("Your account is deleted");
+  });
+
   test("request an export, run the job, download the file", async ({
     page,
     request,

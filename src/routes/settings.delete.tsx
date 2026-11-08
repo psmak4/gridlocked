@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  BackLink,
   Body,
   BottomBar,
   FormMessage,
@@ -11,7 +10,7 @@ import {
   Title,
   linkClass,
 } from "@/components/account-layout";
-import { Help } from "@/components/settings-parts";
+import { Help, SettingsBack } from "@/components/settings-parts";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { privateHeaders } from "@/lib/private-headers";
@@ -28,17 +27,20 @@ export const Route = createFileRoute("/settings/delete")({
 });
 
 const REFUSALS: Record<string, string> = {
-  wrong_username: "That isn't your username.",
   sign_in_again:
     "Your email address isn't confirmed, so sign in again and then delete within 10 minutes.",
   last_admin:
     "You're the only admin. Make someone else an admin before you go.",
+  role_reserved: "This account can't be deleted here.",
+  inactive: "This account is already being deleted.",
   read_only: "This session is read-only.",
 };
 
 /**
  * Delete account (wave 4): what happens, a download first, the username
- * typed out, and an emailed link to finish (DM 6.7). Without a confirmed
+ * typed out (the email address, before there is a username), and an emailed
+ * link to finish (DM 6.7). An account that hasn't finished signing up can
+ * still come here (ruling 52). Without a confirmed
  * address a sign-in in the last 10 minutes is the confirmation instead.
  */
 function DeleteAccount() {
@@ -50,7 +52,7 @@ function DeleteAccount() {
   const [deleted, setDeleted] = useState(false);
   const matches =
     typed.trim() !== "" &&
-    typed.trim().toLowerCase() === state.username.toLowerCase();
+    typed.trim().toLowerCase() === state.confirmWith.toLowerCase();
 
   const points = [
     {
@@ -87,7 +89,11 @@ function DeleteAccount() {
         data: { typedUsername: typed },
       });
       if (!result.ok) {
-        setMessage(REFUSALS[result.error] ?? "We couldn't do that. Try again.");
+        setMessage(
+          result.error === "wrong_username"
+            ? `That isn't your ${state.confirmBy === "username" ? "username" : "email address"}.`
+            : (REFUSALS[result.error] ?? "We couldn't do that. Try again."),
+        );
       } else if (result.confirm === "email") {
         setSent(true);
       } else {
@@ -123,7 +129,7 @@ function DeleteAccount() {
   return (
     <Screen>
       <ScreenHeader>
-        <BackLink href="/settings">Settings</BackLink>
+        <SettingsBack />
       </ScreenHeader>
       <form
         method="post"
@@ -173,8 +179,12 @@ function DeleteAccount() {
           <TextField
             id="confirm-username"
             name="confirm-username"
-            label="Type your username to confirm"
-            placeholder={state.username}
+            label={
+              state.confirmBy === "username"
+                ? "Type your username to confirm"
+                : "Type your email address to confirm"
+            }
+            placeholder={state.confirmWith}
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}

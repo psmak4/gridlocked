@@ -244,11 +244,30 @@ describe("settings actions (M5 task 13)", () => {
       await addAccount(userId, "discord");
       expect(await signInMethodsState(db, await viewerOf(userId))).toEqual({
         email: "me@example.test",
+        hasPassword: true,
         methods: [
           { providerId: "credential", label: "Email and password" },
           { providerId: "discord", label: "Discord" },
         ],
       });
+    });
+
+    it("has no password when the credential row has none, as the security page says", async () => {
+      const userId = await seedUser(db);
+      await addAccount(userId, "credential");
+      await addAccount(userId, "discord");
+      await db
+        .update(authAccounts)
+        .set({ password: null })
+        .where(
+          and(
+            eq(authAccounts.userId, userId),
+            eq(authAccounts.providerId, "credential"),
+          ),
+        );
+      const viewer = await viewerOf(userId);
+      expect((await signInMethodsState(db, viewer)).hasPassword).toBe(false);
+      expect((await securityState(db, viewer)).hasPassword).toBe(false);
     });
 
     it("refuses to remove the last method of a password-only account", async () => {
@@ -495,7 +514,8 @@ describe("settings actions (M5 task 13)", () => {
         updatedAt: NOW,
       });
       expect(await deletePageState(db, await viewerOf(userId))).toEqual({
-        username: "late_braker",
+        confirmWith: "late_braker",
+        confirmBy: "username",
         emailVerified: true,
         teams: ["Late Brakers"],
         leagues: ["Thursday Pub Quiz"],
@@ -637,6 +657,114 @@ describe("settings actions (M5 task 13)", () => {
           deps,
         ),
       ).toEqual({ ok: false, error: "last_admin" });
+    });
+  });
+
+  describe("gated accounts (ruling 52)", () => {
+    /** Pending documents: a username, but a new document to accept. */
+    const pendingDocuments = async () => {
+      const userId = await seedUser(db, {
+        username: "late_braker",
+        email: "late@example.test",
+      });
+      return viewerOf(userId, { complete: false });
+    };
+    /** An unfinished sign-up: no username yet. */
+    const unfinished = async () => {
+      const userId = await seedUser(db, {
+        username: "half_done",
+        email: "half@example.test",
+      });
+      await db
+        .update(users)
+        .set({ username: null, displayUsername: null })
+        .where(eq(users.id, userId));
+      return viewerOf(userId, {
+        username: null,
+        displayUsername: null,
+        complete: false,
+      });
+    };
+    const deps = () => ({
+      sender: captureSender().sender,
+      baseUrl: "https://gridlocked.example",
+    });
+    function captureSender() {
+      const sent: { to: string; text: string }[] = [];
+      const sender: EmailSender = {
+        async send(message) {
+          sent.push({ to: message.to, text: message.text });
+          return { id: `sent-${sent.length}` };
+        },
+      };
+      return { sent, sender };
+    }
+
+    for (const [kind, make, typed, by] of [
+      ["pending documents", pendingDocuments, "late_braker", "username"],
+      ["an unfinished sign-up", unfinished, "half@example.test", "email"],
+    ] as const) {
+      it(`with ${kind}, can see and ask for an export`, async () => {
+        const viewer = await make();
+        expect(await exportState(db, NOW, viewer)).toEqual({ status: "none" });
+        expect(await requestExportAction(db, NOW, viewer)).toEqual({
+          ok: true,
+        });
+        expect(await exportState(db, NOW, viewer)).toEqual({
+          status: "pending",
+        });
+      });
+
+      it(`with ${kind}, can see the delete page and ask to delete`, async () => {
+        const viewer = await make();
+        expect(await deletePageState(db, viewer)).toEqual({
+          confirmWith: typed,
+          confirmBy: by,
+          emailVerified: true,
+          teams: [],
+          leagues: [],
+        });
+        expect(
+          await requestDeletionAction(
+            db,
+            NOW,
+            viewer,
+            { typedUsername: typed.toUpperCase() },
+            deps(),
+          ),
+        ).toEqual({ ok: true, confirm: "email" });
+      });
+
+      it(`with ${kind}, an impersonated session is still refused`, async () => {
+        const viewer = impersonated(await make());
+        expect(await requestExportAction(db, NOW, viewer)).toEqual({
+          ok: false,
+          error: "read_only",
+        });
+        expect(
+          await requestDeletionAction(
+            db,
+            NOW,
+            viewer,
+            { typedUsername: typed },
+            deps(),
+          ),
+        ).toEqual({ ok: false, error: "read_only" });
+        const asked = await db
+          .select()
+          .from(privacyRequests)
+          .where(eq(privacyRequests.userId, viewer.userId));
+        expect(asked).toHaveLength(0);
+      });
+    }
+
+    it("still needs someone signed in", async () => {
+      await expect(exportState(db, NOW, null)).rejects.toMatchObject({
+        code: "unauthenticated",
+      });
+      await expect(deletePageState(db, null)).rejects.toMatchObject({
+        code: "unauthenticated",
+      });
     });
   });
 });

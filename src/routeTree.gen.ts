@@ -32,6 +32,7 @@ import { Route as WelcomeFavoritesRouteImport } from './routes/welcome.favorites
 import { Route as WelcomeSpoilersRouteImport } from './routes/welcome.spoilers'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiTestBanRouteImport } from './routes/api/test.ban'
+import { Route as ApiTestClearAcceptancesRouteImport } from './routes/api/test.clear-acceptances'
 import { Route as ApiTestEmailsRouteImport } from './routes/api/test.emails'
 import { Route as ApiTestExportFileRouteImport } from './routes/api/test.export-file'
 import { Route as ApiTestImpersonateRouteImport } from './routes/api/test.impersonate'
@@ -154,6 +155,11 @@ const ApiTestBanRoute = ApiTestBanRouteImport.update({
   path: '/api/test/ban',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTestClearAcceptancesRoute = ApiTestClearAcceptancesRouteImport.update({
+  id: '/api/test/clear-acceptances',
+  path: '/api/test/clear-acceptances',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
   id: '/api/test/emails',
   path: '/api/test/emails',
@@ -209,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
+  '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
@@ -240,6 +247,7 @@ export interface FileRoutesByTo {
   '/welcome': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
+  '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
@@ -272,6 +280,7 @@ export interface FileRoutesById {
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
+  '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
@@ -305,6 +314,7 @@ export interface FileRouteTypes {
     | '/welcome/'
     | '/api/auth/$'
     | '/api/test/ban'
+    | '/api/test/clear-acceptances'
     | '/api/test/emails'
     | '/api/test/export-file'
     | '/api/test/impersonate'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/api/auth/$'
     | '/api/test/ban'
+    | '/api/test/clear-acceptances'
     | '/api/test/emails'
     | '/api/test/export-file'
     | '/api/test/impersonate'
@@ -367,6 +378,7 @@ export interface FileRouteTypes {
     | '/welcome/'
     | '/api/auth/$'
     | '/api/test/ban'
+    | '/api/test/clear-acceptances'
     | '/api/test/emails'
     | '/api/test/export-file'
     | '/api/test/impersonate'
@@ -399,6 +411,7 @@ export interface RootRouteChildren {
   WelcomeIndexRoute: typeof WelcomeIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiTestBanRoute: typeof ApiTestBanRoute
+  ApiTestClearAcceptancesRoute: typeof ApiTestClearAcceptancesRoute
   ApiTestEmailsRoute: typeof ApiTestEmailsRoute
   ApiTestExportFileRoute: typeof ApiTestExportFileRoute
   ApiTestImpersonateRoute: typeof ApiTestImpersonateRoute
@@ -570,6 +583,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTestBanRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/test/clear-acceptances': {
+      id: '/api/test/clear-acceptances'
+      path: '/api/test/clear-acceptances'
+      fullPath: '/api/test/clear-acceptances'
+      preLoaderRoute: typeof ApiTestClearAcceptancesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/test/emails': {
       id: '/api/test/emails'
       path: '/api/test/emails'
@@ -639,6 +659,7 @@ const rootRouteChildren: RootRouteChildren = {
   WelcomeIndexRoute: WelcomeIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiTestBanRoute: ApiTestBanRoute,
+  ApiTestClearAcceptancesRoute: ApiTestClearAcceptancesRoute,
   ApiTestEmailsRoute: ApiTestEmailsRoute,
   ApiTestExportFileRoute: ApiTestExportFileRoute,
   ApiTestImpersonateRoute: ApiTestImpersonateRoute,

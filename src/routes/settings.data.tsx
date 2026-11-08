@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import {
-  BackLink,
   Body,
   FormMessage,
   Notice,
@@ -9,7 +8,7 @@ import {
   ScreenHeader,
   Title,
 } from "@/components/account-layout";
-import { Help } from "@/components/settings-parts";
+import { Help, SettingsBack } from "@/components/settings-parts";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { privateHeaders } from "@/lib/private-headers";
 import { settingsGuard } from "@/lib/settings-guard";
@@ -26,6 +25,7 @@ export const Route = createFileRoute("/settings/data")({
 const REFUSALS: Record<string, string> = {
   export_too_soon: "You can ask for a new copy once a day.",
   export_pending: "Your copy is already on its way.",
+  inactive: "This account is already being deleted.",
   read_only: "This session is read-only.",
 };
 
@@ -59,7 +59,7 @@ function DataExport() {
   return (
     <Screen>
       <ScreenHeader>
-        <BackLink href="/settings">Settings</BackLink>
+        <SettingsBack />
       </ScreenHeader>
       <Body>
         <Title>Download my data</Title>

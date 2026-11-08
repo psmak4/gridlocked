@@ -59,6 +59,8 @@ function ConfirmDeletion() {
         setMessage(
           "You're the only admin. Make someone else an admin before you go.",
         );
+      else if (result.error === "role_reserved")
+        setMessage("This account can't be deleted here.");
       else setMessage("We couldn't do that. Try again.");
     } catch {
       setMessage("We couldn't do that. Try again in a moment.");

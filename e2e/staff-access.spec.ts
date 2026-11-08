@@ -1,4 +1,9 @@
-import { expect, test } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 import {
   createAccount,
   heading,
@@ -68,6 +73,84 @@ test.describe("staff access", () => {
     ).toHaveCount(0);
   });
 
+  /** A new admin with TOTP on, signed out again. */
+  async function adminWithTotp(page: Page, request: APIRequestContext) {
+    const account = await createAccount(request);
+    await makeAdmin(request, account.email);
+    await signIn(page, account);
+    const totp = await setUpTotp(page, account.password);
+    await page.context().clearCookies();
+    return { ...account, ...totp };
+  }
+
+  /** Email and password on the sign-in form, by keyboard. */
+  async function startSignIn(
+    page: Page,
+    account: { email: string; password: string },
+  ) {
+    await page.goto("/sign-in");
+    await page.getByLabel("Email").fill(account.email);
+    await page.getByLabel("Password").fill(account.password);
+    await page.getByLabel("Password").press("Enter");
+    await expect(heading(page)).toHaveText("Two-step sign-in");
+  }
+
+  test("password and TOTP sign-in reaches home", async ({ page, request }) => {
+    const admin = await adminWithTotp(page, request);
+    await startSignIn(page, admin);
+    const field = page.getByLabel("Code from your authenticator app");
+    await expect(field).toBeFocused();
+    // Keyboard alone: a wrong code, then the right one, each with Enter.
+    await page.keyboard.type("000000");
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "That code didn't work." }),
+    ).toBeVisible();
+    await field.fill(totpCode(admin.setupKey));
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL("/");
+    await expect(
+      page.getByText(`Signed in as ${admin.username}`),
+    ).toBeVisible();
+  });
+
+  test("a backup code works once at sign-in", async ({ page, request }) => {
+    const admin = await adminWithTotp(page, request);
+    await startSignIn(page, admin);
+    await page.getByRole("button", { name: "Use a backup code" }).click();
+    const field = page.getByLabel("Backup code");
+    await expect(field).toBeFocused();
+    await field.fill(admin.backupCodes[0]!);
+    await field.press("Enter");
+    await expect(page).toHaveURL("/");
+    await expect(
+      page.getByText(`Signed in as ${admin.username}`),
+    ).toBeVisible();
+
+    // The same code again is refused; the next one works.
+    await page.context().clearCookies();
+    await startSignIn(page, admin);
+    await page.getByRole("button", { name: "Use a backup code" }).click();
+    await page.getByLabel("Backup code").fill(admin.backupCodes[0]!);
+    await page.getByLabel("Backup code").press("Enter");
+    await expect(
+      page
+        .getByRole("alert")
+        .filter({ hasText: "That backup code didn't work." }),
+    ).toBeVisible();
+    // And back to the app's code is one switch away.
+    await page
+      .getByRole("button", { name: "Use the code from your app" })
+      .click();
+    await expect(
+      page.getByLabel("Code from your authenticator app"),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Use a backup code" }).click();
+    await page.getByLabel("Backup code").fill(admin.backupCodes[1]!);
+    await page.getByLabel("Backup code").press("Enter");
+    await expect(page).toHaveURL("/");
+  });
+
   test("the impersonation banner shows and Stop returns", async ({
     page,
     request,
@@ -111,7 +194,20 @@ test.describe("staff access", () => {
     await page.goto("/profile");
     await expect(banner).toBeVisible();
 
-    await banner.getByRole("button", { name: "Stop" }).click();
+    const [stopped] = await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.request().method() === "POST" && r.url().includes("/_serverFn/"),
+      ),
+      banner.getByRole("button", { name: "Stop" }).click(),
+    ]);
+    // One cookie path: the admin's session cookie is set back exactly once.
+    const sessionCookies = (await stopped.headersArray()).filter(
+      (h) =>
+        h.name.toLowerCase() === "set-cookie" &&
+        /^(__Secure-)?better-auth\.session_token=[^;]+/.test(h.value),
+    );
+    expect(sessionCookies).toHaveLength(1);
     await expect(page).toHaveURL("/");
     await expect(
       page.getByText(`Signed in as ${admin.username}`),

@@ -1,5 +1,23 @@
 import type { ReactNode } from "react";
+import { getRouteApi } from "@tanstack/react-router";
+import { BackLink } from "@/components/account-layout";
 import { cn } from "@/lib/utils";
+
+const root = getRouteApi("__root__");
+
+/**
+ * The Back link on the data and delete pages. An account that hasn't
+ * finished (ruling 52) goes back to finishing, since the gate would send
+ * `/settings` there anyway.
+ */
+export function SettingsBack() {
+  const { account } = root.useRouteContext();
+  return account && !account.complete ? (
+    <BackLink href="/welcome">Back</BackLink>
+  ) : (
+    <BackLink href="/settings">Settings</BackLink>
+  );
+}
 
 /**
  * The parts the profile and settings boards share, beside

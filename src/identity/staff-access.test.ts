@@ -477,6 +477,64 @@ describe("the staff two-step (DM 6.4)", () => {
       }
     });
 
+    // Ruling 53: the sign-in form's code step goes through the same paths.
+    it("the sign-in challenge passes the unlock rule, by code and by backup code", async () => {
+      const { secret, backupCodes } = await adminWithTotp();
+      // A browser still holding a locked session from before signs in.
+      later(5 * 60_000);
+      const locked = await signInWithTotp(auth, BOSS, secret);
+      for (const [path, code] of [
+        ["/two-factor/verify-totp", () => totpCode(auth, secret)],
+        ["/two-factor/verify-backup-code", async () => backupCodes[0]!],
+      ] as const) {
+        later(SECOND);
+        const challenge = await post("/sign-in/email", locked, {
+          email: BOSS,
+          password: PASSWORD,
+        });
+        expect(await challenge.json()).toMatchObject({
+          twoFactorRedirect: true,
+        });
+        // The sign-in clears the old session cookie, so the code step that
+        // follows has only the challenge: no session for the rule to judge.
+        const cleared = challenge.headers
+          .getSetCookie()
+          .find((c) => /^(__Secure-)?better-auth\.session_token=/.test(c));
+        expect(cleared).toMatch(/Max-Age=0/i);
+        const verified = await post(path, cookieHeader(challenge), {
+          code: await code(),
+        });
+        expect(verified.status, path).toBe(200);
+        const v = await viewer(cookieHeader(verified));
+        expect(v!.userId, path).toBeDefined();
+        expect(v!.staffVerifiedAt, path).toBeNull();
+      }
+    });
+
+    it("a signed-in, locked session can't use the verify paths, even with a right code", async () => {
+      const { secret, backupCodes } = await adminWithTotp();
+      later(5 * 60_000);
+      const cookie = await signInWithTotp(auth, BOSS, secret);
+      later(SECOND);
+      for (const [path, code] of [
+        ["/two-factor/verify-totp", await totpCode(auth, secret)],
+        ["/two-factor/verify-backup-code", backupCodes[0]!],
+      ] as const) {
+        const response = await post(path, cookie, { code });
+        expect(response.status, path).toBe(403);
+        expect(await response.text(), path).toContain(
+          "STAFF_SESSION_UNVERIFIED",
+        );
+      }
+      expect((await viewer(cookie))!.staffVerifiedAt).toBeNull();
+      // The refused backup code wasn't used up.
+      await verifyStaffSession(auth, t.db, now(), {
+        viewer: (await viewer(cookie))!,
+        code: backupCodes[0]!,
+      });
+      expect((await viewer(cookie))!.staffVerifiedAt).not.toBeNull();
+    });
+
     it("after a code, managing the factor works, and first enrolment is open", async () => {
       // First enrolment needed no unlock: there was no factor to protect.
       const { secret, cookie } = await discordAdmin();
