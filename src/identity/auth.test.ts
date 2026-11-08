@@ -258,6 +258,8 @@ describe("Better Auth on the real tables", () => {
     expect(DISABLED_AUTH_PATHS).not.toContain("/admin/stop-impersonating");
     expect(DISABLED_AUTH_PATHS).toContain("/admin/set-role");
     expect(DISABLED_AUTH_PATHS).toContain("/delete-user");
+    expect(DISABLED_AUTH_PATHS).toContain("/sign-in/username");
+    expect(DISABLED_AUTH_PATHS).toContain("/is-username-available");
     expect(
       DISABLED_AUTH_PATHS.filter((p) => p.startsWith("/admin/")).length,
     ).toBe(13);
