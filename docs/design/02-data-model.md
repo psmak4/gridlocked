@@ -1585,6 +1585,13 @@ A user can report a given target only once.
 - **`to_email` is nullable** because a sent or expired row's address can be scrubbed (6.7), but a CHECK requires it while `status = 'queued'`.
 - **One queued row per address and template:** a partial unique index on `(lower(to_email), template) WHERE status = 'queued'`, so a repeat request doesn't queue a second email. An index on `(status, send_after)` serves the sender.
 - **Magic links and resets go first**, since they expire. Verification emails wait if the cap is near.
+- **How the outbox works (M5):**
+  - `queueEmail` first limits each address to 3 emails per template in 10 minutes, on a SHA-256 of the lower-cased address (`auth_rate_limits` key `email:<template>:<hash>`, so no address is stored there). Past that it writes nothing and returns `limited`, which no caller shows.
+  - It then upserts the queued row (a repeat replaces it) and sends at once if the caps allow, under a Postgres advisory transaction lock so two requests can't both take the last place. Over the cap, with no sender, or on a passing failure, the row stays `queued` with a later `send_after` and an `email_flush` job is queued for that time (key `email_flush:<yyyy-mm-ddThh>`).
+  - **Caps** (setting `email_caps`: `perDay` 100, `perMonth` 3,000, `reservedForUrgent` 20, `alertAt` 0.8). Days and months count in UTC from `sent_at`. Ordinary templates stop at `perDay - reservedForUrgent` (80); `magic_link`, `password_reset` and `delete_confirm` can use all 100; the month's cap binds even when the day has room. The flush sends urgent rows first, then oldest, and marks a row past `expires_at` `expired`.
+  - **A finished row keeps no personal data:** when a row becomes `sent`, `failed` or `expired`, `to_email` is set to null and `payload` to `{}`. The template, status and timestamps stay. `last_error` holds a short code (`rejected`, `send_failed`, `provider_cap`), never provider text.
+  - The Resend `Idempotency-Key` is the row id, so a crash between the send and the update can't send twice. A 422 is a rejected address (`failed`, not retried); a quota error from Resend holds the batch until the next UTC day; other errors leave the row queued for the next hour.
+  - At 80% of `perDay` a review item `email_cap_near` opens, once per UTC day (key `email_cap_near:<yyyy-mm-dd>`).
 
 ### 5.12 Search (proposed; not in the HLD's launch list, so it can wait)
 It's cheap enough to include at launch. If it's deferred, adding it later is purely additive.

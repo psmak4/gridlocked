@@ -461,6 +461,13 @@ When a pool driver becomes `doubtful` or `unavailable` before lock:
 - **Channels:** in-app (bell and feed), Web Push via the PWA, and email (Resend). Web Push is free, and iOS supports it for installed PWAs.
 - **Email is for account messages only at launch (decided 2026-10-27, for the free tier):** sign-up verification, magic links and password resets. Resend's free plan allows 100 emails/day and 3,000/month, which leaves no room for notification email. Lock reminders, roster changes, scores and replies go **in-app and by Web Push**, which is why Web Push moved into launch scope (§15). Email notifications come back once we're on a paid email plan (Resend Pro is $20/month).
 - **Coping with the daily email cap (proposed):** account emails go through a queue that retries when the next day's allowance opens. Admins get an alert at about 80% of the daily cap. A launch-day sign-up rush beyond 100 people will see delayed verification emails, so sign-up nudges people toward Discord sign-in, which needs no email from us. If a launch push is planned, switch to Resend Pro for that month.
+- **How the queue works (built in M5):** `queueEmail` (`src/identity/email/outbox.ts`) writes the `email_outbox` row (DM 5.11) and sends at once when the caps allow; otherwise an `email_flush` job sends it when the allowance opens.
+  - **Caps:** 100 a day and 3,000 a month, counted in UTC. Magic links, resets and delete confirmations may use all 100; every other email stops at 80, so 20 are kept for them. The month's cap binds even when the day has room.
+  - **Admin alert:** a review item (`email_cap_near`) opens once a day when 80 have been sent. The sign-up screen can say "It might take a while today" from `emailAllowance(...).busy`.
+  - **Per address:** at most 3 emails per address and template in 10 minutes. Past that nothing is sent or stored and the caller gets the same answer as for any other address, so a stranger can't tell whether an address has an account.
+  - **Privacy:** a sent, failed or expired row drops its address and link. Logs and errors name no address, link or provider response.
+  - **No sender yet:** until `RESEND_API_KEY` and `EMAIL_FROM` are set on the function (`neon.ts` declares them only when both are set), emails stay queued and the flush job logs a count.
+  - Every email ends with "Unofficial. Not affiliated with Formula 1 or the FIA."
 - **Types:** lock reminders, roster changes affecting your team, scores final, league activity, replies and mentions, moderation notices.
 - Every template has a spoiler-safe variant.
 

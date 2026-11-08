@@ -32,6 +32,17 @@ export const settingSchemas = {
   /** Re-checks after the race (HLD §4.4). */
   finalizer_checks: z.object({ afterHours: z.array(positiveInt).min(1) }),
   validator_thresholds: z.object({ carsPerConstructor: positiveInt }),
+  /**
+   * Resend's free plan (HLD §10). `reservedForUrgent` of the day's emails are
+   * kept for magic links, resets and delete confirmations; `alertAt` is the
+   * share of `perDay` at which admins get a review item.
+   */
+  email_caps: z.object({
+    perDay: positiveInt,
+    perMonth: positiveInt,
+    reservedForUrgent: z.number().int().nonnegative(),
+    alertAt: z.number().gt(0).max(1),
+  }),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -56,4 +67,10 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
   poll_schedule: { backoffMinutes: [5, 15, 60], giveUpAfterHours: 24 },
   finalizer_checks: { afterHours: [2, 6, 24, 48] },
   validator_thresholds: { carsPerConstructor: 2 },
+  email_caps: {
+    perDay: 100,
+    perMonth: 3000,
+    reservedForUrgent: 20,
+    alertAt: 0.8,
+  },
 };
