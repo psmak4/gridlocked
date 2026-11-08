@@ -4,6 +4,8 @@ import { expect, test } from "@playwright/test";
 // in-memory PGlite and a secret made up for the run.
 
 const ORIGIN = "http://localhost:3100";
+// Better Auth keys its rate limit on the client IP.
+const FORWARDED = { "x-forwarded-for": "203.0.113.7" };
 
 test.describe("logged-out pages", () => {
   test("a logged-out home page sets no cookie and stays cacheable", async ({
@@ -20,16 +22,18 @@ test.describe("logged-out pages", () => {
 
 test.describe("/api/auth", () => {
   test("the auth route answers private, no-store", async ({ request }) => {
-    const ok = await request.get("/api/auth/ok");
+    const ok = await request.get("/api/auth/ok", { headers: FORWARDED });
     expect(ok.status()).toBe(200);
     expect(ok.headers()["cache-control"]).toBe("private, no-store");
 
-    const missing = await request.get("/api/auth/no-such-path");
+    const missing = await request.get("/api/auth/no-such-path", {
+      headers: FORWARDED,
+    });
     expect(missing.status()).toBe(404);
     expect(missing.headers()["cache-control"]).toBe("private, no-store");
 
     const wrong = await request.post("/api/auth/sign-in/email", {
-      headers: { origin: ORIGIN },
+      headers: { origin: ORIGIN, ...FORWARDED },
       data: { email: "nobody@example.test", password: "not a password" },
     });
     expect(wrong.status()).toBe(401);
@@ -40,7 +44,7 @@ test.describe("/api/auth", () => {
     request,
   }) => {
     const response = await request.post("/api/auth/sign-up/email", {
-      headers: { origin: ORIGIN },
+      headers: { origin: ORIGIN, ...FORWARDED },
       data: {
         email: `e2e-${crypto.randomUUID()}@example.test`,
         password: "correct horse battery",

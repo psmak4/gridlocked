@@ -47,4 +47,23 @@ describe("Better Auth import boundary", () => {
       "no-restricted-imports",
     ]);
   });
+
+  it("flags it in the files that are exempt from the provider boundary", async () => {
+    const eslint = new ESLint({ cwd: root, ignore: false });
+    for (const filePath of [
+      "scripts/x.ts",
+      "tests/helpers/x.ts",
+      "src/jobs/functions/tick.ts",
+      "src/providers/x.ts",
+    ]) {
+      const [result] = await eslint.lintText(
+        'import { betterAuth } from "better-auth";\nexport const a = betterAuth;\n',
+        { filePath: `${root}/${filePath}` },
+      );
+      expect(
+        result?.messages.map((m) => m.ruleId),
+        filePath,
+      ).toEqual(["no-restricted-imports"]);
+    }
+  });
 });

@@ -96,7 +96,12 @@ const eslintConfig = defineConfig([
     // Test helpers parse recorded provider fixtures, and the one-off
     // recording script calls the provider client. Neither is domain code.
     files: ["tests/helpers/**", "scripts/**"],
-    rules: { "no-restricted-imports": "off" },
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: [betterAuthBoundaryPattern] },
+      ],
+    },
   },
   {
     // Better Auth's own files may import it; the provider boundary still holds.
@@ -117,7 +122,12 @@ const eslintConfig = defineConfig([
     // database, like the replay harness does: the one file in src/jobs that
     // may import src/providers.
     files: ["src/jobs/functions/tick.ts"],
-    rules: { "no-restricted-imports": "off" },
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: [betterAuthBoundaryPattern] },
+      ],
+    },
   },
   {
     // The scoring engine is pure (HLD §5.6): rules and results in, lines out.
@@ -145,7 +155,12 @@ const eslintConfig = defineConfig([
   {
     // The adapters' own home, and tests of it.
     files: ["src/providers/**"],
-    rules: { "no-restricted-imports": "off" },
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: [betterAuthBoundaryPattern] },
+      ],
+    },
   },
 ]);
 

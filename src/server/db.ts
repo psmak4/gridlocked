@@ -25,7 +25,15 @@ export async function withDb<T>(fn: (db: ServerDb) => Promise<T>): Promise<T> {
   }
   if (import.meta.env.VITE_LOCAL_DB === "1") {
     local ??= import("./local-db").then((m) => m.localDb());
-    return fn(await local);
+    let db: ServerDb;
+    try {
+      db = await local;
+    } catch (error) {
+      // A failed start isn't cached: the next call tries again.
+      local = undefined;
+      throw error;
+    }
+    return fn(db);
   }
   throw new Error("DATABASE_URL is not set");
 }

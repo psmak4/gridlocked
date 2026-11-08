@@ -26,9 +26,17 @@ describe("withNoStore", () => {
   });
 
   it("keeps the body and the other headers when it has to copy", async () => {
-    const redirect = Response.redirect("https://example.test/x", 301);
-    const out = withNoStore(redirect);
-    expect(out).not.toBe(redirect);
+    const immutable = Response.redirect("https://example.test/x", 301);
+    const out = withNoStore(immutable);
+    expect(out).not.toBe(immutable);
     expect(out.status).toBe(301);
+    expect(out.headers.get("location")).toBe("https://example.test/x");
+    expect(await out.text()).toBe("");
+
+    const withBody = new Response("hello", { headers: { "x-keep": "1" } });
+    Object.defineProperty(withBody, "headers", {
+      value: Response.redirect("https://example.test/y").headers,
+    });
+    expect(await withNoStore(withBody).text()).toBe("hello");
   });
 });

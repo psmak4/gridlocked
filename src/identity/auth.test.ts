@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DrizzleQueryError } from "drizzle-orm/errors";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
   authPost,
@@ -9,6 +10,7 @@ import {
   testAuth,
   type TestAuth,
 } from "../../tests/helpers/auth";
+import { DISABLED_AUTH_PATHS } from "./auth";
 import { authRateLimits, authSessions, profiles, users } from "@/db/schema";
 
 const UUID_V7 =
@@ -126,7 +128,8 @@ describe("Better Auth on the real tables", () => {
     const refused = await closed.handler(
       signUpRequest("stranger@example.test"),
     );
-    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).not.toContain("stranger@example.test");
     expect(await people()).toHaveLength(0);
 
     const allowed = await closed.handler(signUpRequest("Friend@Example.test"));
@@ -136,7 +139,8 @@ describe("Better Auth on the real tables", () => {
 
   it("a .invalid address can't sign up", async () => {
     const response = await auth.handler(signUpRequest("ghost@example.invalid"));
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain("ghost@example.invalid");
     expect(await people()).toHaveLength(0);
   });
 
@@ -191,5 +195,60 @@ describe("Better Auth on the real tables", () => {
       .where(eq(authSessions.userId, ada.id));
     // Her own sign-up session, and the impersonation.
     expect(rows.map((r) => r.impersonatedBy).sort()).toEqual([boss.id, null]);
+  });
+
+  it("a failing database write logs and returns no address", async () => {
+    const address = "leaky@example.test";
+    const failing = new Proxy(t.db, {
+      get(target, prop, receiver) {
+        if (prop === "transaction") {
+          return async () => {
+            throw new DrizzleQueryError(
+              'insert into "users" ("email") values ($1)',
+              [address],
+              new Error("connection reset"),
+            );
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const logged: string[] = [];
+    const spies = (["log", "info", "warn", "error"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        logged.push(
+          args.map((a) => (a instanceof Error ? a.stack : String(a))).join(" "),
+        );
+      }),
+    );
+    try {
+      // The failure reaches the caller (the route logs its name only) or
+      // comes back as an error response; either way, nothing is logged here.
+      const outcome = await testAuth(failing)
+        .handler(signUpRequest(address))
+        .then(
+          (response) => response,
+          (error: unknown) => error,
+        );
+      if (outcome instanceof Response) {
+        expect(outcome.status).toBeGreaterThanOrEqual(400);
+        expect(await outcome.text()).not.toContain(address);
+      } else {
+        expect(outcome).toBeInstanceOf(DrizzleQueryError);
+      }
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+    expect(logged.join("\n")).not.toContain(address);
+  });
+
+  it("closes every admin endpoint but the two impersonation ones", () => {
+    expect(DISABLED_AUTH_PATHS).not.toContain("/admin/impersonate-user");
+    expect(DISABLED_AUTH_PATHS).not.toContain("/admin/stop-impersonating");
+    expect(DISABLED_AUTH_PATHS).toContain("/admin/set-role");
+    expect(DISABLED_AUTH_PATHS).toContain("/delete-user");
+    expect(
+      DISABLED_AUTH_PATHS.filter((p) => p.startsWith("/admin/")).length,
+    ).toBe(13);
   });
 });

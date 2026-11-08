@@ -51,9 +51,18 @@ jobs:
       - name: Unit and database tests
         run: pnpm test
 
-      # The e2e tests run the auth routes on an in-memory PGlite, which only
-      # a build made with this flag contains.
-      - name: Build
+      # A deployed build never has the flag. Build it the way a host does, with
+      # no auth secrets, and fail if the local database code got in.
+      - name: Build without the local database
+        run: |
+          pnpm build
+          if grep -rq migrationsFolder .output/server; then
+            echo "::error::.output/server contains the local-db code"
+            exit 1
+          fi
+
+      # The e2e tests need the flagged build, so make it again.
+      - name: Build for end-to-end tests
         run: pnpm build
         env:
           VITE_LOCAL_DB: "1"

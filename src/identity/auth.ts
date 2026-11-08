@@ -25,29 +25,17 @@ export type AuthDeps = {
 /**
  * Staff actions that need an audit row in the same transaction are ours (DM
  * 6.6), so no admin endpoint is reachable over HTTP except the two that only
- * the plugin can do: minting and ending an impersonation session.
+ * the plugin can do: minting and ending an impersonation session. The list is
+ * read from the plugin, so an endpoint a later release adds is closed too.
  */
 const ADMIN_PATHS_OVER_HTTP = [
   "/admin/impersonate-user",
   "/admin/stop-impersonating",
 ];
-const ADMIN_PATHS = [
-  "/admin/ban-user",
-  "/admin/create-user",
-  "/admin/get-user",
-  "/admin/has-permission",
-  "/admin/list-user-sessions",
-  "/admin/list-users",
-  "/admin/remove-user",
-  "/admin/revoke-user-session",
-  "/admin/revoke-user-sessions",
-  "/admin/set-role",
-  "/admin/set-user-password",
-  "/admin/unban-user",
-  "/admin/update-user",
-];
 export const DISABLED_AUTH_PATHS = [
-  ...ADMIN_PATHS.filter((path) => !ADMIN_PATHS_OVER_HTTP.includes(path)),
+  ...Object.values(admin().endpoints)
+    .map((endpoint) => endpoint.path)
+    .filter((path) => !ADMIN_PATHS_OVER_HTTP.includes(path)),
   // `deleteUser.enabled: false` makes these refuse, but they would still be
   // routed; Better Auth's deletion is a hard delete (DM 6.0).
   "/delete-user",
@@ -79,10 +67,31 @@ export async function ensureProfile(
     .onConflictDoNothing();
 }
 
+/**
+ * Better Auth's loggers print the error object, and a database error's
+ * message carries the query's parameters: an email address. This one writes
+ * the level and the error's name, and drops every message and argument.
+ */
+export function logAuthEvent(
+  level: string,
+  _message: string,
+  ...args: unknown[]
+): void {
+  const failure = args.find((arg) => arg instanceof Error);
+  const line = `better-auth ${level}: ${failure?.name ?? "event"}`;
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
 export function createAuth(db: Db, deps: AuthDeps) {
   const { env, now } = deps;
   return betterAuth({
     secret: env.secret,
+    logger: { log: logAuthEvent },
+    // API errors still become responses; anything else (a database failure)
+    // reaches the caller, whose own catch logs the name only.
+    onAPIError: { throw: true },
     // One build serves every host in local mode, so the address comes from
     // the request there; otherwise it is the one configured address.
     baseURL: env.baseUrl ?? { allowedHosts: ["localhost:*"] },

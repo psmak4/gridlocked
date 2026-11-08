@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { TEST_AUTH_SECRET } from "../../tests/helpers/auth";
 import { parseAuthEnv } from "./env";
 
-// A fake value for tests only; 32 characters, as Better Auth wants.
-const SECRET = "test-only-fake-secret-0123456789ab";
+const SECRET = TEST_AUTH_SECRET;
 
 describe("parseAuthEnv", () => {
   it("needs a secret and a URL outside local mode", () => {
