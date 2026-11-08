@@ -14,8 +14,12 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   webServer: {
     // CI builds before running e2e; locally, build first so the run is self-contained.
-    // The Nitro server reads its port from PORT.
-    command: process.env.CI ? "pnpm start" : "pnpm build && pnpm start",
+    // The Nitro server reads its port from PORT. VITE_LOCAL_DB=1 builds the
+    // server with an in-memory PGlite for the auth routes; CI sets it on its
+    // build step, and a deployed build never does.
+    command: process.env.CI
+      ? "pnpm start"
+      : "VITE_LOCAL_DB=1 pnpm build && pnpm start",
     env: { PORT: String(PORT) },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
