@@ -274,6 +274,13 @@
       "when": 1794146907318,
       "tag": "0038_old_vertigo",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794161883467,
+      "tag": "0039_lyrical_rage",
+      "breakpoints": true
     }
   ]
 }

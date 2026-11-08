@@ -45,6 +45,12 @@ const COPY: Record<
       "Use this link to confirm deleting your account. If you didn't ask for this, you can ignore this email.",
     action: "Confirm deletion",
   },
+  export_ready: {
+    subject: "Your Gridlocked data export is ready",
+    intro:
+      "The copy of your Gridlocked data you asked for is ready. The link works for 7 days.",
+    action: "Download your data",
+  },
 };
 
 const escapeHtml = (s: string) =>

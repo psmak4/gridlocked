@@ -8,7 +8,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
  * daily checks (handler in `src/game/corrections.ts`). `email_flush` sends the
  * queued account emails (handler in `src/identity/email/outbox.ts`). `identity_daily` is the day's
- * trust, purge and prune steps (handler in `src/identity/daily.ts`). `normalize` and `validate`
+ * trust, purge, prune and export-expiry steps (handler in `src/identity/daily.ts`), and
+ * `privacy_export` builds one data export (handler in `src/identity/export.ts`). `normalize` and `validate`
  * are reserved: the poll and finalize jobs run both steps inline, so nothing
  * enqueues them yet.
  *
@@ -30,6 +31,7 @@ export const JOB_KINDS = [
   "game_checks",
   "email_flush",
   "identity_daily",
+  "privacy_export",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -271,3 +273,13 @@ export const emailFlushKey = (at: Date) => {
 
 /** One identity job per UTC day, however many games there are. */
 export const identityDailyKey = (day: string) => `identity_daily:${day}`;
+
+/** One data export (DM 6.7): the `privacy_requests` row it fills. */
+export const privacyExportPayload = z.object({
+  requestId: z.string().min(1),
+});
+export type PrivacyExportPayload = z.infer<typeof privacyExportPayload>;
+
+/** One job per export request. */
+export const privacyExportKey = (requestId: string) =>
+  `privacy_export:${requestId}`;

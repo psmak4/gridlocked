@@ -1,0 +1,2 @@
+ALTER TABLE "email_outbox" DROP CONSTRAINT "email_outbox_template_check";--> statement-breakpoint
+ALTER TABLE "email_outbox" ADD CONSTRAINT "email_outbox_template_check" CHECK ("email_outbox"."template" in ('verify_email', 'magic_link', 'password_reset', 'email_change_notice', 'delete_confirm', 'export_ready'));

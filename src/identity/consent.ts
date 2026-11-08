@@ -2,7 +2,18 @@
  * Age confirmation and the legal documents (DM 6.2, 6.8). We keep that a user
  * confirmed they are 16 or older, never a birth date.
  */
-import { and, asc, desc, eq, exists, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   authAccounts,
   authSessions,
@@ -273,6 +284,9 @@ export async function purgeIncompleteAccountsCounted(
         eq(users.role, "user"),
         isNull(profiles.ageConfirmedAt),
         lt(users.createdAt, cutoff),
+        // A deleted account's tombstone has no age confirmation either, but
+        // it is kept (DM 6.7).
+        or(isNull(profiles.status), ne(profiles.status, "deleted")),
       ),
     )
     .orderBy(asc(users.createdAt));

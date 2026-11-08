@@ -8,8 +8,9 @@
  *
  * It is the one place the jobs meet the providers and the real database
  * (HLD §3.3 rule 2 allows it: see eslint.config.mjs), so it only wires:
- * `createDb` (Neon injects DATABASE_URL), `createDueStoreFromEnv` (Neon
- * injects the AWS_* variables for Object Storage), the clock mode from
+ * `createDb` (Neon injects DATABASE_URL), `createDueStoreFromEnv` and
+ * `createExportStoreFromEnv` (Neon injects the AWS_* variables for Object
+ * Storage), the clock mode from
  * CLOCK_MODE, and `createPipelineClients` / `createPipelineHandlers` with the
  * real fetch and the real timer, plus the game's handlers
  * (`createGameHandlers`). Nothing is opened at import time, and a sleeping
@@ -24,6 +25,7 @@
 import { createDb } from "@/db/client";
 import { createGameHandlers } from "@/game/jobs";
 import { createEmailFlushHandler } from "@/identity/email/outbox";
+import type { ExportStore } from "@/identity/export";
 import { senderFromEnv } from "@/identity/email/resend";
 import { systemTimer } from "@/lib/clock";
 import { clockModeFromEnv } from "@/lib/resolve-clock";
@@ -33,6 +35,7 @@ import {
   createSharedLimiters,
 } from "@/providers/pipeline/clients";
 import { createDueStoreFromEnv } from "@/providers/storage/due-store";
+import { createExportStoreFromEnv } from "@/providers/storage/export-store";
 import type { DueStore } from "../due-times";
 import {
   DEFAULT_TICK_OPTIONS,
@@ -169,7 +172,7 @@ export function createTickHandler(
  */
 export function depsFromEnv(
   env: Record<string, string | undefined>,
-  overrides: { store?: DueStore } = {},
+  overrides: { store?: DueStore; exportStore?: ExportStore } = {},
 ): TickHandlerDeps {
   // The direct connection, as Neon advises for multi-round-trip transactions
   // (the job queue's claims and the results writes); the pooled URL is the
@@ -180,6 +183,8 @@ export function depsFromEnv(
   }
   const mode = clockModeFromEnv(env);
   const store = overrides.store ?? createDueStoreFromEnv(env);
+  // The `exports` bucket, with the same injected keys (DM 6.7).
+  const exportStore = overrides.exportStore ?? createExportStoreFromEnv(env);
   const database = createDb(url);
   // One limiter per provider for this isolate, re-seeded from the request log
   // at each wake, so overlapping invocations on one warm process share them.
@@ -193,16 +198,18 @@ export function depsFromEnv(
     mode,
     timer: systemTimer,
     handlers: async (db, clock, wake) => ({
-      ...createPipelineHandlers(
-        await createPipelineClients({
+      ...createPipelineHandlers({
+        ...(await createPipelineClients({
           db,
           clock,
           timer: wake.timer,
           deadlineAt: wake.deadlineAt,
           limiters,
           fetch: (input, init) => fetch(input, init),
-        }),
-      ),
+        })),
+        exportStore,
+        emailSender,
+      }),
       // The game's lock and open jobs; they read the database only.
       ...createGameHandlers(),
       email_flush: createEmailFlushHandler(emailSender),

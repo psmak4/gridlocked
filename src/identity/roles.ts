@@ -91,7 +91,7 @@ async function lockTarget(tx: Tx, userId: string) {
  * each other wait for one another instead of deadlocking, and the second
  * sees the first's result (`last_admin`).
  */
-async function lockAdmins(tx: Tx): Promise<void> {
+export async function lockAdmins(tx: Tx): Promise<void> {
   await tx
     .select({ id: users.id })
     .from(users)
@@ -119,14 +119,15 @@ const DEADLOCK_ATTEMPTS = 3;
  * aborting it (the ordered locks make that rare), and as `try_again` if it
  * keeps happening, never as a raw database error.
  */
-async function staffTransaction(
+export async function staffTransaction<T = void>(
   db: Db,
-  fn: (tx: Tx) => Promise<void>,
-): Promise<void> {
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
-      await db.transaction((transaction) => fn(transaction as unknown as Db));
-      return;
+      return await db.transaction((transaction) =>
+        fn(transaction as unknown as Db),
+      );
     } catch (error) {
       if (!isDeadlock(error)) throw error;
       if (attempt >= DEADLOCK_ATTEMPTS) throw new IdentityError("try_again");
@@ -139,7 +140,7 @@ async function staffTransaction(
  * banned (or banned with an end that has passed) and not deleted. Call it
  * after `lockAdmins`.
  */
-async function requireAnotherAdmin(
+export async function requireAnotherAdmin(
   tx: Tx,
   now: Date,
   exceptUserId: string,
