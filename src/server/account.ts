@@ -23,6 +23,7 @@ import {
   saveFavoritesInput,
   saveSpoilersAction,
   saveSpoilersInput,
+  usernameCheckKey,
 } from "./account-actions";
 import { getViewer, withRequestNow } from "./session";
 
@@ -37,14 +38,6 @@ async function requestViewer(): Promise<Viewer | null> {
   return getViewer(getRequest());
 }
 
-/** The browser's address as the platform reports it, for rate limits. */
-function clientAddress(): string {
-  const headers = getRequest().headers;
-  const forwarded =
-    headers.get("x-vercel-forwarded-for") ?? headers.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || "unknown";
-}
-
 /** Who is signed in, or null. Read by the gate on every page. */
 export const getAccount = createServerFn({ method: "GET" }).handler(
   async (): Promise<AccountSummary | null> => {
@@ -57,6 +50,18 @@ export const getAccount = createServerFn({ method: "GET" }).handler(
       username: viewer.displayUsername ?? viewer.username,
       emailVerified: viewer.emailVerified,
     };
+  },
+);
+
+/**
+ * Marks the response in progress private. A redirect that depends on the
+ * cookie (a logged-out visitor sent away from a signed-in step) calls this
+ * before it throws, since route `headers()` don't run for a redirect.
+ */
+export const markPrivate = createServerFn({ method: "GET" }).handler(
+  async (): Promise<null> => {
+    setResponseHeader("Cache-Control", "private, no-store");
+    return null;
   },
 );
 
@@ -76,16 +81,16 @@ export type UsernameCheck = {
 export const checkUsername = createServerFn({ method: "POST" })
   .validator(checkUsernameInput)
   .handler(({ data }): Promise<UsernameCheck> => {
-    const address = clientAddress();
+    const headers = getRequest().headers;
     return withRequestNow(async (db, now) => {
+      const viewer = await requestViewer();
       const within = await consumeRateLimit(
         db,
         now,
-        `username-check:${address}`,
+        usernameCheckKey(headers, viewer?.userId),
         { windowSeconds: 60, max: 60 },
       );
       if (!within) return { problem: null, limited: true };
-      const viewer = await requestViewer();
       return {
         problem: await checkUsernameAction(
           db,

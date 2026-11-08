@@ -22,6 +22,7 @@ import {
   finishSignUpAction,
   finishSignUpInput,
   onboardingState,
+  usernameCheckKey,
   saveFavoritesAction,
   saveSpoilersAction,
 } from "./account-actions";
@@ -177,6 +178,25 @@ describe("account actions (M5 task 12)", () => {
       ).toEqual({ ok: false, error: "username_required" });
     });
 
+    it("refuses an impersonated session, and records nothing", async () => {
+      const { userId, viewer } = await newcomer();
+      await expect(
+        finishSignUpAction(
+          db,
+          NOW,
+          { ...viewer, impersonatedBy: newId() },
+          { username: "not_theirs", ageConfirmed: true, accepted: true },
+        ),
+      ).rejects.toMatchObject({ code: "read_only" });
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      expect(user!.username).toBeNull();
+      const accepted = await db
+        .select()
+        .from(legalAcceptances)
+        .where(eq(legalAcceptances.userId, userId));
+      expect(accepted).toHaveLength(0);
+    });
+
     it("needs someone signed in", async () => {
       await expect(
         finishSignUpAction(db, NOW, null, {
@@ -328,6 +348,47 @@ describe("account actions (M5 task 12)", () => {
           { expectedVersion: 1, spoilerProtection: true },
         ),
       ).rejects.toMatchObject({ code: "read_only" });
+    });
+  });
+
+  describe("the username check's rate-limit key", () => {
+    const headers = (init: Record<string, string>) => new Headers(init);
+    const random = () => "request-1";
+
+    it("is the user id when signed in", () => {
+      expect(
+        usernameCheckKey(
+          headers({ "x-forwarded-for": "1.2.3.4" }),
+          "u1",
+          random,
+        ),
+      ).toBe("username-check:user:u1");
+    });
+
+    it("is the address from the headers Better Auth trusts, Vercel's first", () => {
+      expect(
+        usernameCheckKey(
+          headers({
+            "x-vercel-forwarded-for": "9.9.9.9",
+            "x-forwarded-for": "1.2.3.4, 5.6.7.8",
+          }),
+          undefined,
+          random,
+        ),
+      ).toBe("username-check:ip:9.9.9.9");
+      expect(
+        usernameCheckKey(
+          headers({ "x-forwarded-for": "1.2.3.4, 5.6.7.8" }),
+          undefined,
+          random,
+        ),
+      ).toBe("username-check:ip:1.2.3.4");
+    });
+
+    it("with no address is its own bucket, never a shared one", () => {
+      expect(usernameCheckKey(headers({}), undefined, random)).toBe(
+        "username-check:request:request-1",
+      );
     });
   });
 

@@ -150,4 +150,48 @@ test.describe("sign in", () => {
       page.getByRole("button", { name: "Sign in", exact: true }),
     ).toBeDisabled();
   });
+
+  test("a banned user sees the same plain message from a sign-in link", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await createAccount(request);
+    await request.post("/api/test/ban", {
+      headers: { origin: ORIGIN },
+      data: { email, reason: "posting spam links" },
+    });
+    await page.goto("/sign-in?mode=link");
+    await page.getByLabel("Email").fill(email);
+    await page.getByRole("button", { name: "Send link" }).click();
+    await expect(heading(page)).toHaveText("Check your email");
+    const link = linkIn(await emailTo(page.request, email, "sign-in link"));
+    await page.goto(link);
+    await expect(page.getByText("This account can't sign in.")).toBeVisible();
+    await expect(page.getByText(/spam/)).toHaveCount(0);
+  });
+
+  test("a redirect that depends on the session is private, no-store", async ({
+    page,
+    request,
+  }) => {
+    // Someone signed in but unfinished is bounced from home to /welcome.
+    const email = `e2e-${crypto.randomUUID()}@example.test`;
+    await page.goto("/sign-in?mode=link");
+    await page.getByLabel("Email").fill(email);
+    await page.getByRole("button", { name: "Send link" }).click();
+    await expect(heading(page)).toHaveText("Check your email");
+    await page.goto(linkIn(await emailTo(page.request, email, "sign-in link")));
+    await expect(page).toHaveURL(/\/welcome$/);
+    const bounced = await page.request.get("/", { maxRedirects: 0 });
+    expect(bounced.status()).toBeGreaterThanOrEqual(300);
+    expect(bounced.status()).toBeLessThan(400);
+    expect(bounced.headers()["cache-control"]).toBe("private, no-store");
+    void request;
+
+    // So is the bounce of a logged-out visitor from a signed-in step.
+    const away = await request.get("/welcome/favorites", { maxRedirects: 0 });
+    expect(away.status()).toBeGreaterThanOrEqual(300);
+    expect(away.status()).toBeLessThan(400);
+    expect(away.headers()["cache-control"]).toBe("private, no-store");
+  });
 });

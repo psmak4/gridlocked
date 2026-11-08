@@ -1,8 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Cloudflare's script. Loaded by a page that shows the widget, and by no other. */
 export const TURNSTILE_SCRIPT_URL =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
+/**
+ * The stand-in exists in local builds only. The flag is replaced at build
+ * time, so a deployed client bundle drops the stand-in and its token (tests
+ * may use it too, under Vitest).
+ */
+const STAND_IN_ALLOWED =
+  import.meta.env.VITE_LOCAL_DB === "1" || Boolean(import.meta.env.VITEST);
 
 /** What the local stand-in hands over. A local build has no secret key to check it. */
 export const LOCAL_TURNSTILE_TOKEN = "local-stand-in-token";
@@ -67,7 +75,7 @@ export async function startTurnstile({
   siteKey: string | undefined;
 }): Promise<() => void> {
   if (mode === "local") {
-    onToken(LOCAL_TURNSTILE_TOKEN);
+    if (STAND_IN_ALLOWED) onToken(LOCAL_TURNSTILE_TOKEN);
     return () => {};
   }
   if (!container || !siteKey) return () => {};
@@ -102,17 +110,20 @@ export function Turnstile({
   siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined,
 }: TurnstileProps) {
   const container = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const standIn = STAND_IN_ALLOWED && local;
   const report = useRef(onToken);
   useEffect(() => {
     report.current = onToken;
   });
 
   useEffect(() => {
-    if (!local && !siteKey) return;
+    if (!standIn && !siteKey) return;
     let stop: (() => void) | undefined;
     let cancelled = false;
     startTurnstile({
-      mode: local ? "local" : "widget",
+      mode: standIn ? "local" : "widget",
       onToken: (token) => report.current(token),
       container: container.current,
       siteKey,
@@ -121,15 +132,18 @@ export function Turnstile({
         if (cancelled) stopper();
         else stop = stopper;
       })
-      .catch(() => report.current(null));
+      .catch(() => {
+        report.current(null);
+        if (!cancelled) setFailed(true);
+      });
     return () => {
       cancelled = true;
       stop?.();
       report.current(null);
     };
-  }, [local, siteKey, resetKey]);
+  }, [standIn, siteKey, resetKey, attempt]);
 
-  if (local) {
+  if (standIn) {
     return (
       <div
         data-slot="turnstile"
@@ -146,5 +160,37 @@ export function Turnstile({
       </p>
     );
   }
+  if (failed) {
+    return (
+      <TurnstileFailed
+        onRetry={() => {
+          setFailed(false);
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
+  }
   return <div ref={container} data-slot="turnstile" className="min-h-[65px]" />;
+}
+
+/** The script didn't load (blocked, or offline): say so, and offer another go. */
+export function TurnstileFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      data-slot="turnstile"
+      role="alert"
+      className="flex flex-col items-start gap-space-2 text-[14px]"
+    >
+      <span className="font-semibold text-fall">
+        The bot check didn&apos;t load.
+      </span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="min-h-[44px] cursor-pointer rounded-radius-m border-2 border-ink px-space-4 font-display text-[16px] tracking-[0.04em] text-ink uppercase outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+      >
+        Try again
+      </button>
+    </div>
+  );
 }

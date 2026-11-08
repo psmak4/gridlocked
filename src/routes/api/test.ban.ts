@@ -24,7 +24,10 @@ async function ban(request: Request): Promise<Response> {
       .where(eq(users.email, email))
       .returning({ id: users.id }),
   );
-  return withNoStore(Response.json({ banned: changed.length }));
+  // `test-hook-ban-account` marks this handler for the CI build check.
+  return withNoStore(
+    Response.json({ banned: changed.length, hook: "test-hook-ban-account" }),
+  );
 }
 
 export const Route = createFileRoute("/api/test/ban")({

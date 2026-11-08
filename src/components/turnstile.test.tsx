@@ -4,6 +4,7 @@ import {
   LOCAL_TURNSTILE_TOKEN,
   TURNSTILE_SCRIPT_URL,
   Turnstile,
+  TurnstileFailed,
   loadTurnstileScript,
   startTurnstile,
 } from "./turnstile";
@@ -96,5 +97,26 @@ describe("Turnstile", () => {
       stop();
       expect(remove).toHaveBeenCalledWith("widget-1");
     });
+  });
+
+  it("a script that fails to load is reported, not swallowed", async () => {
+    const loadScript = vi.fn(async () => {
+      throw new Error("blocked");
+    });
+    await expect(
+      startTurnstile({
+        mode: "widget",
+        onToken: () => {},
+        loadScript,
+        container: {} as HTMLElement,
+        siteKey: "k",
+      }),
+    ).rejects.toThrow("blocked");
+  });
+
+  it("the failure shows a short message and a retry", () => {
+    const html = renderToString(<TurnstileFailed onRetry={() => {}} />);
+    expect(html).toContain("The bot check didn&#x27;t load.");
+    expect(html).toMatch(/<button[^>]*>[^<]*Try again/);
   });
 });

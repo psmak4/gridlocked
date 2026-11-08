@@ -67,7 +67,11 @@ export async function finishSignUpAction(
   viewer: Viewer | null,
   input: FinishSignUpInput,
 ): Promise<ActionResult> {
+  // `requireViewer`, not `requireWritable`: an unfinished account can't pass
+  // that. An admin looking through someone's session still can't finish it
+  // for them (Ruling 49).
   const v = requireViewer(viewer);
+  if (v.impersonatedBy !== null) throw new IdentityError("read_only");
   if (v.username === null && input.username === undefined) {
     return { ok: false, error: "username_required" };
   }
@@ -293,6 +297,26 @@ export function checkUsernameAction(
   userId?: string,
 ): Promise<UsernameProblem | null> {
   return checkUsername(db, now, username, userId ? { userId } : {});
+}
+
+/**
+ * The rate-limit key for a username check: the user when signed in, else the
+ * address from the headers Better Auth trusts (Vercel's first, as in
+ * `ipAddressHeaders`). With neither, the request gets a key of its own, so
+ * it can never use up anyone else's allowance.
+ */
+export function usernameCheckKey(
+  headers: Headers,
+  userId: string | undefined,
+  random: () => string = () => crypto.randomUUID(),
+): string {
+  if (userId) return `username-check:user:${userId}`;
+  const forwarded =
+    headers.get("x-vercel-forwarded-for") ?? headers.get("x-forwarded-for");
+  const address = forwarded?.split(",")[0]?.trim();
+  return address
+    ? `username-check:ip:${address}`
+    : `username-check:request:${random()}`;
 }
 
 /** True when an ordinary email would wait: "It might take a while today". */

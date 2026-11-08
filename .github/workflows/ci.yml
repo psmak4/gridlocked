@@ -65,6 +65,17 @@ jobs:
             echo "::error::.output/server contains the test email sender"
             exit 1
           fi
+          # The other local-only hooks: the busy-notice cookie and the ban
+          # route's handler (its path stays, as a 404 stub, so the path is
+          # not what is searched for).
+          if grep -rq gl-test-busy .output/server; then
+            echo "::error::.output/server contains the busy-notice test override"
+            exit 1
+          fi
+          if grep -rq test-hook-ban-account .output/server; then
+            echo "::error::.output/server contains the test ban hook"
+            exit 1
+          fi
 
       # The e2e tests need the flagged build, so make it again.
       - name: Build for end-to-end tests
