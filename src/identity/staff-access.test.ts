@@ -211,6 +211,7 @@ describe("the staff two-step (DM 6.4)", () => {
       ),
     ).toBe("invalid_code");
 
+    // Five failures in the window; the sixth attempt waits.
     const codes: (string | null)[] = [];
     for (let i = 0; i < 4; i++) {
       codes.push(
@@ -219,7 +220,12 @@ describe("the staff two-step (DM 6.4)", () => {
         ),
       );
     }
-    expect(codes).toContain("rate_limited");
+    expect(codes).toEqual([
+      "invalid_code",
+      "invalid_code",
+      "invalid_code",
+      "rate_limited",
+    ]);
     // Once limited, even the right code waits.
     expect(
       await errorCode(() =>
@@ -233,6 +239,19 @@ describe("the staff two-step (DM 6.4)", () => {
       viewer: v,
       code: await totpCode(auth, secret),
     });
+    expect((await viewer(cookie))!.staffVerifiedAt).not.toBeNull();
+  });
+
+  it("only failed codes count toward the limit", async () => {
+    const { secret } = await adminWithTotp();
+    const cookie = await signInWithTotp(auth, BOSS, secret);
+    const v = (await viewer(cookie))!;
+    for (let i = 0; i < 7; i++) {
+      await verifyStaffSession(auth, t.db, now(), {
+        viewer: v,
+        code: await totpCode(auth, secret),
+      });
+    }
     expect((await viewer(cookie))!.staffVerifiedAt).not.toBeNull();
   });
 
@@ -340,4 +359,102 @@ describe("the staff two-step (DM 6.4)", () => {
       "unauthenticated",
     );
   });
+
+  describe("managing the second factor (ruling 37)", () => {
+    const post = (path: string, cookie: string, body: unknown = {}) =>
+      auth.handler(
+        authPost(path, body, {
+          cookie,
+          "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 250)}`,
+        }),
+      );
+
+    /** A Discord admin with TOTP: no password guards their factor. */
+    const discordAdmin = async () => {
+      const person = { id: "2002", email: BOSS, verified: true };
+      const first = await signInWithDiscord(auth, fetchStub, person);
+      const [user] = await t.db
+        .select()
+        .from(users)
+        .where(eq(users.email, BOSS));
+      await t.db
+        .update(users)
+        .set({ role: "admin" })
+        .where(eq(users.id, user!.id));
+      const { secret } = await enableTotp(auth, cookieHeader(first));
+      later(5 * 60_000);
+      // A new session, as a phished link or a taken Discord account gives.
+      const again = await signInWithDiscord(auth, fetchStub, person);
+      return { secret, cookie: cookieHeader(again) };
+    };
+
+    it("a passwordless staff session can't mint a factor to unlock itself", async () => {
+      const { cookie } = await discordAdmin();
+      const minted = await post("/two-factor/generate-backup-codes", cookie);
+      expect(minted.status).toBe(403);
+      const text = await minted.text();
+      expect(text).toContain("STAFF_SESSION_UNVERIFIED");
+      expect(text).not.toMatch(/backupCodes|totpURI|secret/i);
+      // Nor turn TOTP off and enrol another authenticator.
+      expect((await post("/two-factor/disable", cookie)).status).toBe(403);
+      expect((await post("/two-factor/enable", cookie)).status).toBe(403);
+      const v = await viewer(cookie);
+      expect(v!.twoFactorEnabled).toBe(true);
+      expect(await errorCode(() => requireStaff(v, "admin"))).toBe(
+        "staff_session_unverified",
+      );
+    });
+
+    it("every /two-factor path needs an unlocked staff session", async () => {
+      const { cookie } = await discordAdmin();
+      const checked: string[] = [];
+      for (const endpoint of Object.values(auth.api)) {
+        const path = (endpoint as { path?: string }).path;
+        if (!path?.startsWith("/two-factor/")) continue;
+        const response = await post(path, cookie, { code: "000000" });
+        expect(response.status, path).toBe(403);
+        expect(await response.text(), path).toContain(
+          "STAFF_SESSION_UNVERIFIED",
+        );
+        checked.push(path);
+      }
+      for (const path of [
+        "/two-factor/enable",
+        "/two-factor/disable",
+        "/two-factor/generate-backup-codes",
+        "/two-factor/get-totp-uri",
+        "/two-factor/verify-totp",
+        "/two-factor/verify-backup-code",
+      ]) {
+        expect(checked, path).toContain(path);
+      }
+    });
+
+    it("after a code, managing the factor works, and first enrolment is open", async () => {
+      // First enrolment needed no unlock: there was no factor to protect.
+      const { secret, cookie } = await discordAdmin();
+      await verifyStaffSession(auth, t.db, now(), {
+        viewer: (await viewer(cookie))!,
+        code: await totpCode(auth, secret),
+      });
+      const minted = await post("/two-factor/generate-backup-codes", cookie);
+      expect(minted.status).toBe(200);
+      const { backupCodes } = (await minted.json()) as {
+        backupCodes: string[];
+      };
+      expect(backupCodes.length).toBeGreaterThan(0);
+      // And the sign-in challenge, which has no session, still works.
+      later(5 * 60_000);
+      const { secret: other } = await adminWithTotpFor("mod@example.test");
+      expect(await signInWithTotp(auth, "mod@example.test", other)).toContain(
+        "session_token",
+      );
+    });
+  });
+
+  /** A password moderator with TOTP, on a second address. */
+  const adminWithTotpFor = async (email: string) => {
+    const { cookie } = await signUpAs(auth, t.db, email, "moderator");
+    return enableTotp(auth, cookie, { password: PASSWORD });
+  };
 });

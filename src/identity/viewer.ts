@@ -56,7 +56,9 @@ export type IdentityErrorCode =
   | "last_admin"
   | "invalid_ban"
   | "cannot_impersonate"
-  | "not_impersonating";
+  | "not_impersonating"
+  // Two staff changes deadlocked, and the retries did too.
+  | "try_again";
 
 /** Carries a code and nothing personal: it can be logged and shown. */
 export class IdentityError extends Error {
@@ -160,4 +162,27 @@ export async function consumeRateLimit(
     })
     .returning({ count: authRateLimits.count });
   return (row?.count ?? 1) <= max;
+}
+
+/**
+ * True if `key` has already used its `max` attempts in the current window,
+ * without counting this one. For limits that count only failures: check
+ * with this first, and `consumeRateLimit` only when an attempt fails.
+ */
+export async function rateLimitReached(
+  db: Db,
+  now: Date,
+  key: string,
+  { windowSeconds, max }: { windowSeconds: number; max: number },
+): Promise<boolean> {
+  const [row] = await db
+    .select({
+      count: authRateLimits.count,
+      lastRequest: authRateLimits.lastRequest,
+    })
+    .from(authRateLimits)
+    .where(eq(authRateLimits.key, key));
+  if (!row) return false;
+  const open = now.getTime() - row.lastRequest < windowSeconds * 1000;
+  return open && row.count >= max;
 }

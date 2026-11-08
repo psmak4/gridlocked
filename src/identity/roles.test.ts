@@ -3,15 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
   authPost,
+  clickLink,
   cookieHeader,
+  linkIn,
   PASSWORD,
+  recordingSender,
   TEST_NOW,
   testAuth,
   type TestAuth,
 } from "../../tests/helpers/auth";
+import { signInWithDiscord } from "../../tests/helpers/discord";
 import { errorCode, signUpAs, viewerFor } from "../../tests/helpers/staff";
 import { seedUser } from "../../tests/helpers/users";
 import { auditLog, authSessions, users } from "@/db/schema";
+import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import type { StaffActor } from "@/staff/roster";
 import { banUser, setRole, unbanUser, type Role } from "./roles";
@@ -25,6 +30,8 @@ describe("roles and bans (DM 6.4)", () => {
   let auth: TestAuth;
   let boss: string;
   let actor: StaffActor;
+  let mail: ReturnType<typeof recordingSender>;
+  let fetchStub: ReturnType<typeof vi.fn<typeof fetch>>;
   const now = () => new Date();
   const roleOf = async (id: string) =>
     (await t.db.select().from(users).where(eq(users.id, id)))[0]!.role;
@@ -38,11 +45,24 @@ describe("roles and bans (DM 6.4)", () => {
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: TEST_NOW });
     t = await createTestDb();
-    auth = testAuth(t.db, { now });
+    mail = recordingSender();
+    fetchStub = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchStub);
+    auth = testAuth(t.db, {
+      now,
+      sender: mail.sender,
+      env: {
+        discord: {
+          clientId: "fake-discord-client-id",
+          clientSecret: "fake-discord-client-secret",
+        },
+      },
+    });
     boss = await seedUser(t.db, { username: "boss", role: "admin" });
     actor = { kind: "admin", label: "psmak4", requestId: "r-1", userId: boss };
   });
   afterEach(async () => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     await t.close();
   });
@@ -203,6 +223,76 @@ describe("roles and bans (DM 6.4)", () => {
     expect(await audits("user.unban")).toMatchObject([
       { entityId: ada, after: { banned: false }, reason: "Appeal upheld" },
     ]);
+  });
+
+  it("a ban refuses magic link and Discord sign-in too", async () => {
+    const hasSession = (response: Response) =>
+      response.headers.getSetCookie().some((c) => c.includes("session_token"));
+    // Discord: a first sign-in makes the account.
+    const person = { id: "3001", email: "grid@example.test", verified: true };
+    expect(hasSession(await signInWithDiscord(auth, fetchStub, person))).toBe(
+      true,
+    );
+    const [grid] = await t.db
+      .select()
+      .from(users)
+      .where(eq(users.email, person.email));
+    await banUser(t.db, now(), {
+      targetUserId: grid!.id,
+      until: null,
+      reason: "Spam",
+      actor,
+    });
+    expect(hasSession(await signInWithDiscord(auth, fetchStub, person))).toBe(
+      false,
+    );
+
+    // Magic link, for the same banned account.
+    await auth.handler(
+      authPost(
+        "/sign-in/magic-link",
+        { email: person.email },
+        { "x-forwarded-for": "203.0.113.40" },
+      ),
+    );
+    const clicked = await auth.handler(
+      clickLink(linkIn(mail.last(person.email, "sign-in link"))),
+    );
+    expect(hasSession(clicked)).toBe(false);
+    expect(await sessionsOf(grid!.id)).toHaveLength(0);
+  });
+
+  it("a deadlock between two staff changes is retried, then reported", async () => {
+    const ada = await seedUser(t.db, { username: "ada" });
+    const deadlock = Object.assign(new Error("deadlock detected"), {
+      cause: { code: "40P01" },
+    });
+    const flaky = (failures: number) => {
+      let left = failures;
+      return new Proxy(t.db, {
+        get(target, prop, receiver) {
+          if (prop === "transaction" && left > 0) {
+            return async () => {
+              left--;
+              throw deadlock;
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as unknown as Db;
+    };
+    const change = (db: Db) =>
+      setRole(db, now(), {
+        targetUserId: ada,
+        role: "moderator",
+        reason: "Helps with chat",
+        actor,
+      });
+    await change(flaky(1));
+    expect(await roleOf(ada)).toBe("moderator");
+    await t.db.update(users).set({ role: "user" }).where(eq(users.id, ada));
+    expect(await errorCode(() => change(flaky(10)))).toBe("try_again");
+    expect(await roleOf(ada)).toBe("user");
   });
 
   it("their sessions are gone at once", async () => {

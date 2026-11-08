@@ -6,7 +6,7 @@
  * Nothing here imports Better Auth. The permissions below are plain data;
  * `auth.ts` turns them into the admin plugin's access-control config.
  */
-import { and, eq, lte, ne, or } from "drizzle-orm";
+import { and, asc, eq, lte, ne, or } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
 import {
   authSessions,
@@ -86,21 +86,64 @@ async function lockTarget(tx: Tx, userId: string) {
 }
 
 /**
+ * Locks every admin row, in id order, before anything else (ruling 39). Two
+ * changes then take their locks in the same order, so two admins demoting
+ * each other wait for one another instead of deadlocking, and the second
+ * sees the first's result (`last_admin`).
+ */
+async function lockAdmins(tx: Tx): Promise<void> {
+  await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.role, "admin"))
+    .orderBy(asc(users.id))
+    .for("update");
+}
+
+/** Postgres's deadlock code, on the error or the one drizzle wraps. */
+function isDeadlock(error: unknown): boolean {
+  const codeOf = (e: unknown) =>
+    typeof e === "object" && e !== null && "code" in e
+      ? (e as { code: unknown }).code
+      : undefined;
+  return (
+    codeOf(error) === "40P01" ||
+    codeOf((error as { cause?: unknown } | null)?.cause) === "40P01"
+  );
+}
+
+const DEADLOCK_ATTEMPTS = 3;
+
+/**
+ * Runs a staff change's transaction, again if Postgres broke a deadlock by
+ * aborting it (the ordered locks make that rare), and as `try_again` if it
+ * keeps happening, never as a raw database error.
+ */
+async function staffTransaction(
+  db: Db,
+  fn: (tx: Tx) => Promise<void>,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.transaction((transaction) => fn(transaction as unknown as Db));
+      return;
+    } catch (error) {
+      if (!isDeadlock(error)) throw error;
+      if (attempt >= DEADLOCK_ATTEMPTS) throw new IdentityError("try_again");
+    }
+  }
+}
+
+/**
  * Refuses if no admin other than `exceptUserId` would be left active: not
- * banned (or banned with an end that has passed) and not deleted. Every
- * admin row is locked first, so two admins demoting each other at once
- * can't both succeed.
+ * banned (or banned with an end that has passed) and not deleted. Call it
+ * after `lockAdmins`.
  */
 async function requireAnotherAdmin(
   tx: Tx,
   now: Date,
   exceptUserId: string,
 ): Promise<void> {
-  await tx
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.role, "admin"))
-    .for("update");
   const [other] = await tx
     .select({ id: users.id })
     .from(users)
@@ -149,8 +192,8 @@ export async function setRole(
   if (input.role === "system" || !USER_ROLES.includes(input.role)) {
     throw new IdentityError("role_reserved");
   }
-  await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
+  await staffTransaction(db, async (tx) => {
+    await lockAdmins(tx);
     const target = await lockTarget(tx, input.targetUserId);
     if (target.role === input.role) return;
     if (target.role === "admin") {
@@ -192,8 +235,8 @@ export async function banUser(
   if (input.until !== null && input.until.getTime() <= now.getTime()) {
     throw new IdentityError("invalid_ban");
   }
-  await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
+  await staffTransaction(db, async (tx) => {
+    await lockAdmins(tx);
     const target = await lockTarget(tx, input.targetUserId);
     if (target.role === "admin") {
       await requireAnotherAdmin(tx, now, target.id);
@@ -232,8 +275,7 @@ export async function unbanUser(
   input: { targetUserId: string; reason: string; actor: StaffActor },
 ): Promise<void> {
   const reason = requireReason(input.reason);
-  await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
+  await staffTransaction(db, async (tx) => {
     const target = await lockTarget(tx, input.targetUserId);
     if (!target.banned) return;
     await tx

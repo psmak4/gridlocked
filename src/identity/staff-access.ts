@@ -14,11 +14,12 @@ import { hasStaffRole, type StaffRole } from "./roles";
 import {
   consumeRateLimit,
   IdentityError,
+  rateLimitReached,
   requireViewer,
   type Viewer,
 } from "./viewer";
 
-/** Attempts per user per window, right or wrong; then it waits. */
+/** Failed attempts per user per window; then it waits (ruling 39). */
 const VERIFY_LIMIT = { windowSeconds: 900, max: 5 };
 const TOTP_DIGITS = 6;
 /** One step either side, for a clock that's a little off. */
@@ -90,8 +91,9 @@ async function totpMatches(
  * Unlocks staff tools for the viewer's session: checks `code` (a TOTP code,
  * or one of the backup codes, which it uses up), then sets
  * `auth_sessions.staff_verified_at` with the audit `staff.session.verify`, in
- * one transaction. Five attempts per user per 15 minutes, counted whether
- * right or wrong, so a guesser gets nowhere. The code is never logged.
+ * one transaction. Five failed attempts per user per 15 minutes, then every
+ * attempt waits for the window to end, so a guesser gets nowhere; a right
+ * code costs nothing (ruling 39). The code is never logged.
  */
 export async function verifyStaffSession(
   auth: Auth,
@@ -105,14 +107,13 @@ export async function verifyStaffSession(
     throw new IdentityError("forbidden");
   }
   if (!v.twoFactorEnabled) throw new IdentityError("staff_two_factor_required");
-  if (
-    !(await consumeRateLimit(db, now, `staff-verify:${v.userId}`, VERIFY_LIMIT))
-  ) {
+  const limitKey = `staff-verify:${v.userId}`;
+  if (await rateLimitReached(db, now, limitKey, VERIFY_LIMIT)) {
     throw new IdentityError("rate_limited");
   }
 
   const code = input.code.trim();
-  await db.transaction(async (transaction) => {
+  const unlocked = await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
     const factor = await readTwoFactor(auth, tx, v.userId);
     if (!factor) throw new IdentityError("staff_two_factor_required");
@@ -126,10 +127,11 @@ export async function verifyStaffSession(
     } else if (await factor.useBackupCode(code)) {
       method = "backup_code";
     } else {
-      throw new IdentityError("invalid_code");
+      // Nothing to write; the failure is counted after the transaction.
+      return false;
     }
 
-    const unlocked = await tx
+    const updated = await tx
       .update(authSessions)
       .set({ staffVerifiedAt: now })
       .where(
@@ -141,7 +143,7 @@ export async function verifyStaffSession(
       )
       .returning({ id: authSessions.id });
     // The session went (signed out, revoked); the backup code stays unused.
-    if (unlocked.length !== 1) throw new IdentityError("unauthenticated");
+    if (updated.length !== 1) throw new IdentityError("unauthenticated");
 
     await writeAudit(tx, now, {
       actorUserId: v.userId,
@@ -155,5 +157,10 @@ export async function verifyStaffSession(
       reason: null,
       requestId: null,
     });
+    return true;
   });
+  if (!unlocked) {
+    await consumeRateLimit(db, now, limitKey, VERIFY_LIMIT);
+    throw new IdentityError("invalid_code");
+  }
 }

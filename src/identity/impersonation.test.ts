@@ -17,9 +17,11 @@ import {
   totpCode,
   viewerFor,
 } from "../../tests/helpers/staff";
-import { auditLog, authSessions } from "@/db/schema";
+import { auditLog, authSessions, users } from "@/db/schema";
+import type { Db } from "@/db/types";
 import { DISABLED_AUTH_PATHS } from "./auth";
 import { startImpersonation, stopImpersonating } from "./impersonation";
+import { banUser } from "./roles";
 import { verifyStaffSession } from "./staff-access";
 import { SYSTEM_USER_ID } from "./system";
 import { requireWritable, type Viewer } from "./viewer";
@@ -31,6 +33,12 @@ const cookieOf = (headers: Headers) =>
     .getSetCookie()
     .map((c) => c.split(";")[0])
     .filter((c) => !c!.endsWith("="))
+    .join("; ");
+/** The same cookies less `dont_remember`, which a client can simply drop. */
+const withoutDontRemember = (cookie: string) =>
+  cookie
+    .split("; ")
+    .filter((c) => !c.includes("dont_remember"))
     .join("; ");
 
 describe("impersonation (DM 6.4)", () => {
@@ -181,6 +189,112 @@ describe("impersonation (DM 6.4)", () => {
     expect(await viewer(cookie)).not.toBeNull();
     vi.setSystemTime(new Date(now().getTime() + 2 * 60_000));
     expect(await viewer(cookie)).toBeNull();
+  });
+
+  it("the hour holds on the server, even without the dont_remember cookie", async () => {
+    const { headers } = await start();
+    const cookie = withoutDontRemember(cookieOf(headers));
+    expect(cookieOf(headers)).toContain("dont_remember");
+    const getSession = () =>
+      auth.handler(
+        new Request(`${TEST_ORIGIN}/api/auth/get-session`, {
+          headers: { cookie },
+        }),
+      );
+    // A refresh can't push it past the hour.
+    expect((await getSession()).status).toBe(200);
+    const [row] = await t.db
+      .select()
+      .from(authSessions)
+      .where(eq(authSessions.impersonatedBy, boss.userId));
+    expect(
+      row!.expiresAt.getTime() - row!.createdAt.getTime(),
+    ).toBeLessThanOrEqual(HOUR);
+    expect(await viewer(cookie)).not.toBeNull();
+
+    vi.setSystemTime(new Date(row!.createdAt.getTime() + HOUR + 60_000));
+    expect(await (await getSession()).json()).toBeNull();
+    expect(await viewer(cookie)).toBeNull();
+  });
+
+  it("a page treats an impersonation older than an hour as signed out", async () => {
+    const { headers } = await start();
+    const cookie = withoutDontRemember(cookieOf(headers));
+    const as = (await viewer(cookie))!;
+    // As if a refresh had got through: the row says a week.
+    await t.db
+      .update(authSessions)
+      .set({ expiresAt: new Date(now().getTime() + 7 * 24 * HOUR) })
+      .where(eq(authSessions.id, as.sessionId));
+    const late = new Date(now().getTime() + HOUR + 60_000);
+    expect(await viewerFor(t.db, cookie, () => late)).toBeNull();
+    // An admin's own session of the same age is fine.
+    expect(await viewerFor(t.db, boss.cookie, () => late)).not.toBeNull();
+  });
+
+  it("a banned user can't be impersonated", async () => {
+    await banUser(t.db, now(), {
+      targetUserId: ada,
+      until: null,
+      reason: "Spam",
+      actor: { kind: "admin", label: "boss", userId: boss.userId },
+    });
+    expect(await errorCode(() => start())).toBe("cannot_impersonate");
+    expect(await audits("user.impersonate.start")).toHaveLength(0);
+  });
+
+  it("the viewer must be the session the headers carry", async () => {
+    const other = await verifiedStaff("other@example.test", "admin", "other");
+    expect(
+      await errorCode(() =>
+        startImpersonation(auth, t.db, now(), {
+          viewer: boss.viewer,
+          targetUserId: ada,
+          reason: "Mixed up",
+          headers: new Headers({ cookie: other.cookie }),
+        }),
+      ),
+    ).toBe("unauthenticated");
+    expect(await audits("user.impersonate.start")).toHaveLength(0);
+  });
+
+  it("a stop whose audit fails still restores the admin, and logs no values", async () => {
+    const { headers } = await start();
+    const cookie = cookieOf(headers);
+    const as = (await viewer(cookie))!;
+    const failing = new Proxy(t.db, {
+      get(target, prop, receiver) {
+        if (prop === "insert") {
+          return (table: unknown) => {
+            if (table === auditLog) throw new Error("audit down");
+            return target.insert(table as typeof auditLog);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as unknown as Db;
+    const logged: string[] = [];
+    const spy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        logged.push(args.map(String).join(" "));
+      });
+    try {
+      const { headers: back } = await stopImpersonating(auth, failing, now(), {
+        viewer: as,
+        headers: new Headers({ cookie }),
+      });
+      expect((await viewer(cookieOf(back)))!.userId).toBe(boss.userId);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).not.toContain(boss.userId);
+    expect(logged[0]).not.toContain(ada);
+    expect(logged[0]).not.toContain("example.test");
+    expect(
+      (await t.db.select().from(users).where(eq(users.id, ada)))[0],
+    ).toBeTruthy();
   });
 
   it("every non-GET auth path is refused while impersonating", async () => {

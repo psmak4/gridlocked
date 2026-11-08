@@ -25,7 +25,7 @@ import {
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements } from "better-auth/plugins/admin/access";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, ne } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import {
   authAccounts,
@@ -42,7 +42,7 @@ import { queueEmail } from "./email/outbox";
 import type { EmailSender } from "./email/sender";
 import type { EmailTemplate } from "./email/templates";
 import { completeSignUp } from "./consent";
-import { ROLE_PERMISSIONS } from "./roles";
+import { hasStaffRole, ROLE_PERMISSIONS } from "./roles";
 import {
   checkUsername,
   isValidUsernameFormat,
@@ -121,6 +121,34 @@ const IMPERSONATION_EXITS = ["/sign-out", "/admin/stop-impersonating"];
 
 /** The refusal code, also what the read-only banner keys on. */
 export const IMPERSONATION_READ_ONLY = "IMPERSONATION_READ_ONLY";
+
+/** A staff member managing their factor from a session not yet unlocked. */
+export const STAFF_SESSION_UNVERIFIED = "STAFF_SESSION_UNVERIFIED";
+
+/**
+ * The session token in a request's cookie, read without checking the
+ * signature. Only ever a lookup key: it matches a row only if it's real.
+ */
+function sessionTokenIn(
+  headers: Headers | undefined,
+  cookieName: string,
+): string | null {
+  const header = headers?.get("cookie");
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name !== cookieName) continue;
+    let value: string;
+    try {
+      value = decodeURIComponent(rest.join("="));
+    } catch {
+      return null;
+    }
+    const dot = value.lastIndexOf(".");
+    return dot > 0 ? value.slice(0, dot) : null;
+  }
+  return null;
+}
 
 /**
  * The admin plugin's access control (DM 6.4): its own statement names, with
@@ -442,22 +470,53 @@ export function createAuth(db: Db, deps: AuthDeps) {
         // adds is covered too. Reads pay nothing.
         const method =
           ctx.request?.method ?? (readablePaths.has(ctx.path) ? "GET" : "POST");
-        if (method !== "GET" && method !== "HEAD") {
+        const writes = method !== "GET" && method !== "HEAD";
+        const managesFactor = ctx.path.startsWith("/two-factor/");
+        if (writes || managesFactor) {
           const token = await ctx.getSignedCookie(
             ctx.context.authCookies.sessionToken.name,
             ctx.context.secret,
           );
+          // A live session only: the sign-in challenge has none, just the
+          // two-factor cookie.
           const [held] = token
             ? await db
                 .select({
                   id: authSessions.id,
                   userId: authSessions.userId,
                   impersonatedBy: authSessions.impersonatedBy,
+                  staffVerifiedAt: authSessions.staffVerifiedAt,
+                  role: users.role,
+                  twoFactorEnabled: users.twoFactorEnabled,
                 })
                 .from(authSessions)
-                .where(eq(authSessions.token, token))
+                .innerJoin(users, eq(users.id, authSessions.userId))
+                .where(
+                  and(
+                    eq(authSessions.token, token),
+                    gt(authSessions.expiresAt, now()),
+                  ),
+                )
             : [];
-          if (token && held?.impersonatedBy) {
+          // Ruling 37: a staff member's factor is managed only from an
+          // unlocked session. Otherwise a session alone (a phished magic
+          // link, a taken Discord account, no password with
+          // `allowPasswordless`) could mint backup codes or enrol another
+          // authenticator, and unlock staff tools with it. First enrolment
+          // stays open: there is no factor yet to protect.
+          if (
+            held &&
+            managesFactor &&
+            hasStaffRole(held.role, "moderator") &&
+            held.twoFactorEnabled &&
+            held.staffVerifiedAt === null
+          ) {
+            throw APIError.from("FORBIDDEN", {
+              message: "Enter a code to unlock staff tools first.",
+              code: STAFF_SESSION_UNVERIFIED,
+            });
+          }
+          if (writes && token && held?.impersonatedBy) {
             if (!IMPERSONATION_EXITS.includes(ctx.path)) {
               throw APIError.from("FORBIDDEN", {
                 message: "This session is read-only.",
@@ -627,6 +686,35 @@ export function createAuth(db: Db, deps: AuthDeps) {
           before: async (session) => ({
             data: { ...session, staffVerifiedAt: null },
           }),
+        },
+        update: {
+          // Ruling 38: an impersonation never outlives its hour, whatever
+          // the client sends. Without the plugin's `dont_remember` cookie a
+          // session read would refresh it to the usual seven days. Better
+          // Auth refreshes the session the request's cookie names, so that
+          // is the one looked up.
+          before: async (data, context) => {
+            const expiresAt = (data as { expiresAt?: unknown }).expiresAt;
+            if (!(expiresAt instanceof Date) || !context) return;
+            const token = sessionTokenIn(
+              context.headers ?? context.request?.headers,
+              context.context.authCookies.sessionToken.name,
+            );
+            if (!token) return;
+            const [row] = await db
+              .select({
+                createdAt: authSessions.createdAt,
+                impersonatedBy: authSessions.impersonatedBy,
+              })
+              .from(authSessions)
+              .where(eq(authSessions.token, token));
+            if (!row?.impersonatedBy) return;
+            const cap = new Date(
+              row.createdAt.getTime() + IMPERSONATION_SECONDS * 1000,
+            );
+            if (expiresAt.getTime() <= cap.getTime()) return;
+            return { data: { ...data, expiresAt: cap } };
+          },
         },
       },
       user: {

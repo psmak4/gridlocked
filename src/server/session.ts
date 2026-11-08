@@ -5,7 +5,12 @@
 import { and, eq } from "drizzle-orm";
 import { getSessionCookie } from "better-auth/cookies";
 import { authSessions, profiles, users } from "@/db/schema";
-import { createAuth, ensureProfile, type Auth } from "@/identity/auth";
+import {
+  createAuth,
+  ensureProfile,
+  IMPERSONATION_SECONDS,
+  type Auth,
+} from "@/identity/auth";
 import { createResendSender } from "@/identity/email/resend";
 import type { EmailSender } from "@/identity/email/sender";
 import { pendingDocuments } from "@/identity/consent";
@@ -102,6 +107,7 @@ export async function getViewer(
         profile: profiles,
         impersonatedBy: authSessions.impersonatedBy,
         staffVerifiedAt: authSessions.staffVerifiedAt,
+        sessionCreatedAt: authSessions.createdAt,
       })
       .from(authSessions)
       .innerJoin(users, eq(users.id, authSessions.userId))
@@ -113,6 +119,15 @@ export async function getViewer(
         ),
       );
     if (!row) return null;
+    // Ruling 38: an impersonation older than its hour is over, by our clock,
+    // whatever the row's expiry says.
+    if (
+      row.impersonatedBy !== null &&
+      now.getTime() - row.sessionCreatedAt.getTime() >=
+        IMPERSONATION_SECONDS * 1000
+    ) {
+      return null;
+    }
 
     const { user, profile } = row;
     const viewer: Viewer = {
