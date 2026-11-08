@@ -41,3 +41,10 @@ describe("Checkbox", () => {
     expect(html).toContain("data-checked:bg-ink");
   });
 });
+
+describe("Checkbox disabled row", () => {
+  it("dims the whole row, label included", () => {
+    const html = renderToString(<Checkbox id="t" label="Terms" disabled />);
+    expect(html).toMatch(/data-slot="checkbox-row" class="[^"]*opacity-45/);
+  });
+});

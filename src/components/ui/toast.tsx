@@ -1,4 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -21,24 +27,38 @@ function Toast({
   onDismiss,
   className,
 }: ToastProps) {
-  const [held, setHeld] = useState(false);
-
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const held = hovered || focused;
+  // The latest callback, so an inline onDismiss doesn't restart the timer.
+  const dismiss = useRef(onDismiss);
   useEffect(() => {
-    if (held || !onDismiss) return;
-    const timer = setTimeout(onDismiss, TOAST_MS);
+    dismiss.current = onDismiss;
+  });
+  const hasDismiss = onDismiss !== undefined;
+
+  // Pauses while hovered or focused. On resume the full 4 seconds start again.
+  useEffect(() => {
+    if (held || !hasDismiss) return;
+    const timer = setTimeout(() => dismiss.current?.(), TOAST_MS);
     return () => clearTimeout(timer);
-  }, [held, onDismiss]);
+  }, [held, hasDismiss]);
+
+  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
+    // Blur bubbles: only focus leaving the toast ends the pause.
+    if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+  };
 
   return (
     <div
       role="status"
       data-slot="toast"
-      onMouseEnter={() => setHeld(true)}
-      onMouseLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)}
-      onBlur={() => setHeld(false)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={onBlur}
       className={cn(
-        "flex min-h-[48px] items-center gap-space-3 rounded-radius-m bg-ink py-0 pr-space-2 pl-space-4 font-sans text-[16px] font-semibold text-surface",
+        "flex min-h-[48px] items-center gap-space-3 rounded-radius-m bg-ink shadow-[var(--shadow-sheet)] py-0 pr-space-2 pl-space-4 font-sans text-[16px] font-semibold text-surface",
         className,
       )}
     >

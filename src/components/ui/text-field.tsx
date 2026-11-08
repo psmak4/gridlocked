@@ -16,11 +16,13 @@ function TextField({
   hint,
   error,
   className,
+  "aria-describedby": callerDescribedBy,
   ...props
 }: TextFieldProps) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
-  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
+  const describedBy =
+    [callerDescribedBy, hintId, errorId].filter(Boolean).join(" ") || undefined;
   return (
     <div data-slot="text-field" className="flex flex-col gap-[6px] font-sans">
       <label htmlFor={id} className="text-[14px] font-bold text-ink">

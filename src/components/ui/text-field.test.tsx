@@ -40,3 +40,18 @@ describe("TextField", () => {
     expect(html).not.toMatch(/\saria-invalid="/);
   });
 });
+
+describe("TextField describedby merge", () => {
+  it("keeps a caller's aria-describedby beside the hint and error", () => {
+    const html = renderToString(
+      <TextField
+        id="n"
+        label="Name"
+        hint="Hint"
+        error="Err"
+        aria-describedby="outside"
+      />,
+    );
+    expect(html).toContain('aria-describedby="outside n-hint n-error"');
+  });
+});
