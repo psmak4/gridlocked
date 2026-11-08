@@ -57,6 +57,8 @@ export type IdentityErrorCode =
   | "invalid_ban"
   | "cannot_impersonate"
   | "not_impersonating"
+  // Trust levels (DM 6.5): a moderator's level outside 0–3.
+  | "invalid_trust_level"
   // Two staff changes deadlocked, and the retries did too.
   | "try_again";
 

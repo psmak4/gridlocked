@@ -20,6 +20,13 @@ const sessionDurations = z.object(
   ) as Record<(typeof SESSION_KINDS)[number], typeof positiveInt>,
 );
 
+const trustLevelThreshold = z.object({
+  daysVisited: z.number().int().nonnegative(),
+  posts: z.number().int().nonnegative(),
+  reputation: z.number().int().nonnegative(),
+  accountAgeDays: z.number().int().nonnegative(),
+});
+
 export const settingSchemas = {
   /** Set below each provider's published limits (HLD §4.1). */
   provider_limits: z.object({ jolpica: rateLimits, openf1: rateLimits }),
@@ -45,6 +52,15 @@ export const settingSchemas = {
   }),
   /** Days between username changes (DM 6.3). */
   username_change_days: positiveInt,
+  /**
+   * What each trust level asks for (DM 6.5): all of a level's numbers must be
+   * met. `accountAgeDays` is a floor on the account's age.
+   */
+  trust_thresholds: z.object({
+    tl1: trustLevelThreshold,
+    tl2: trustLevelThreshold,
+    tl3: trustLevelThreshold,
+  }),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -76,4 +92,9 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     alertAt: 0.8,
   },
   username_change_days: 30,
+  trust_thresholds: {
+    tl1: { daysVisited: 3, posts: 10, reputation: 0, accountAgeDays: 3 },
+    tl2: { daysVisited: 15, posts: 50, reputation: 25, accountAgeDays: 15 },
+    tl3: { daysVisited: 60, posts: 200, reputation: 200, accountAgeDays: 60 },
+  },
 };

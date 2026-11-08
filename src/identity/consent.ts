@@ -252,8 +252,17 @@ function isReferenced(t: Db, id: string) {
 export async function purgeIncompleteAccounts(
   db: Db,
   now: Date,
-  { olderThanDays = 7 }: { olderThanDays?: number } = {},
+  options: { olderThanDays?: number } = {},
 ): Promise<number> {
+  return (await purgeIncompleteAccountsCounted(db, now, options)).purged;
+}
+
+/** `purgeIncompleteAccounts`, with the number it skipped as well. */
+export async function purgeIncompleteAccountsCounted(
+  db: Db,
+  now: Date,
+  { olderThanDays = 7 }: { olderThanDays?: number } = {},
+): Promise<{ purged: number; skipped: number }> {
   const cutoff = new Date(now.getTime() - olderThanDays * DAY_MS);
   const candidates = await db
     .select({ id: users.id })
@@ -269,6 +278,7 @@ export async function purgeIncompleteAccounts(
     .orderBy(asc(users.createdAt));
 
   let removed = 0;
+  let skipped = 0;
   for (const { id } of candidates) {
     try {
       const deleted = await db.transaction(async (tx) => {
@@ -329,10 +339,11 @@ export async function purgeIncompleteAccounts(
       if (deleted) removed++;
     } catch (error) {
       if (!hasPgCode(error, FOREIGN_KEY_VIOLATION)) throw error;
+      skipped++;
       console.error(
         `purge incomplete accounts: skipped (${FOREIGN_KEY_VIOLATION})`,
       );
     }
   }
-  return removed;
+  return { purged: removed, skipped };
 }

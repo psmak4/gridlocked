@@ -361,6 +361,7 @@ describe("the tick function", () => {
           },
         );
         expect(typeof handlers.email_flush).toBe("function");
+        expect(typeof handlers.identity_daily).toBe("function");
       }
     });
 
