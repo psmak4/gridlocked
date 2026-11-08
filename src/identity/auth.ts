@@ -105,6 +105,9 @@ export const DISABLED_AUTH_PATHS = [
   // availability is `checkUsername`'s to answer, not an open endpoint.
   // Read from the plugin, like the admin list.
   ...Object.values(username().endpoints).map((endpoint) => endpoint.path),
+  // Settings removes a sign-in method itself (`removeSignInMethodAction`):
+  // under a row lock, so two removals can't leave none, and audited.
+  "/unlink-account",
 ];
 
 /** The TOTP step, in seconds; `verifyStaffSession` checks codes with it. */

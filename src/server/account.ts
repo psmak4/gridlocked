@@ -8,10 +8,19 @@ import { createServerFn } from "@tanstack/react-start";
 import {
   getCookie,
   getRequest,
+  setCookie,
   setResponseHeader,
 } from "@tanstack/react-start/server";
+import { parseSetCookieHeader, toCookieOptions } from "better-auth/cookies";
+import { z } from "zod";
 import { discordFrom } from "@/identity/env";
-import { consumeRateLimit, type Viewer } from "@/identity/viewer";
+import { stopImpersonating } from "@/identity/impersonation";
+import { verifyStaffSession } from "@/identity/staff-access";
+import {
+  consumeRateLimit,
+  IdentityError,
+  type Viewer,
+} from "@/identity/viewer";
 import {
   checkUsernameAction,
   checkUsernameInput,
@@ -25,13 +34,44 @@ import {
   saveSpoilersInput,
   usernameCheckKey,
 } from "./account-actions";
-import { getViewer, withRequestNow } from "./session";
+import {
+  changeUsernameAction,
+  changeUsernameInput,
+  confirmDeletionAction,
+  confirmDeletionInput,
+  deletePageState,
+  exportState,
+  favoritesState,
+  profileState,
+  removeSignInMethodAction,
+  removeSignInMethodInput,
+  requestDeletionAction,
+  requestDeletionInput,
+  requestExportAction,
+  saveFavoriteSettingAction,
+  saveFavoriteSettingInput,
+  saveSpoilerSettingAction,
+  saveSpoilerSettingInput,
+  securityState,
+  settingsOverview,
+  signInMethodsState,
+  usernameState,
+} from "./settings-actions";
+import {
+  getViewer,
+  requestSender,
+  siteBaseUrl,
+  withAuth,
+  withRequestNow,
+} from "./session";
 
 /** What a page may know about the signed-in person. Nothing else leaves the server. */
 export type AccountSummary = {
   complete: boolean;
   username: string | null;
   emailVerified: boolean;
+  /** An admin is looking through this session (the banner, ruling 51a). */
+  impersonated: boolean;
 };
 
 async function requestViewer(): Promise<Viewer | null> {
@@ -49,6 +89,7 @@ export const getAccount = createServerFn({ method: "GET" }).handler(
       complete: viewer.complete,
       username: viewer.displayUsername ?? viewer.username,
       emailVerified: viewer.emailVerified,
+      impersonated: viewer.impersonatedBy !== null,
     };
   },
 );
@@ -157,3 +198,213 @@ export const saveSpoilers = createServerFn({ method: "POST" })
       saveSpoilersAction(db, now, viewer, data),
     );
   });
+
+// --- Profile and settings (M5 task 13) --------------------------------------
+// Every one of these is about the signed-in person, so every answer is
+// private (ruling 51e), whatever the route's own headers say.
+
+function privately() {
+  setResponseHeader("Cache-Control", "private, no-store");
+}
+
+export const getProfile = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db) => profileState(db, viewer));
+  },
+);
+
+export const getSettings = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) => settingsOverview(db, now, viewer));
+  },
+);
+
+export const saveSpoilerSetting = createServerFn({ method: "POST" })
+  .validator(saveSpoilerSettingInput)
+  .handler(async ({ data }) => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) =>
+      saveSpoilerSettingAction(db, now, viewer, data),
+    );
+  });
+
+export const getFavoriteSettings = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db) => favoritesState(db, viewer));
+  },
+);
+
+export const saveFavoriteSettings = createServerFn({ method: "POST" })
+  .validator(saveFavoriteSettingInput)
+  .handler(async ({ data }) => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) =>
+      saveFavoriteSettingAction(db, now, viewer, data),
+    );
+  });
+
+export const getUsernameSettings = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) => usernameState(db, now, viewer));
+  },
+);
+
+export const changeMyUsername = createServerFn({ method: "POST" })
+  .validator(changeUsernameInput)
+  .handler(async ({ data }) => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) =>
+      changeUsernameAction(db, now, viewer, data),
+    );
+  });
+
+export const getSignInMethods = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    const state = await withRequestNow((db) => signInMethodsState(db, viewer));
+    return { ...state, discordAvailable: discordFrom(process.env) !== null };
+  },
+);
+
+export const removeSignInMethod = createServerFn({ method: "POST" })
+  .validator(removeSignInMethodInput)
+  .handler(async ({ data }) => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) =>
+      removeSignInMethodAction(db, now, viewer, data),
+    );
+  });
+
+export const getSecurity = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db) => securityState(db, viewer));
+  },
+);
+
+const STAFF_REFUSALS = [
+  "invalid_code",
+  "rate_limited",
+  "read_only",
+  "forbidden",
+  "staff_two_factor_required",
+] as const;
+export type UnlockResult =
+  { ok: true } | { ok: false; error: (typeof STAFF_REFUSALS)[number] };
+
+/** "Unlock staff tools": the staff two-step for this session (DM 6.4). */
+export const unlockStaffTools = createServerFn({ method: "POST" })
+  .validator(z.object({ code: z.string().trim().min(1).max(64) }))
+  .handler(async ({ data }): Promise<UnlockResult> => {
+    privately();
+    const viewer = await requestViewer();
+    if (!viewer) throw new IdentityError("unauthenticated");
+    try {
+      await withAuth((auth, db, now) =>
+        verifyStaffSession(auth, db, now, { viewer, code: data.code }),
+      );
+      return { ok: true };
+    } catch (error) {
+      if (
+        error instanceof IdentityError &&
+        (STAFF_REFUSALS as readonly string[]).includes(error.code)
+      ) {
+        return {
+          ok: false,
+          error: error.code as (typeof STAFF_REFUSALS)[number],
+        };
+      }
+      throw error;
+    }
+  });
+
+export const getDataExport = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) => exportState(db, now, viewer));
+  },
+);
+
+export const requestMyExport = createServerFn({ method: "POST" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) => requestExportAction(db, now, viewer));
+  },
+);
+
+export const getDeleteAccount = createServerFn({ method: "GET" }).handler(
+  async () => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db) => deletePageState(db, viewer));
+  },
+);
+
+export const requestMyDeletion = createServerFn({ method: "POST" })
+  .validator(requestDeletionInput)
+  .handler(async ({ data }) => {
+    privately();
+    const request = getRequest();
+    const viewer = await requestViewer();
+    const deps = {
+      sender: await requestSender(),
+      baseUrl: siteBaseUrl(request),
+    };
+    return withRequestNow((db, now) =>
+      requestDeletionAction(db, now, viewer, data, deps),
+    );
+  });
+
+/** The emailed link's button; works signed out, since the token is the proof. */
+export const confirmMyDeletion = createServerFn({ method: "POST" })
+  .validator(confirmDeletionInput)
+  .handler(async ({ data }) => {
+    privately();
+    const viewer = await requestViewer();
+    return withRequestNow((db, now) =>
+      confirmDeletionAction(db, now, viewer, data),
+    );
+  });
+
+/** Puts each `Set-Cookie` Better Auth returned onto this response. */
+function applySetCookies(headers: Headers) {
+  const header = headers.get("set-cookie");
+  if (!header) return;
+  parseSetCookieHeader(header).forEach((value, name) => {
+    if (name) setCookie(name, value.value, toCookieOptions(value));
+  });
+}
+
+/**
+ * The banner's Stop (ruling 51a): ends the impersonation and sets the
+ * admin's own session cookie back. `/admin/stop-impersonating` is closed
+ * over HTTP, so this is the way out besides signing out.
+ */
+export const stopImpersonation = createServerFn({ method: "POST" }).handler(
+  async (): Promise<{ ok: true }> => {
+    privately();
+    const request = getRequest();
+    const viewer = await requestViewer();
+    const { headers } = await withAuth((auth, db, now) =>
+      stopImpersonating(auth, db, now, { viewer, headers: request.headers }),
+    );
+    applySetCookies(headers);
+    return { ok: true };
+  },
+);

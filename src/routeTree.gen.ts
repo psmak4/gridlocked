@@ -13,10 +13,18 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthErrorRouteImport } from './routes/auth-error'
 import { Route as CheckEmailRouteImport } from './routes/check-email'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
 import { Route as LegalKindRouteImport } from './routes/legal.$kind'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsDataRouteImport } from './routes/settings.data'
+import { Route as SettingsDeleteRouteImport } from './routes/settings.delete'
+import { Route as SettingsFavoritesRouteImport } from './routes/settings.favorites'
+import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
+import { Route as SettingsSignInRouteImport } from './routes/settings.sign-in'
+import { Route as SettingsUsernameRouteImport } from './routes/settings.username'
 import { Route as SignUpIndexRouteImport } from './routes/sign-up.index'
 import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
@@ -25,6 +33,11 @@ import { Route as WelcomeSpoilersRouteImport } from './routes/welcome.spoilers'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiTestBanRouteImport } from './routes/api/test.ban'
 import { Route as ApiTestEmailsRouteImport } from './routes/api/test.emails'
+import { Route as ApiTestExportFileRouteImport } from './routes/api/test.export-file'
+import { Route as ApiTestImpersonateRouteImport } from './routes/api/test.impersonate'
+import { Route as ApiTestMakeAdminRouteImport } from './routes/api/test.make-admin'
+import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exports'
+import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +59,11 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
@@ -64,6 +82,41 @@ const DevComponentsRoute = DevComponentsRouteImport.update({
 const LegalKindRoute = LegalKindRouteImport.update({
   id: '/legal/$kind',
   path: '/legal/$kind',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsDataRoute = SettingsDataRouteImport.update({
+  id: '/settings/data',
+  path: '/settings/data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsDeleteRoute = SettingsDeleteRouteImport.update({
+  id: '/settings/delete',
+  path: '/settings/delete',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsFavoritesRoute = SettingsFavoritesRouteImport.update({
+  id: '/settings/favorites',
+  path: '/settings/favorites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
+  id: '/settings/security',
+  path: '/settings/security',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsSignInRoute = SettingsSignInRouteImport.update({
+  id: '/settings/sign-in',
+  path: '/settings/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsUsernameRoute = SettingsUsernameRouteImport.update({
+  id: '/settings/username',
+  path: '/settings/username',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignUpIndexRoute = SignUpIndexRouteImport.update({
@@ -106,42 +159,93 @@ const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
   path: '/api/test/emails',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTestExportFileRoute = ApiTestExportFileRouteImport.update({
+  id: '/api/test/export-file',
+  path: '/api/test/export-file',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestImpersonateRoute = ApiTestImpersonateRouteImport.update({
+  id: '/api/test/impersonate',
+  path: '/api/test/impersonate',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestMakeAdminRoute = ApiTestMakeAdminRouteImport.update({
+  id: '/api/test/make-admin',
+  path: '/api/test/make-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestRunExportsRoute = ApiTestRunExportsRouteImport.update({
+  id: '/api/test/run-exports',
+  path: '/api/test/run-exports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsDeleteConfirmRoute = SettingsDeleteConfirmRouteImport.update({
+  id: '/settings/delete_/confirm',
+  path: '/settings/delete/confirm',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth-error': typeof AuthErrorRoute
   '/check-email': typeof CheckEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
   '/components': typeof DevComponentsRoute
   '/legal/$kind': typeof LegalKindRoute
+  '/settings/data': typeof SettingsDataRoute
+  '/settings/delete': typeof SettingsDeleteRoute
+  '/settings/favorites': typeof SettingsFavoritesRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/settings/sign-in': typeof SettingsSignInRoute
+  '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
+  '/api/test/export-file': typeof ApiTestExportFileRoute
+  '/api/test/impersonate': typeof ApiTestImpersonateRoute
+  '/api/test/make-admin': typeof ApiTestMakeAdminRoute
+  '/api/test/run-exports': typeof ApiTestRunExportsRoute
+  '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth-error': typeof AuthErrorRoute
   '/check-email': typeof CheckEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
   '/components': typeof DevComponentsRoute
   '/legal/$kind': typeof LegalKindRoute
+  '/settings/data': typeof SettingsDataRoute
+  '/settings/delete': typeof SettingsDeleteRoute
+  '/settings/favorites': typeof SettingsFavoritesRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/settings/sign-in': typeof SettingsSignInRoute
+  '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/settings': typeof SettingsIndexRoute
   '/sign-up': typeof SignUpIndexRoute
   '/welcome': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
+  '/api/test/export-file': typeof ApiTestExportFileRoute
+  '/api/test/impersonate': typeof ApiTestImpersonateRoute
+  '/api/test/make-admin': typeof ApiTestMakeAdminRoute
+  '/api/test/run-exports': typeof ApiTestRunExportsRoute
+  '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -149,18 +253,31 @@ export interface FileRoutesById {
   '/auth-error': typeof AuthErrorRoute
   '/check-email': typeof CheckEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
   '/_dev/components': typeof DevComponentsRoute
   '/legal/$kind': typeof LegalKindRoute
+  '/settings/data': typeof SettingsDataRoute
+  '/settings/delete': typeof SettingsDeleteRoute
+  '/settings/favorites': typeof SettingsFavoritesRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/settings/sign-in': typeof SettingsSignInRoute
+  '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
+  '/api/test/export-file': typeof ApiTestExportFileRoute
+  '/api/test/impersonate': typeof ApiTestImpersonateRoute
+  '/api/test/make-admin': typeof ApiTestMakeAdminRoute
+  '/api/test/run-exports': typeof ApiTestRunExportsRoute
+  '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -169,54 +286,93 @@ export interface FileRouteTypes {
     | '/auth-error'
     | '/check-email'
     | '/forgot-password'
+    | '/profile'
     | '/reset-password'
     | '/sign-in'
     | '/components'
     | '/legal/$kind'
+    | '/settings/data'
+    | '/settings/delete'
+    | '/settings/favorites'
+    | '/settings/security'
+    | '/settings/sign-in'
+    | '/settings/username'
     | '/sign-up/email'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/settings/'
     | '/sign-up/'
     | '/welcome/'
     | '/api/auth/$'
     | '/api/test/ban'
     | '/api/test/emails'
+    | '/api/test/export-file'
+    | '/api/test/impersonate'
+    | '/api/test/make-admin'
+    | '/api/test/run-exports'
+    | '/settings/delete/confirm'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth-error'
     | '/check-email'
     | '/forgot-password'
+    | '/profile'
     | '/reset-password'
     | '/sign-in'
     | '/components'
     | '/legal/$kind'
+    | '/settings/data'
+    | '/settings/delete'
+    | '/settings/favorites'
+    | '/settings/security'
+    | '/settings/sign-in'
+    | '/settings/username'
     | '/sign-up/email'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/settings'
     | '/sign-up'
     | '/welcome'
     | '/api/auth/$'
     | '/api/test/ban'
     | '/api/test/emails'
+    | '/api/test/export-file'
+    | '/api/test/impersonate'
+    | '/api/test/make-admin'
+    | '/api/test/run-exports'
+    | '/settings/delete/confirm'
   id:
     | '__root__'
     | '/'
     | '/auth-error'
     | '/check-email'
     | '/forgot-password'
+    | '/profile'
     | '/reset-password'
     | '/sign-in'
     | '/_dev/components'
     | '/legal/$kind'
+    | '/settings/data'
+    | '/settings/delete'
+    | '/settings/favorites'
+    | '/settings/security'
+    | '/settings/sign-in'
+    | '/settings/username'
     | '/sign-up/email'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/settings/'
     | '/sign-up/'
     | '/welcome/'
     | '/api/auth/$'
     | '/api/test/ban'
     | '/api/test/emails'
+    | '/api/test/export-file'
+    | '/api/test/impersonate'
+    | '/api/test/make-admin'
+    | '/api/test/run-exports'
+    | '/settings/delete_/confirm'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -224,18 +380,31 @@ export interface RootRouteChildren {
   AuthErrorRoute: typeof AuthErrorRoute
   CheckEmailRoute: typeof CheckEmailRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ProfileRoute: typeof ProfileRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignInRoute: typeof SignInRoute
   DevComponentsRoute: typeof DevComponentsRoute
   LegalKindRoute: typeof LegalKindRoute
+  SettingsDataRoute: typeof SettingsDataRoute
+  SettingsDeleteRoute: typeof SettingsDeleteRoute
+  SettingsFavoritesRoute: typeof SettingsFavoritesRoute
+  SettingsSecurityRoute: typeof SettingsSecurityRoute
+  SettingsSignInRoute: typeof SettingsSignInRoute
+  SettingsUsernameRoute: typeof SettingsUsernameRoute
   SignUpEmailRoute: typeof SignUpEmailRoute
   WelcomeFavoritesRoute: typeof WelcomeFavoritesRoute
   WelcomeSpoilersRoute: typeof WelcomeSpoilersRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
   SignUpIndexRoute: typeof SignUpIndexRoute
   WelcomeIndexRoute: typeof WelcomeIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiTestBanRoute: typeof ApiTestBanRoute
   ApiTestEmailsRoute: typeof ApiTestEmailsRoute
+  ApiTestExportFileRoute: typeof ApiTestExportFileRoute
+  ApiTestImpersonateRoute: typeof ApiTestImpersonateRoute
+  ApiTestMakeAdminRoute: typeof ApiTestMakeAdminRoute
+  ApiTestRunExportsRoute: typeof ApiTestRunExportsRoute
+  SettingsDeleteConfirmRoute: typeof SettingsDeleteConfirmRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -268,6 +437,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reset-password': {
       id: '/reset-password'
       path: '/reset-password'
@@ -294,6 +470,55 @@ declare module '@tanstack/react-router' {
       path: '/legal/$kind'
       fullPath: '/legal/$kind'
       preLoaderRoute: typeof LegalKindRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/data': {
+      id: '/settings/data'
+      path: '/settings/data'
+      fullPath: '/settings/data'
+      preLoaderRoute: typeof SettingsDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/delete': {
+      id: '/settings/delete'
+      path: '/settings/delete'
+      fullPath: '/settings/delete'
+      preLoaderRoute: typeof SettingsDeleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/favorites': {
+      id: '/settings/favorites'
+      path: '/settings/favorites'
+      fullPath: '/settings/favorites'
+      preLoaderRoute: typeof SettingsFavoritesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/security': {
+      id: '/settings/security'
+      path: '/settings/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof SettingsSecurityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/sign-in': {
+      id: '/settings/sign-in'
+      path: '/settings/sign-in'
+      fullPath: '/settings/sign-in'
+      preLoaderRoute: typeof SettingsSignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/username': {
+      id: '/settings/username'
+      path: '/settings/username'
+      fullPath: '/settings/username'
+      preLoaderRoute: typeof SettingsUsernameRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-up/': {
@@ -352,6 +577,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTestEmailsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/test/export-file': {
+      id: '/api/test/export-file'
+      path: '/api/test/export-file'
+      fullPath: '/api/test/export-file'
+      preLoaderRoute: typeof ApiTestExportFileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/impersonate': {
+      id: '/api/test/impersonate'
+      path: '/api/test/impersonate'
+      fullPath: '/api/test/impersonate'
+      preLoaderRoute: typeof ApiTestImpersonateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/make-admin': {
+      id: '/api/test/make-admin'
+      path: '/api/test/make-admin'
+      fullPath: '/api/test/make-admin'
+      preLoaderRoute: typeof ApiTestMakeAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/run-exports': {
+      id: '/api/test/run-exports'
+      path: '/api/test/run-exports'
+      fullPath: '/api/test/run-exports'
+      preLoaderRoute: typeof ApiTestRunExportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/delete_/confirm': {
+      id: '/settings/delete_/confirm'
+      path: '/settings/delete/confirm'
+      fullPath: '/settings/delete/confirm'
+      preLoaderRoute: typeof SettingsDeleteConfirmRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -360,18 +620,31 @@ const rootRouteChildren: RootRouteChildren = {
   AuthErrorRoute: AuthErrorRoute,
   CheckEmailRoute: CheckEmailRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  ProfileRoute: ProfileRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignInRoute: SignInRoute,
   DevComponentsRoute: DevComponentsRoute,
   LegalKindRoute: LegalKindRoute,
+  SettingsDataRoute: SettingsDataRoute,
+  SettingsDeleteRoute: SettingsDeleteRoute,
+  SettingsFavoritesRoute: SettingsFavoritesRoute,
+  SettingsSecurityRoute: SettingsSecurityRoute,
+  SettingsSignInRoute: SettingsSignInRoute,
+  SettingsUsernameRoute: SettingsUsernameRoute,
   SignUpEmailRoute: SignUpEmailRoute,
   WelcomeFavoritesRoute: WelcomeFavoritesRoute,
   WelcomeSpoilersRoute: WelcomeSpoilersRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
   SignUpIndexRoute: SignUpIndexRoute,
   WelcomeIndexRoute: WelcomeIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiTestBanRoute: ApiTestBanRoute,
   ApiTestEmailsRoute: ApiTestEmailsRoute,
+  ApiTestExportFileRoute: ApiTestExportFileRoute,
+  ApiTestImpersonateRoute: ApiTestImpersonateRoute,
+  ApiTestMakeAdminRoute: ApiTestMakeAdminRoute,
+  ApiTestRunExportsRoute: ApiTestRunExportsRoute,
+  SettingsDeleteConfirmRoute: SettingsDeleteConfirmRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

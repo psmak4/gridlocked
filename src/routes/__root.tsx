@@ -6,6 +6,7 @@ import {
   createRootRoute,
   redirect,
 } from "@tanstack/react-router";
+import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeScript } from "@/components/theme-script";
 import { gateRedirect } from "@/lib/auth-gate";
@@ -43,9 +44,22 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: RootDocument,
-  component: Outlet,
+  component: RootComponent,
   notFoundComponent: NotFound,
 });
+
+/** Every page, with the impersonation banner on top while one is running. */
+function RootComponent() {
+  const { account } = Route.useRouteContext();
+  return (
+    <>
+      {account?.impersonated ? (
+        <ImpersonationBanner username={account.username ?? ""} />
+      ) : null}
+      <Outlet />
+    </>
+  );
+}
 
 function NotFound() {
   return (

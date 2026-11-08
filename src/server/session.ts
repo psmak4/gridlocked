@@ -79,16 +79,46 @@ export function withRequestNow<T>(
   return deps.withDb(async (db) => fn(db, await deps.now(db)));
 }
 
-/** Runs `fn` with an auth instance on this request's database. */
+/**
+ * Runs `fn` with an auth instance on this request's database, and the same
+ * database and "now", for our code that calls `auth.api` (impersonation, the
+ * staff two-step).
+ */
 export function withAuth<T>(
-  fn: (auth: Auth) => Promise<T>,
+  fn: (auth: Auth, db: ServerDb, now: Date) => Promise<T>,
   deps: SessionDeps = defaultDeps,
 ): Promise<T> {
   return deps.withDb(async (db) => {
     const now = await deps.now(db);
     const sender = (await deps.sender?.()) ?? null;
-    return fn(createAuth(db, { env: deps.env(), now: () => now, sender }));
+    return fn(
+      createAuth(db, { env: deps.env(), now: () => now, sender }),
+      db,
+      now,
+    );
   });
+}
+
+/** The email sender for this host, for our own emails (the deletion link). */
+export function requestSender(
+  deps: SessionDeps = defaultDeps,
+): Promise<EmailSender | null> {
+  return deps.sender?.() ?? Promise.resolve(null);
+}
+
+/**
+ * The site's address for a link in an email: `BETTER_AUTH_URL` (ruling 51b),
+ * never a host from the request. Only a local build, which serves any port on
+ * localhost and may have no URL set, falls back to the request's origin.
+ */
+export function siteBaseUrl(
+  request: Request,
+  deps: SessionDeps = defaultDeps,
+): string {
+  const env = deps.env();
+  if (env.baseUrl) return env.baseUrl.replace(/\/+$/, "");
+  if (env.local) return new URL(request.url).origin;
+  throw new Error("BETTER_AUTH_URL is not set");
 }
 
 /**

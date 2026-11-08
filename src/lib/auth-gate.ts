@@ -16,6 +16,8 @@ const OPEN_TO_UNFINISHED = [
   /^\/check-email$/,
   /^\/reset-password$/,
   /^\/forgot-password$/,
+  // The deletion link: its token is the proof, whatever else is unfinished.
+  /^\/settings\/delete\/confirm$/,
 ];
 
 /** Pages a finished account is sent home from. */

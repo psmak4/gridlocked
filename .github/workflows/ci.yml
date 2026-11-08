@@ -76,6 +76,15 @@ jobs:
             echo "::error::.output/server contains the test ban hook"
             exit 1
           fi
+          # Task 13's hooks: make an admin, start an impersonation, run the
+          # export jobs, and serve an export file from memory.
+          for marker in test-hook-make-admin test-hook-impersonate \
+            test-hook-run-exports test-hook-export-file; do
+            if grep -rq "$marker" .output/server; then
+              echo "::error::.output/server contains the test hook $marker"
+              exit 1
+            fi
+          done
 
       # The e2e tests need the flagged build, so make it again.
       - name: Build for end-to-end tests

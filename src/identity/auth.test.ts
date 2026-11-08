@@ -251,6 +251,8 @@ describe("Better Auth on the real tables", () => {
     expect(DISABLED_AUTH_PATHS).toContain("/delete-user");
     expect(DISABLED_AUTH_PATHS).toContain("/sign-in/username");
     expect(DISABLED_AUTH_PATHS).toContain("/is-username-available");
+    // Settings removes a sign-in method itself, refusing the last one.
+    expect(DISABLED_AUTH_PATHS).toContain("/unlink-account");
     expect(
       DISABLED_AUTH_PATHS.filter((p) => p.startsWith("/admin/")).length,
     ).toBe(15);

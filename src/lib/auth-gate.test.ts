@@ -35,6 +35,7 @@ describe("the signed-in gate", () => {
       "/check-email",
       "/reset-password",
       "/forgot-password",
+      "/settings/delete/confirm",
     ]) {
       expect(gateRedirect(path, incomplete)).toBeNull();
     }
@@ -44,6 +45,8 @@ describe("the signed-in gate", () => {
     expect(gateRedirect("/welcomed", incomplete)).toBe("/welcome");
     expect(gateRedirect("/legal", incomplete)).toBe("/welcome");
     expect(gateRedirect("/check-email-now", incomplete)).toBe("/welcome");
+    expect(gateRedirect("/settings/delete", incomplete)).toBe("/welcome");
+    expect(gateRedirect("/settings", incomplete)).toBe("/welcome");
   });
 
   it("sends a complete viewer away from the sign-in pages and Finish signing up", () => {

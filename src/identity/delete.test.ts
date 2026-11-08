@@ -729,7 +729,7 @@ describe("account deletion (DM 6.7)", () => {
         expiresAt: after(60 * MIN),
       });
       expect((row!.payload as { url: string }).url).toMatch(
-        /^http:\/\/localhost:3000\/account\/delete\/confirm\?token=/,
+        /^http:\/\/localhost:3000\/settings\/delete\/confirm\?token=/,
       );
     });
 
