@@ -52,6 +52,7 @@ import {
 import { enqueue } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
 import { simulatedClock } from "@/lib/clock";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { createLeague, joinLeague } from "@/leagues/leagues";
 import { setSimulatedClock } from "@/replay/clock-loop";
@@ -131,7 +132,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
   });
 
   const team = async (db: typeof t.db, at: Date, name: string) => {
-    const userId = newId();
+    const userId = await seedUser(db);
     const id = await createTeam(db, at, { gameId, userId, name });
     users.set(id, userId);
     return id;
@@ -635,7 +636,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
     };
     /** A private league of both teams. */
     async function league() {
-      const owner = newId();
+      const owner = await seedUser(t.db);
       const { leagueId, joinCode } = await createLeague(t.db, scoredAt, {
         gameId,
         ownerUserId: owner,

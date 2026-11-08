@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { auditLog } from "@/db/schema";
-import { writeAudit, type AuditEntry } from "./log";
+import { seedUser } from "../../tests/helpers/users";
+import { writeAudit, redactPersonal, type AuditEntry } from "./log";
 
 const NOW = new Date("2026-11-02T09:00:00.000Z");
 const ENTRY: AuditEntry = {
@@ -52,5 +53,60 @@ describe("writeAudit", () => {
       /append-only/,
     );
     expect(await t.db.select().from(auditLog)).toHaveLength(1);
+  });
+
+  it("an email inside before or after is stored redacted, at any depth", async () => {
+    const id = await writeAudit(t.db, NOW, {
+      ...ENTRY,
+      before: { email: "a@example.com", keep: 1 },
+      after: {
+        nested: { ip: "203.0.113.9", list: [{ userAgent: "x", ok: true }] },
+        name: "Ada",
+        ipAddress: "::1",
+      },
+    });
+    const [row] = await t.db.select().from(auditLog);
+    expect(row!.id).toBe(id);
+    expect(row!.before).toEqual({ email: "[redacted]", keep: 1 });
+    expect(row!.after).toEqual({
+      nested: {
+        ip: "[redacted]",
+        list: [{ userAgent: "[redacted]", ok: true }],
+      },
+      name: "[redacted]",
+      ipAddress: "[redacted]",
+    });
+  });
+
+  it("a Date inside before or after is kept as it was", async () => {
+    const when = new Date("2026-12-01T10:00:00.000Z");
+    expect(redactPersonal({ banExpires: when, list: [when] })).toEqual({
+      banExpires: when,
+      list: [when],
+    });
+    await writeAudit(t.db, NOW, { ...ENTRY, after: { banExpires: when } });
+    const [row] = await t.db.select().from(auditLog);
+    expect(row!.after).toEqual({ banExpires: when.toISOString() });
+  });
+
+  it("redactPersonal leaves its input alone", () => {
+    const input = { a: { email: "a@example.com" } };
+    expect(redactPersonal(input)).toEqual({ a: { email: "[redacted]" } });
+    expect(input).toEqual({ a: { email: "a@example.com" } });
+  });
+
+  it("an audit row can name its user and the user it impersonated", async () => {
+    const actor = await seedUser(t.db);
+    const target = await seedUser(t.db);
+    await writeAudit(t.db, NOW, {
+      ...ENTRY,
+      actorUserId: actor,
+      impersonatingUserId: target,
+    });
+    const [row] = await t.db.select().from(auditLog);
+    expect(row).toMatchObject({
+      actorUserId: actor,
+      impersonatingUserId: target,
+    });
   });
 });

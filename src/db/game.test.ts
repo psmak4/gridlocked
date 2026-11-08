@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import {
@@ -419,10 +420,11 @@ describe("teams (DM 3.6)", () => {
   let seasonId: string;
   let eventId: string;
   let gameId: string;
-  const userId = newId();
+  let userId: string;
 
   beforeEach(async () => {
     t = await createTestDb();
+    userId = await seedUser(t.db);
     seasonId = newId();
     await t.db
       .insert(seasons)
@@ -670,7 +672,7 @@ describe("lineup versions (DM 3.7)", () => {
     await t.db.insert(teams).values({
       id: teamId,
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       slot: 1,
       name: "One",
       status: "active",

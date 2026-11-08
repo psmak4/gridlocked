@@ -12,12 +12,12 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { createdAt, oneOf, updatedAt } from "./helpers";
+import { users } from "./identity";
 import { games, teams } from "./game";
 import { constructors, drivers, events } from "./reference";
 
-// Leagues and standings (DM 4.5 to 4.7). `owner_user_id` is a plain uuid until
-// `users` arrives in M5, which adds the foreign key. Not declared here,
-// because Drizzle cannot express them: the membership checks (the team is in
+// Leagues and standings (DM 4.5 to 4.7). Not declared here, because Drizzle
+// cannot express them: the membership checks (the team is in
 // the league's game, the source matches the kind) and the 50-league cap, which
 // raises GL008. They live in the `league_rules` migration.
 
@@ -56,7 +56,9 @@ export const leagues = pgTable(
     /** User content for public and private leagues (DM Part 5). */
     name: text("name").notNull(),
     slug: text("slug").notNull(),
-    ownerUserId: uuid("owner_user_id"),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     /** Public and private leagues only; random, from an alphabet with no look-alikes. */
     joinCode: text("join_code").unique(),
     /** Exactly one of these, matching the `auto_*` kind. */

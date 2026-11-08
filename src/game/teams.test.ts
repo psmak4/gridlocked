@@ -3,7 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedGame2026 } from "../../tests/helpers/game-2026";
 import { gameEvents, games, teams } from "@/db/schema";
-import { newId } from "@/lib/ids";
+import { seedUser } from "../../tests/helpers/users";
 import { GameError } from "./errors";
 import { createTeam, removeTeam, renameTeam } from "./teams";
 
@@ -11,15 +11,16 @@ import { createTeam, removeTeam, renameTeam } from "./teams";
 // game opens.
 
 const NOW = new Date("2026-02-01T09:00:00.000Z");
-const USER = newId();
 
 describe("teams (DM 3.6)", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
   let gameId: string;
+  let USER: string;
 
   beforeEach(async () => {
     t = await createTestDb();
     ({ gameId } = await seedGame2026(t.db, NOW));
+    USER = await seedUser(t.db);
     await setStatus("open");
   });
   afterEach(async () => {
@@ -59,7 +60,7 @@ describe("teams (DM 3.6)", () => {
     ]);
     await expectGameError(make("Four"), "no_free_slot");
     // Another user is unaffected.
-    await make("Mine", newId());
+    await make("Mine", await seedUser(t.db));
   });
 
   it("takes the lowest free slot, or the one asked for", async () => {

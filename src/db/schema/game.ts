@@ -16,6 +16,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { createdAt, oneOf, updatedAt } from "./helpers";
+import { users } from "./identity";
 import {
   constructors,
   drivers,
@@ -228,8 +229,9 @@ export const gameSessionExceptions = pgTable(
       .references(() => sessions.id, { onDelete: "restrict" }),
     policy: text("policy", { enum: SESSION_EXCEPTION_POLICIES }).notNull(),
     reason: text("reason").notNull(),
-    // FK to users added in M5; who acted is in the audit row until then.
-    decidedBy: uuid("decided_by").notNull(),
+    decidedBy: uuid("decided_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -354,8 +356,7 @@ export const assetPrices = pgTable(
 );
 
 /**
- * DM 3.6: a user's team in a game. `user_id` is a plain uuid until `users`
- * arrives in M5, which adds the foreign key. `slot` runs from 1 to the
+ * DM 3.6: a user's team in a game. `slot` runs from 1 to the
  * ruleset's `teamsPerUser` (trigger), and a retired team keeps its slot.
  */
 export const teams = pgTable(
@@ -365,7 +366,9 @@ export const teams = pgTable(
     gameId: uuid("game_id")
       .notNull()
       .references(() => games.id, { onDelete: "restrict" }),
-    userId: uuid("user_id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     slot: smallint("slot").notNull(),
     name: text("name").notNull(),
     /**

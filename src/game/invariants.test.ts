@@ -16,6 +16,7 @@ import {
   sessions,
   teamEventStates,
 } from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { playChip, saveFinalFix } from "./chips";
@@ -96,12 +97,12 @@ describe("checkGameInvariants", () => {
     await openGame(t.db, NOW, gameId);
     plain = await createTeam(t.db, NOW, {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "Plain",
     });
     chips = await createTeam(t.db, NOW, {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "Chips",
     });
 

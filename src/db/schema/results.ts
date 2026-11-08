@@ -17,6 +17,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { createdAt, oneOf } from "./helpers";
+import { users } from "./identity";
 import { jobs } from "./jobs";
 import {
   constructors,
@@ -29,15 +30,12 @@ import {
 
 // Ingestion and results (DM Part 2): how provider data comes in, becomes
 // per-session facts, and gets corrected. Facts only, never points (DM 0.5).
-// Foreign keys point down the stack: to reference data and to `jobs`.
+// Foreign keys point down the stack: to reference data, `jobs` and `users`.
 //
 // Not defined here, because Drizzle cannot express them: the `effective_results`
 // view (only a typed `.existing()` handle is declared) and the triggers
 // (`results.session_kind`, the blocking-review guard). They live in the
 // `results_rules` migration.
-//
-// Columns that DM 2.x marks "FK -> users" are plain `uuid`s for now. The users
-// table arrives in M5, which adds the foreign keys.
 
 export const PROVIDER_REQUEST_OUTCOMES = [
   "new_snapshot",
@@ -299,12 +297,14 @@ export const resultOverrides = pgTable(
      */
     fields: jsonb("fields").notNull().default({}),
     reason: text("reason").notNull(),
-    // FK to users added in M5
-    createdBy: uuid("created_by").notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     createdAt: createdAt(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    // FK to users added in M5
-    revokedBy: uuid("revoked_by"),
+    revokedBy: uuid("revoked_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     version: integer("version").notNull().default(1),
   },
   (t) => [
@@ -417,8 +417,9 @@ export const reviewItems = pgTable(
     status: text("status", { enum: REVIEW_STATUSES }).notNull().default("open"),
     /** What the admin decided. */
     resolution: text("resolution"),
-    // FK to users added in M5
-    resolvedBy: uuid("resolved_by"),
+    resolvedBy: uuid("resolved_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     /** Unique while open, so a repeated check does not pile up duplicates. */
     dedupeKey: text("dedupe_key").notNull(),

@@ -812,7 +812,7 @@ The Zod schema is `rulesetParamsSchema` in `src/game/ruleset.ts`, strict at ever
 |---|---|---|
 | id | uuid PK | |
 | game_id | uuid FK | |
-| user_id | uuid FK → users | A plain uuid until `users` arrives in M5, which adds the foreign key |
+| user_id | uuid FK → users | `ON DELETE RESTRICT`, like every reference to a user (5.1) |
 | slot | smallint | **Unique `(game_id, user_id, slot)`.** On insert (and when the slot changes), a trigger checks `1 ≤ slot ≤` the `teamsPerUser` of the game's latest non-correction ruleset version (3). A retired team keeps its slot. Two simultaneous creates can't both take slot 3, because the unique key serialises them |
 | name | text | User content: filtered and reportable (Part 5) |
 | first_event_id | uuid FK, nullable | The team's first **locked** event. Set by the first lock it takes part in, which drives unlimited transfers and chip unlocks (HLD §5.2) |
@@ -922,7 +922,7 @@ The save check calls `team_purchasing_power` for every version except `limitless
 - **Session cancelled after lock** (e.g. a race called off after qualifying): sessions already run stay scored, and the cancelled session simply has no results. Chips stay used, because the lock happened. Prices update as normal from what was scored. A game event that has locked never becomes `cancelled`, even if its event does: it keeps its sequence, its lock record and its chips.
 - **Event cancelled after lock:** the event's own finalize check does nothing for a cancelled event, so the daily `game_finalize` sweep (4.8) closes it for the game. The game event becomes `final` on what was scored, so its totals and standings are `final` and the next event's prices come from the formula. With nothing scored, the update skips (`no_scores`), the game event still becomes `final`, its lock records get totals of 0, and the next window opens at once on carried prices, not at the 24-hour cutoff. **Transfer penalties (decided 2026-11-07):** an event that scored nothing applies none, since its totals are 0; one where any session scored applies them as normal. A session that was under review stays as it is: it holds nothing here, since no check will ever finalize its results.
 
-**Abandoned sessions with a classification** (e.g. Belgium 2021): scored as classified by default (ruleset param). Admins can void one through `game_session_exceptions` (`setSessionException`, policy `skip`), and clear it again (`clearSessionException`, which removes the row). Both need a reason and are audited, and both trigger a re-score (M4). A session has at most one exception per game. `decided_by` is a plain uuid until M5 adds users; the audit row names who acted.
+**Abandoned sessions with a classification** (e.g. Belgium 2021): scored as classified by default (ruleset param). Admins can void one through `game_session_exceptions` (`setSessionException`, policy `skip`), and clear it again (`clearSessionException`, which removes the row). Both need a reason and are audited, and both trigger a re-score (M4). A session has at most one exception per game. `decided_by` is a `users` FK; the system user until staff have accounts, and the audit row names who acted.
 
 ### 3.10 Indexes beyond keys
 - `lineup_versions (team_id, for_event_id, saved_at DESC)`: the locked-lineup lookup and the builder.
@@ -1151,7 +1151,7 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 
 **Built (M4)** in `src/db/schema/leagues.ts`, with `createLeague` and `syncAutoLeagues` in `src/leagues/leagues.ts`.
 - **`createGame` makes the game's `global` league** in the same transaction (name "Global", slug `global`). A partial unique index allows one per game. It has no code, owner, limit or range of its own, and no members.
-- **`CHECK`s:** the `auto_*` kind has exactly its own key, and the other kinds have none; only `public` and `private` leagues have an owner, a code, a limit and a range other than the whole season; a user league's name is 1 to 40 characters; `start_sequence` is at least 1 and `end_sequence` is not before it; `max_members` is at least 1. `slug` is unique per game, and `owner_user_id` is a plain uuid until M5 adds `users`.
+- **`CHECK`s:** the `auto_*` kind has exactly its own key, and the other kinds have none; only `public` and `private` leagues have an owner, a code, a limit and a range other than the whole season; a user league's name is 1 to 40 characters; `start_sequence` is at least 1 and `end_sequence` is not before it; `max_members` is at least 1. `slug` is unique per game, and `owner_user_id` is a `users` FK (`ON DELETE RESTRICT`).
 - **`createLeague`** makes a `public` or `private` league and returns `{ leagueId, joinCode }`. **Both kinds get a code,** so a public league can be shared too; only the code joins a league (there is no browsing here). The code is 10 characters of `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I, L, O, 0 or 1) from `crypto.getRandomValues`, with bytes that would skew the pick thrown away. The slug is the name plus a random suffix, **not** part of the code, so a private league's code can't be read off its URL. A collision on the code or slug is retried (up to 5 times). A bad name is `bad_name`.
 - **`syncAutoLeagues`** takes a user, a game and the profile's constructor ID, driver ID and country code. For each key that isn't null it finds the game's league for the key or creates it ("Ferrari fans", slug `constructor-ferrari`), and moves every **active** team of the user in that game in. A team leaves the auto leagues of the same kind that don't match, and a null key means none of that kind. Memberships are `auto`, stamped with the `now` it was given. It is idempotent, and one user's syncs take turns (an advisory lock). A team created later is moved in by running it again.
 
@@ -1759,13 +1759,13 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | UUIDv7, so ordered by time |
-| actor_user_id | uuid FK, nullable | Null for jobs. The FK to `users` arrives in M5 |
+| actor_user_id | uuid FK, nullable | Null for jobs. `ON DELETE RESTRICT`, like every reference to a user |
 | actor_label | text, nullable | Who acted while there are no user rows: the staff workflow's GitHub login (added 2026-10-31) |
 | actor_kind | text: `admin`, `moderator`, `user`, `system`, `job` | |
-| impersonating_user_id | uuid FK, nullable | Set when an admin acted while impersonating. The FK to `users` arrives in M5 |
+| impersonating_user_id | uuid FK, nullable | Set when an admin acted while impersonating. `ON DELETE RESTRICT` |
 | action | text | Dotted names, e.g. `event.lock_at.update`, `result_override.create`, `review_item.resolve`, `user.role.update`, `ruleset.correction.apply`, `scoring.rescore.approve` |
 | entity_type, entity_id | text, uuid | Polymorphic, like `provider_ids` (1.11) |
-| before, after | jsonb, nullable | Only the changed fields. **Personal fields** (email, IP) are stored as `"[redacted]"`, so the log never becomes a second copy of personal data |
+| before, after | jsonb, nullable | Only the changed fields. **Personal fields** (the keys `email`, `ip`, `ipAddress`, `userAgent` and `name`, at any depth) are stored as `"[redacted]"` by `writeAudit`, so the log never becomes a second copy of personal data |
 | reason | text, nullable | Required for overrides, corrections, bans and role changes |
 | request_id | text, nullable | Ties together all the entries from one request |
 | created_at | timestamptz | |

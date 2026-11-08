@@ -1,3 +1,4 @@
+import { seedUser } from "../../tests/helpers/users";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
@@ -38,6 +39,7 @@ describe("advanceStatus", () => {
 
   beforeEach(async () => {
     t = await createTestDb();
+    await seedUser(t.db, { id: ADMIN });
     await seedWorldWithSeats(t.db);
   });
   afterEach(async () => {

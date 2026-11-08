@@ -53,9 +53,11 @@ import { z } from "zod";
 import {
   events,
   lineupVersions,
+  profiles,
   SESSION_KINDS,
   sessionResultState,
   sessions,
+  users,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { playChip, saveFinalFix } from "@/game/chips";
@@ -270,6 +272,38 @@ function resolvers(run: GameScriptRun) {
   return { driverId, constructorId };
 }
 
+/**
+ * A user (and its profile) for a scripted team, since a team needs a real
+ * one. The username is unique to the id, so any number of teams can have one.
+ */
+async function createScriptedUser(
+  db: Db,
+  now: Date,
+  team: string,
+): Promise<string> {
+  const id = newId();
+  const username = `scripted_${id.replaceAll("-", "").slice(-12)}`;
+  await db.insert(users).values({
+    id,
+    name: team,
+    email: `${username}@example.test`,
+    emailVerified: true,
+    role: "user",
+    username,
+    displayUsername: username,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.insert(profiles).values({
+    userId: id,
+    status: "active",
+    avatarSeed: id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
+
 async function applyPlayerAction(
   db: Db,
   now: Date,
@@ -283,7 +317,7 @@ async function applyPlayerAction(
       }
       const id = await createTeam(db, now, {
         gameId: run.gameId,
-        userId: newId(),
+        userId: await createScriptedUser(db, now, action.team),
         name: action.team,
       });
       run.teams.set(action.team, id);

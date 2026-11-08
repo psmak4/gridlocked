@@ -17,7 +17,7 @@ import {
   teamEventStates,
 } from "@/db/schema";
 import { simulatedClock } from "@/lib/clock";
-import { newId } from "@/lib/ids";
+import { seedUser } from "../../tests/helpers/users";
 import { gameLockKey, gameOpenKey, type GameOpenPayload } from "@/jobs/kinds";
 import { enqueue } from "@/jobs/queue";
 import { runDue } from "@/jobs/runner";
@@ -140,7 +140,7 @@ describe("the game jobs (HLD §3.3)", () => {
     await at(saved);
     const teamId = await createTeam(t.db, saved, {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "T",
     });
     await saveLineup(t.db, saved, {
@@ -294,7 +294,7 @@ describe("the game jobs (HLD §3.3)", () => {
     await teamWithLineup();
     const second = await createTeam(t.db, clock.now(), {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "U",
     });
     await saveLineup(t.db, clock.now(), {
@@ -381,7 +381,7 @@ describe("the game jobs (HLD §3.3)", () => {
     await teamWithLineup();
     const second = await createTeam(t.db, clock.now(), {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "U",
     });
     await saveLineup(t.db, clock.now(), {
@@ -772,7 +772,7 @@ describe("the game jobs (HLD §3.3)", () => {
     await teamWithLineup();
     const second = await createTeam(t.db, clock.now(), {
       gameId,
-      userId: newId(),
+      userId: await seedUser(t.db),
       name: "U",
     });
     await saveLineup(t.db, clock.now(), {

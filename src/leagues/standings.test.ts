@@ -10,6 +10,7 @@ import {
   teams,
 } from "@/db/schema";
 import { createTeam, removeTeam } from "@/game/teams";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { createLeague, joinLeague, leaveLeague } from "./leagues";
 import { recomputeStandings } from "./standings";
@@ -35,7 +36,7 @@ describe("league standings (DM 4.7)", () => {
   beforeEach(async () => {
     t = await createTestDb();
     ({ gameId, eventIds } = await seedLeagueGames(t.db, NOW));
-    owner = newId();
+    owner = await seedUser(t.db);
     users.clear();
     codes.clear();
     teamIds = {
@@ -50,7 +51,7 @@ describe("league standings (DM 4.7)", () => {
   });
 
   const team = async (name: string) => {
-    const userId = newId();
+    const userId = await seedUser(t.db);
     const id = await createTeam(t.db, NOW, { gameId, userId, name });
     users.set(id, userId);
     return id;

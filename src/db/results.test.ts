@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { newId } from "@/lib/ids";
 import {
   circuits,
@@ -216,7 +217,7 @@ describe("ingestion and results schema (DM Part 2)", () => {
         kind,
         fields,
         reason,
-        createdBy: newId(),
+        createdBy: SYSTEM_USER_ID,
         createdAt: NOW,
       })
       .then(() => id);
@@ -476,7 +477,7 @@ describe("ingestion and results schema (DM Part 2)", () => {
       });
       await t.db
         .update(resultOverrides)
-        .set({ revokedAt: NOW, revokedBy: newId() })
+        .set({ revokedAt: NOW, revokedBy: SYSTEM_USER_ID })
         .where(eq(resultOverrides.id, overrideId));
 
       const row = (await effective(sessionId)).find(
@@ -584,7 +585,7 @@ describe("ingestion and results schema (DM Part 2)", () => {
       });
       await t.db
         .update(resultOverrides)
-        .set({ revokedAt: NOW, revokedBy: newId() })
+        .set({ revokedAt: NOW, revokedBy: SYSTEM_USER_ID })
         .where(eq(resultOverrides.id, first));
       await override(sessionId, driverA, "patch", { position: 9 });
 
@@ -645,7 +646,7 @@ describe("ingestion and results schema (DM Part 2)", () => {
           kind: "patch",
           fields: [1, 2],
           reason: "x",
-          createdBy: newId(),
+          createdBy: SYSTEM_USER_ID,
           createdAt: NOW,
         }),
         CHECK_VIOLATION,
@@ -728,7 +729,11 @@ describe("ingestion and results schema (DM Part 2)", () => {
 
       await t.db
         .update(reviewItems)
-        .set({ status: "resolved", resolvedAt: NOW, resolvedBy: newId() })
+        .set({
+          status: "resolved",
+          resolvedAt: NOW,
+          resolvedBy: SYSTEM_USER_ID,
+        })
         .where(eq(reviewItems.dedupeKey, "will-resolve"));
       await setStatus(sessionId, "provisional");
     });
