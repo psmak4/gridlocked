@@ -49,6 +49,8 @@ test.describe("/api/auth", () => {
         email: `e2e-${crypto.randomUUID()}@example.test`,
         password: "correct horse battery",
         name: "E2E Person",
+        ageConfirmed: true,
+        accepted: true,
       },
     });
     expect(response.status()).toBe(200);
