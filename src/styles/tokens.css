@@ -18,6 +18,7 @@
   --caution: #a8321a;
   --veil: #e6e6f0;
   --focus-ring: #0b0b1e;
+  --shadow-sheet: 0 -8px 24px rgba(11, 11, 30, 0.16);
 }
 
 [data-theme="dark"] {
@@ -39,6 +40,7 @@
   --caution: #ff9e7a;
   --veil: #23234a;
   --focus-ring: #ffd23f;
+  --shadow-sheet: 0 -8px 24px rgba(0, 0, 0, 0.5);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -61,6 +63,7 @@
     --caution: #ff9e7a;
     --veil: #23234a;
     --focus-ring: #ffd23f;
+    --shadow-sheet: 0 -8px 24px rgba(0, 0, 0, 0.5);
   }
 }
 
