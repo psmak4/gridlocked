@@ -59,6 +59,14 @@ export type IdentityErrorCode =
   | "not_impersonating"
   // Trust levels (DM 6.5): a moderator's level outside 0–3.
   | "invalid_trust_level"
+  // Export and deletion (DM 6.7): an export already open or made today, the
+  // typed username that doesn't match, a sign-in too old to confirm by, and a
+  // confirmation link that is expired, used or replaced.
+  | "export_pending"
+  | "export_too_soon"
+  | "wrong_username"
+  | "sign_in_again"
+  | "invalid_link"
   // Two staff changes deadlocked, and the retries did too.
   | "try_again";
 

@@ -48,6 +48,7 @@ export const EMAIL_TEMPLATES = [
   "password_reset",
   "email_change_notice",
   "delete_confirm",
+  "export_ready",
 ] as const;
 export const EMAIL_STATUSES = ["queued", "sent", "failed", "expired"] as const;
 

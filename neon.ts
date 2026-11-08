@@ -5,6 +5,9 @@
  * - `scheduler` bucket: the due-times file (HLD §4.5). Declaring it makes Neon
  *   create the bucket and inject AWS_ENDPOINT_URL_S3, AWS_REGION and the
  *   access keys into the function, so the tick holds no secret of its own.
+ * - `exports` bucket: data export files (DM 6.7), written by the
+ *   `privacy_export` job and downloaded through 7-day presigned links. Same
+ *   injected keys as `scheduler`.
  * - `tick` function: bundled from the entry file by the CLI (esbuild). Neon
  *   injects DATABASE_URL. The only `env` declared is the email sender's
  *   (RESEND_API_KEY and EMAIL_FROM), read from the deploy's own environment
@@ -30,6 +33,7 @@ const emailEnv =
 export default defineConfig({
   buckets: {
     scheduler: {},
+    exports: {},
   },
   functions: {
     tick: {

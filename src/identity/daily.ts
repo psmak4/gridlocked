@@ -20,6 +20,11 @@ import {
 import type { Db } from "@/db/types";
 import type { JobHandler } from "@/jobs/runner";
 import { purgeIncompleteAccountsCounted } from "./consent";
+import {
+  expireExports,
+  unconfiguredExportStore,
+  type ExportStore,
+} from "./export";
 import { recomputeTrustLevels } from "./trust";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -80,15 +85,19 @@ export async function pruneIdentity(database: Db, now: Date): Promise<void> {
 
 type Step = (db: Db, now: Date) => Promise<string>;
 
-/** The steps, in order. Task 10 appends `expireExports`. */
+/**
+ * The steps, in order. `expireExports` deletes export files past their 7 days
+ * and those of deleted accounts (DM 6.7).
+ */
 export const DAILY_STEPS = [
   "recomputeTrustLevels",
   "purgeIncompleteAccounts",
   "pruneIdentity",
+  "expireExports",
 ] as const;
 export type DailyStep = (typeof DAILY_STEPS)[number];
 
-const defaultSteps: Record<DailyStep, Step> = {
+const defaultSteps = (store: ExportStore): Record<DailyStep, Step> => ({
   recomputeTrustLevels: async (db, now) => {
     const { changed } = await recomputeTrustLevels(db, now);
     return `changed=${changed}`;
@@ -101,22 +110,33 @@ const defaultSteps: Record<DailyStep, Step> = {
     await pruneIdentity(db, now);
     return "done";
   },
-};
+  expireExports: async (db, now) => {
+    const expired = await expireExports(db, now, store);
+    return `expired=${expired}`;
+  },
+});
 
-/** `steps` replaces named steps, for tests. */
+/**
+ * `steps` replaces named steps, for tests. `exportStore` is the `exports`
+ * bucket; without one, `expireExports` only fails if there is a file to
+ * delete.
+ */
 export function createIdentityDailyHandler({
   log = console.log,
   steps = {},
+  exportStore = unconfiguredExportStore,
 }: {
   log?: (line: string) => void;
   steps?: Partial<Record<DailyStep, Step>>;
+  exportStore?: ExportStore;
 } = {}): JobHandler {
+  const defaults = defaultSteps(exportStore);
   return async (_job, ctx) => {
     const db = ctx.db as unknown as Db;
     const now = ctx.clock.now();
     const failed: string[] = [];
     for (const name of DAILY_STEPS) {
-      const step = steps[name] ?? defaultSteps[name];
+      const step = steps[name] ?? defaults[name];
       try {
         // Each step opens its own transactions; a throw leaves the others'.
         const result = await step(db, now);

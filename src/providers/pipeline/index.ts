@@ -1,4 +1,10 @@
 import { createIdentityDailyHandler } from "@/identity/daily";
+import type { EmailSender } from "@/identity/email/sender";
+import {
+  createPrivacyExportHandler,
+  unconfiguredExportStore,
+  type ExportStore,
+} from "@/identity/export";
 import { createGameChecksHandler } from "@/game/corrections";
 import { createScoreHandlers } from "@/game/score-jobs";
 import { createFinalizeHandler } from "@/jobs/finalize";
@@ -21,6 +27,13 @@ export interface PipelineDeps {
   openf1: ProviderClient;
   /** Teams per `teams` job of a scoring run; about 1,000 when absent. */
   scoreBatchSize?: number;
+  /**
+   * The `exports` bucket, for `privacy_export` and the daily expiry. Absent
+   * (the replay harnesses), any use of it throws, so a file is never lost.
+   */
+  exportStore?: ExportStore;
+  /** Sends the export-ready email; null leaves it queued. */
+  emailSender?: EmailSender | null;
 }
 
 export type PipelineHandlers = Record<
@@ -31,7 +44,8 @@ export type PipelineHandlers = Record<
   | "score_session"
   | "game_finalize"
   | "game_checks"
-  | "identity_daily",
+  | "identity_daily"
+  | "privacy_export",
   JobHandler
 >;
 
@@ -42,6 +56,7 @@ export type PipelineHandlers = Record<
  */
 export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
   const results = createJolpicaResultsSource(deps.jolpica);
+  const exportStore = deps.exportStore ?? unconfiguredExportStore;
   return {
     sync_calendar: createSyncCalendarHandler(
       createJolpicaCalendarSource(deps.jolpica),
@@ -54,6 +69,10 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
     ...createScoreHandlers({ batchSize: deps.scoreBatchSize }),
     game_checks: createGameChecksHandler(),
     // Database only, like the game's: no provider is involved.
-    identity_daily: createIdentityDailyHandler(),
+    identity_daily: createIdentityDailyHandler({ exportStore }),
+    privacy_export: createPrivacyExportHandler({
+      store: exportStore,
+      sender: deps.emailSender ?? null,
+    }),
   };
 }

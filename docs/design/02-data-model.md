@@ -1827,27 +1827,34 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
 | export_url | text, nullable | Where the user downloads the export (added in M5) |
 | confirm_token_hash, confirm_expires_at | text, timestamptz, nullable | A deletion waits for the emailed confirmation link. Only the token's hash is kept (added in M5) |
 
-**Export:** a job builds one JSON file with:
-- the user's profile and sign-in methods (provider names, not tokens);
-- teams, lineups, chip plays and league memberships;
-- posts, including revisions, and chat, including archived chat (5.5);
-- votes, watch marks, notification preferences and legal acceptances.
+**The registry (built in M5).** `PERSONAL_DATA` in `src/identity/personal-data.ts` has one entry per user column: the table, the column, what deletion does (`delete`, `scrub`, `retire` or `keep`, with why) and the export section it feeds, if any. The export and the deletion both walk it, in its order. A test walks every table in the Drizzle schema (`getTableConfig`) and fails for any foreign key to `users` with no entry, so M7's tables can't be missed by either. Two entries aren't foreign keys but are keyed by the address: `auth_verifications` and `email_outbox`.
+
+**Export:** `requestExport` allows one open request per user and one a day (`export_pending`, `export_too_soon`); a request still open after a day counts as failed. It queues the `privacy_export` job, which builds one JSON file from the registry, stores it at `exports/<request id>.json` in the `exports` bucket (neon.ts), signs a 7-day download link, sets the request `completed` with `export_expires_at` and `export_url`, and emails the link (`export_ready`, an email row expiring within a day). The file has:
+- the account and profile, the sessions (times, IP and browser) and the sign-in methods (provider names, not tokens);
+- teams, with their lineups, chip plays and league memberships, and the leagues the user owns;
+- old usernames, legal acceptances, trust level changes and privacy requests.
+
+It never holds a token, hash, secret, password or two-factor data: every reader names its columns. A job for a deleted account stops and writes nothing. The daily `expireExports` step (`identity_daily`) deletes a file once its 7 days are up, or at the next run for a deleted account, then clears the key and the link.
+
+**Moves to M7, through the same registry:** posts, including revisions, and chat, including archived chat (5.5); votes, watch marks, notifications, push subscriptions and notification preferences. Each table registers its user column, how deletion treats it and its export section.
 
 It covers GDPR and CCPA access requests (HLD §13.6).
 
 **Deletion (our flow, not Better Auth's built-in one):**
-1. **Confirmation:** the user confirms by email link or a fresh sign-in, and is offered an export first.
-2. **One transaction, the scrub:**
-   - the email becomes `deleted-<id>@deleted.invalid`, which keeps the email unique;
-   - name, username and avatar seed are cleared;
-   - all `auth_accounts`, `auth_sessions` and two-factor rows are deleted;
-   - profile fields are nulled, and `status = deleted`.
-3. **Game data:** the user's teams are retired and renamed "Deleted team". Their league memberships end. Leagues they owned stay active with no owner until an admin reassigns them (4.5).
-4. **Personal leftovers removed:** notifications, push subscriptions, notification preferences, watch marks, pending email outbox rows, and their own privacy request exports.
-5. **What stays, tied to the tombstone ID:** posts and chat (anonymized), votes (counted but never shown per user), and reports they filed. Moderation history about them stays for the 2-year retention period (5.10).
-6. Audit entry: `user.delete`.
+1. **Confirmation:** `requestDeletion` takes the username typed out (any case; `wrong_username` otherwise) and is offered an export first. With a verified address it emails a one-hour link (`delete_confirm`); only the token's hash is kept, and a new request replaces the old link. `confirmDeletion` uses the token up in the same transaction as the scrub; an expired, used or replaced link changes nothing (`invalid_link`). With no verified address, a sign-in in the last 10 minutes (the session's `created_at`) is the confirmation, and the account goes at once (`sign_in_again` otherwise). An impersonated session can't ask.
+2. **One transaction, the scrub (`scrubAccount`),** in registry order:
+   - pending sign-in, reset and magic links for the address or the id are deleted; queued and retrying outbox rows to the address are deleted, and finished ones keep their place in the month's count under the tombstone address;
+   - all `auth_sessions` (including any the user holds as someone else), `auth_accounts` and two-factor rows are deleted;
+   - the email becomes `deleted-<id>@deleted.invalid`, which keeps the email unique; name, username, display username, image and any ban are cleared, and the role becomes `user`;
+   - profile fields go back to empty or their defaults, and `status = deleted`.
+3. **Game data:** the user's teams are retired and renamed "Deleted team", and every open league membership ends. Past lock records and standings keep them. Leagues they owned stay active with no owner until an admin reassigns them (4.5).
+4. **Personal leftovers removed:** pending email outbox rows, privacy request links and token hashes (the export file goes at the next daily run). M7 adds notifications, push subscriptions, notification preferences and watch marks.
+5. **What stays, tied to the tombstone ID:** legal acceptances, trust level changes, and staff columns (filter rules, settings, exceptions, overrides, reviews, the audit log). In M7: posts and chat (anonymized), votes (counted but never shown per user), and reports they filed. Moderation history about them stays for the 2-year retention period (5.10).
+6. Audit entry: `user.delete`, with the actor (the user, or a moderator with a reason, e.g. an under-16 account) and no address or name.
 
-The username is held in `username_history` for 90 days and then released.
+It refuses the `system` user (`role_reserved`) and the last active admin (`last_admin`, the same check as `setRole`, with admin rows locked in id order). Deleting an account twice changes nothing. A tombstone can't sign in by any method: it has no sign-in rows, and `.invalid` addresses are refused for magic links and resets. Discord or the old address makes a brand-new account. The daily purge of unfinished sign-ups leaves tombstones alone.
+
+The username is held in `username_history` for 90 days and then released (the daily prune).
 
 ### 6.8 `legal_documents` and `legal_acceptances`
 - **`legal_documents`:** `id`, `kind` (`terms`, `privacy`, `community_rules`), `version`, `published_at`, `requires_reacceptance` (boolean), `url`. The documents themselves are pages on the site, written with your lawyer (HLD §13).
