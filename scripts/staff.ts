@@ -2,7 +2,8 @@
  * The staff actions (src/staff/) from the command line, until M8's screens: a
  * substitution for one event, a seat change from an event onward, an override
  * of one driver's result in one session, or an insert of a driver the provider
- * left out of a session. On staging, run it through the `staff-action` workflow.
+ * left out of a session; or a user's role. On staging, run it through the
+ * `staff-action` workflow.
  *
  *   STAFF_EVENT=2026/19 \
  *   STAFF_CHANGE='{"in":"ryo_hirakawa","team":"haas","car":<n>,"out":"ocon"}' \
@@ -17,6 +18,12 @@
  *
  *   STAFF_CHANGE='{"session":"qualifying","driver":"stroll","team":"aston_martin","car":18,"position":22,"classification":"classified"}' \
  *   ... pnpm staff insert
+ *
+ *   STAFF_CHANGE='{"username":"ada","role":"admin"}' \
+ *   STAFF_REASON='Runs the beta league' STAFF_ACTOR=<you> pnpm staff set-role
+ *
+ * set-role is the one command without STAFF_EVENT. It prints only the
+ * username and the role change, never an email.
  *
  * Keys are Jolpica's. Without STAFF_DRY_RUN=false it only resolves the keys
  * and prints what it would do. It runs in system mode only: it refuses a
@@ -35,7 +42,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length !== 1) {
     throw new Error(
-      "usage: pnpm staff <substitute|seats|override|insert> (inputs in STAFF_* variables)",
+      "usage: pnpm staff <substitute|seats|override|insert|set-role> (inputs in STAFF_* variables)",
     );
   }
   const cmd = parseStaffEnv(args[0], process.env);

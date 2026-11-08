@@ -118,6 +118,9 @@ export async function getViewer(
     const viewer: Viewer = {
       userId: user.id,
       role: user.role,
+      banned:
+        user.banned &&
+        (user.banExpires === null || user.banExpires.getTime() > now.getTime()),
       username: user.username,
       displayUsername: user.displayUsername,
       emailVerified: user.emailVerified,

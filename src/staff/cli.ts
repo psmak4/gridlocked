@@ -1,6 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { CLASSIFICATIONS, providerIds, sessions } from "@/db/schema";
+import { CLASSIFICATIONS, providerIds, sessions, users } from "@/db/schema";
+import { setRole } from "@/identity/roles";
 import type { Db } from "@/db/types";
 import { resultFieldsSchema, type ResultFields } from "@/results/overrides";
 import { SCORED_KINDS } from "@/results/validate";
@@ -12,6 +13,8 @@ import type { SessionMove, StaffDeps } from "./revalidate";
 // line, until M8's screens. Everything but the command comes from the
 // environment, so the staff-action workflow never writes an input into a
 // shell command line. Keys are Jolpica's (`ocon`, `haas`, `2026/19`).
+// `set-role` names a user by username and is the one command without an
+// event.
 
 const text = (name: string) =>
   z
@@ -70,6 +73,12 @@ const insertChange = z.strictObject({
   classification: z.enum(CLASSIFICATIONS),
 });
 
+const setRoleChange = z.strictObject({
+  username: z.string().trim().min(1).max(64),
+  // Never `system` (DM 6.1): that role is the reserved user's alone.
+  role: z.enum(["user", "moderator", "admin"]),
+});
+
 const common = {
   STAFF_EVENT: text("STAFF_EVENT").regex(
     /^\d{4}\/\d{1,2}$/,
@@ -82,6 +91,13 @@ const common = {
 };
 
 export type StaffCommand =
+  | {
+      command: "set-role";
+      change: z.infer<typeof setRoleChange>;
+      reason: string;
+      actor: StaffActor;
+      dryRun: boolean;
+    }
   | {
       command: "substitute";
       event: string;
@@ -127,6 +143,7 @@ export type StaffCommand =
     };
 
 const COMMANDS = {
+  "set-role": setRoleChange,
   substitute: substituteChange,
   seats: seatsChange,
   override: overrideChange,
@@ -148,8 +165,11 @@ export function parseStaffEnv(
     );
   }
   const name = command as keyof typeof COMMANDS;
+  // The workflow always sends STAFF_EVENT; set-role ignores it.
+  const { STAFF_EVENT, ...rest } = common;
   const schema = z.object({
-    ...common,
+    ...rest,
+    ...(name === "set-role" ? {} : { STAFF_EVENT }),
     STAFF_CHANGE: json(COMMANDS[name] as z.ZodType),
   });
   const parsed = schema.safeParse(env);
@@ -162,18 +182,25 @@ export function parseStaffEnv(
         .join("; "),
     );
   }
-  const e = parsed.data;
+  const e = parsed.data as z.infer<z.ZodObject<typeof common>> & {
+    STAFF_CHANGE: unknown;
+  };
   const actor: StaffActor = {
     kind: "admin",
     label: e.STAFF_ACTOR,
     ...(e.STAFF_REQUEST_ID ? { requestId: e.STAFF_REQUEST_ID } : {}),
   };
-  const base = {
-    event: e.STAFF_EVENT,
-    reason: e.STAFF_REASON,
-    actor,
-    dryRun: e.STAFF_DRY_RUN !== "false",
-  };
+  const dryRun = e.STAFF_DRY_RUN !== "false";
+  if (name === "set-role") {
+    return {
+      command: name,
+      reason: e.STAFF_REASON,
+      actor,
+      dryRun,
+      change: e.STAFF_CHANGE as z.infer<typeof setRoleChange>,
+    };
+  }
+  const base = { event: e.STAFF_EVENT, reason: e.STAFF_REASON, actor, dryRun };
   return { command: name, ...base, change: e.STAFF_CHANGE } as StaffCommand;
 }
 
@@ -219,6 +246,12 @@ async function sessionOf(
 
 export type StaffRunReport =
   | {
+      dryRun: boolean;
+      command: "set-role";
+      /** The username and the change only: nothing else about the person. */
+      resolved: { username: string; role: { from: string; to: string } };
+    }
+  | {
       dryRun: true;
       command: StaffCommand["command"];
       resolved: Record<string, unknown>;
@@ -242,6 +275,7 @@ export async function runStaffCommand(
   cmd: StaffCommand,
   deps: StaffDeps = {},
 ): Promise<StaffRunReport> {
+  if (cmd.command === "set-role") return runSetRole(db, now, cmd);
   const eventId = await resolve(db, "event", cmd.event);
   if (cmd.command === "substitute") {
     const resolved = {
@@ -323,4 +357,35 @@ export async function runStaffCommand(
     deps,
   );
   return { dryRun: false, command: cmd.command, resolved, ...result };
+}
+
+/** `set-role`: the user by username, then `setRole` unless a dry run. */
+async function runSetRole(
+  db: Db,
+  now: Date,
+  cmd: Extract<StaffCommand, { command: "set-role" }>,
+): Promise<StaffRunReport> {
+  const { username, role } = cmd.change;
+  const [user] = await db
+    .select({
+      id: users.id,
+      role: users.role,
+      displayUsername: users.displayUsername,
+    })
+    .from(users)
+    .where(eq(sql`lower(${users.username})`, username.toLowerCase()));
+  if (!user) throw new Error(`no user ${username}`);
+  const resolved = {
+    username: user.displayUsername ?? username,
+    role: { from: user.role, to: role },
+  };
+  if (!cmd.dryRun) {
+    await setRole(db, now, {
+      targetUserId: user.id,
+      role,
+      reason: cmd.reason,
+      actor: cmd.actor,
+    });
+  }
+  return { dryRun: cmd.dryRun, command: cmd.command, resolved };
 }

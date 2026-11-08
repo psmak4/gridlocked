@@ -1703,17 +1703,18 @@ erDiagram
 - **Rate limits** can be stored in the database (`rateLimit` model). That's needed on serverless hosting, where memory doesn't last between requests.
 - **Built-in account deletion is a hard delete, with hooks.** That conflicts with "always anonymize" (5.1), so **we leave it disabled and use our own scrub flow** (6.7). `deleteUser.enabled: false` still leaves `/delete-user` routed (it answers 401), so both paths are also in `disabledPaths` and answer 404.
 - **Installed at 1.7.18** (`better-auth` and `@better-auth/drizzle-adapter`, pinned exactly). Sign-up, sign-in, session reads and impersonation run through the adapter against the tables in 6.1 as they are, with no schema change: `auth_sessions.impersonated_by` as a uuid foreign key (ON DELETE SET NULL) takes the admin's id, and ids are UUIDv7 from `generateId`. The adapter is told our names with `modelName` (`users`, `authSessions`, `authAccounts`, `authVerifications`, `authRateLimits`); `authTwoFactors` joins when the two-factor plugin does.
-- **Admin routes:** every `/admin/*` path is in `disabledPaths` except `impersonate-user` and `stop-impersonating`, since staff writes are ours, in one transaction with their audit row (6.6).
+- **Admin routes:** every `/admin/*` path is in `disabledPaths`, since staff writes are ours, in one transaction with their audit row (6.6). Impersonation still uses the plugin's `impersonate-user` and `stop-impersonating`, but only through `auth.api`, from `startImpersonation` and `stopImpersonating` (6.4). Over HTTP an admin could start one without the staff two-step, a reason or an audit row. (Changed by M5 Task 8; before, those two were open.)
+- **Two-factor plugin:** `twoFactor({ issuer: "Gridlocked", allowPasswordless: true, totpOptions: { period: 30 } })` on `auth_two_factors` (`modelName: authTwoFactors`). `allowPasswordless` because a Discord or magic-link staff member has no password to confirm with. It challenges password sign-in only, which is why staff tools have their own step (6.4).
 - **The IP for rate limits** comes from `x-vercel-forwarded-for`, then `x-forwarded-for`. With neither, Better Auth warns and shares one bucket per path.
 
 ### 6.1 Better Auth's tables (shape set by Better Auth; names set by us)
 | Table | Holds | Our additions and notes |
 |---|---|---|
 | `users` | id, name, email (unique), email_verified, image, created_at, updated_at | Admin plugin fields: `role`, `banned`, `ban_reason`, `ban_expires`. Username plugin: `username` (unique, case-insensitive) and `display_username`. Two-factor plugin: `two_factor_enabled`. **`role` is the single source of truth** for `admin`, `moderator` and `user` (HLD §3.2), plus the reserved `system` |
-| `auth_sessions` | id, user_id, token, expires_at, ip_address, user_agent, `impersonated_by`, created_at, updated_at | Expired sessions are pruned daily. The IP is kept only for the session's life. **Ours:** `staff_verified_at` (nullable), for staff re-checks (6.4) |
+| `auth_sessions` | id, user_id, token, expires_at, ip_address, user_agent, `impersonated_by`, created_at, updated_at | Expired sessions are pruned daily. The IP is kept only for the session's life. **Ours:** `staff_verified_at` (nullable), for staff re-checks (6.4). It's declared to Better Auth as a session field with `input: false`, so no client can set it (`/update-session` refuses it), and the session create hook clears it, so a session Better Auth makes from another never inherits it |
 | `auth_accounts` | One row per sign-in method: `credential` (password hash) or `discord` (provider IDs and tokens) | Google and Apple later are just new provider rows (HLD §9). The columns are Better Auth's: `account_id`, `provider_id`, `user_id`, the access, refresh and id tokens with their expiries, `scope`, `password`, `created_at`, `updated_at` |
 | `auth_verifications` | Email verification, magic-link and reset tokens with expiry | Pruned on expiry. `identifier`, `value`, `expires_at`, `created_at`, `updated_at`. Its `id` is text, the one id that isn't a uuid: Better Auth keys a single-use row by a hash of what it guards. |
-| `auth_two_factors` | TOTP secrets and backup codes (two-factor plugin) | **Proposed: required for `admin` and `moderator` roles** (6.4). `secret`, `backup_codes`, `user_id`, plus the plugin's `verified`, `failed_verification_count` and `locked_until` |
+| `auth_two_factors` | TOTP secrets and backup codes (two-factor plugin) | **Required for `admin` and `moderator` staff tools** (6.4). `secret`, `backup_codes`, `user_id`, plus the plugin's `verified`, `failed_verification_count` and `locked_until` |
 | `auth_rate_limits` | Key, count, last request | Auth endpoints only. Pruned. `last_request` is epoch milliseconds, a bigint |
 
 **The shape was read from Better Auth 1.7.10** (core, admin, username and two-factor plugins). M5 Task 3 re-checks it against the version it installs. Ids are uuids made by the app. Foreign keys from these tables to `users` cascade; every other table's reference to a user restricts, since users are anonymized, never deleted (6.7). `username` keeps Better Auth's own unique constraint, and the unique index on `lower(username)` (6.3) is added beside it.
@@ -1760,15 +1761,18 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
 - **Mentions survive renames.** `post_mentions` stores the user ID (5.4). The post text keeps the old `@name` as written, and the mention link still points at the right person.
 
 ### 6.4 Roles, staff security and impersonation
-- **Roles** (`users.role`): `user`, `moderator`, `admin`, `system`. Permissions are defined in Better Auth's access-control config, in code and reviewed, not in a table.
-- **Role changes are admin-only and audited** (6.6). Trust level is separate from role (HLD §3.2).
-- **Staff accounts must use two-factor sign-in (proposed).** An admin or moderator without TOTP set up can sign in, but staff tools stay locked until they enable it. Staff accounts are the most damaging to lose.
+- **Roles** (`users.role`): `user`, `moderator`, `admin`, `system`. Permissions are defined in code and reviewed, not in a table: `ROLE_PERMISSIONS` in `src/identity/roles.ts`, in the admin plugin's statement names, which `auth.ts` turns into its access-control config (`createAccessControl`, roles `user`, `moderator` and `admin`). No role has `impersonate-admins`.
+- **Role changes are admin-only and audited** (6.6). `setRole` is one transaction with the audit `user.role.update` and a reason. It refuses `system` as the new role or the target (`role_reserved`) and leaving no active admin (`last_admin`: an admin who isn't banned and isn't deleted; every admin row is locked first, so two admins can't demote each other at once). It revokes the target's sessions, and any they hold as someone else, so the new role holds from the next request. Until M8's screens it runs through `pnpm staff set-role` (by username, with no event; the output shows only the username and the role change). Trust level is separate from role (HLD §3.2).
+- **Bans:** `banUser` sets `banned`, `ban_reason` and `ban_expires` (null: until lifted), revokes the sessions and writes the audit `user.ban`, in one transaction; `unbanUser` writes `user.unban`. The admin plugin refuses a banned user's next sign-in, however it's made, and lifts a ban whose end has passed. The last active admin can't be banned. M7 adds the `mod_actions` mirror (5.9).
+- **Staff accounts must use two-factor sign-in (decided, M5 decision 5).** An admin or moderator without TOTP set up can sign in, but staff tools stay locked until they enable it (`staff_two_factor_required`). Staff accounts are the most damaging to lose.
+- **The staff two-step, once per session (M5 finding 3, ruling 34).** The two-factor plugin only challenges password sign-in, so a magic link or Discord would skip it. Staff tools therefore ask for a code once per session, however the person signed in. `verifyStaffSession` checks a TOTP code at the caller's `now` (RFC 6238 with the plugin's settings) or uses up a backup code, then sets `auth_sessions.staff_verified_at`, audited as `staff.session.verify` (the method, never the code). It's the only thing that sets it: no sign-in does, password and TOTP included. Five attempts per user per 15 minutes, right or wrong (`rate_limited`), counted in `auth_rate_limits` under `staff-verify:<user id>`. `requireStaff(viewer, "moderator" | "admin")` refuses, in order: no viewer, an impersonated session (`read_only`), a banned or non-staff role, or a moderator at an admin check (`forbidden`), no TOTP, and an unverified session (`staff_session_unverified`). A new session starts locked; signing out and back in locks it again.
 - **Impersonation** (admin plugin; for support, e.g. "see what this user sees"):
-  - admins only;
-  - limited to one hour;
-  - every start and stop is audited;
+  - admins only, from a verified session (`requireStaff(viewer, "admin")`); never another admin, the system user or yourself (`cannot_impersonate`);
+  - limited to one hour (`impersonationSessionDuration: 3600`);
+  - every start and stop is audited (`user.impersonate.start` with a reason, `user.impersonate.stop`), with the admin as `actor_user_id` and the user as `impersonating_user_id`. Signing out of it counts as a stop and is audited the same way;
+  - `stopImpersonating` puts the admin's own session back, still verified;
   - a visible banner shows while it's active;
-  - the impersonated session can't change email or password, delete the account, or post. That's enforced by checking `impersonated_by` on those routes.
+  - the impersonated session is read-only. `hooks.before` refuses every non-GET auth path for a session with `impersonated_by` except `/sign-out` and `/admin/stop-impersonating` (so email, password, 2FA and account changes, whatever endpoint a later release adds), and `requireWritable` refuses our own writes (`read_only`).
 
 ### 6.5 Trust levels (HLD §7.4)
 - **A nightly job** recomputes each active user's level from their counts: days visited, posts, reputation, upheld flags and account age. The thresholds are settings. It skips `trust_level_locked` users.
@@ -1870,7 +1874,7 @@ The username is held in `username_history` for 90 days and then released.
 | Data export request | GDPR and CCPA | `privacy_requests` export, including archived chat (6.7) |
 | Temporary ban | Moderation | `banned` plus `ban_expires` (admin plugin), sessions revoked, mirrored in `mod_actions` (5.9) |
 | Ban evasion with a new account | Any forum | Starts at TL0 with tight limits, plus filters (HLD §7.4) |
-| Staff account phished | Common risk | Two-factor sign-in required for staff tools (6.4) |
+| Staff account phished | Common risk | TOTP required for staff tools, asked once per session however the person signed in (6.4) |
 | Admin investigates a user's issue | Support | Time-limited, audited, read-only impersonation (6.4) |
 | Two admins edit the same setting | Busy weekend | `version` check (0.7) |
 | A moderator's level shouldn't change | Policy | `trust_level_locked` (6.2) |

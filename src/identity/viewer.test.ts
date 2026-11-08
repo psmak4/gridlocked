@@ -157,6 +157,7 @@ describe("the guards", () => {
   const base = {
     userId: "u",
     role: "user",
+    banned: false,
     username: "ada",
     displayUsername: "Ada",
     emailVerified: true,

@@ -79,15 +79,26 @@ manual **Staff action** workflow (`.github/workflows/staff-action.yml`):
 - `override`: one driver's result in one session, for provider data that is
   wrong and stays wrong. A `patch` override sets the given `results` columns
   over the provider row.
+- `set-role`: a user's role (`user`, `moderator` or `admin`), by username,
+  with no event. It refuses `system` and demoting the last active admin, and
+  signs the user out everywhere so the new role holds at once. Its output
+  shows only the username and the role change.
+
+A new admin or moderator still can't open staff tools until they turn on an
+authenticator app (TOTP) and enter a code once in that session (DM 6.4).
 
 Each write goes to `audit_log` with the reason and the GitHub login of
-whoever ran it. The event is then checked again, so a held session moves
-straight away. The workflow does a dry run unless `dry_run` is unticked:
+whoever ran it. For the roster and result commands the event is then checked
+again, so a held session moves straight away. The workflow does a dry run unless `dry_run` is unticked:
 
 ```sh
 gh workflow run staff-action.yml -f command=substitute -f event=2026/19 \
   -f change='{"in":"ryo_hirakawa","team":"haas","car":99,"out":"ocon"}' \
   -f reason='Hirakawa replaces Ocon from FP3'
+
+gh workflow run staff-action.yml -f command=set-role \
+  -f change='{"username":"ada","role":"moderator"}' \
+  -f reason='Helps run race chat'
 ```
 
 ## Docs

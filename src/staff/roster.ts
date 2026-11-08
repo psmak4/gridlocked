@@ -22,10 +22,15 @@ import {
 // held session moves at once instead of at the next finalize check. Until
 // M8's screens, they run through `pnpm staff` (scripts/staff.ts).
 
-/** Who is acting. `label` stands in for a user until M5 (the GitHub login). */
+/**
+ * Who is acting. `label` names them in the log: the GitHub login for the
+ * staff workflow, the username for a signed-in staff member. `userId` is set
+ * when there is a user behind it (M8's screens); the workflow has none.
+ */
 export interface StaffActor {
   kind: "admin";
   label: string;
+  userId?: string;
   /** Ties the audit rows of one run together, e.g. `gh-run:<id>`. */
   requestId?: string;
 }
@@ -54,6 +59,7 @@ export function requireReason(reason: string): string {
 }
 
 export const audit = (actor: StaffActor, reason: string) => ({
+  actorUserId: actor.userId ?? null,
   actorKind: actor.kind,
   actorLabel: actor.label,
   reason,

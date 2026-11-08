@@ -13,6 +13,8 @@ export type Profile = typeof profiles.$inferSelect;
 export type Viewer = {
   userId: string;
   role: UserRole;
+  /** Banned now: `banned`, with no end or an end still to come. */
+  banned: boolean;
   username: string | null;
   displayUsername: string | null;
   emailVerified: boolean;
@@ -42,7 +44,19 @@ export type IdentityErrorCode =
   | "version_conflict"
   | "invalid_country"
   | "invalid_timezone"
-  | "invalid_document";
+  | "invalid_document"
+  // Roles, staff access and impersonation (DM 6.4).
+  | "forbidden"
+  | "staff_two_factor_required"
+  | "staff_session_unverified"
+  | "invalid_code"
+  | "rate_limited"
+  | "no_such_user"
+  | "role_reserved"
+  | "last_admin"
+  | "invalid_ban"
+  | "cannot_impersonate"
+  | "not_impersonating";
 
 /** Carries a code and nothing personal: it can be logged and shown. */
 export class IdentityError extends Error {

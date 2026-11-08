@@ -14,11 +14,26 @@ import {
   createAuthMiddleware,
   getSessionFromCtx,
 } from "better-auth/api";
-import { admin, captcha, magicLink, username } from "better-auth/plugins";
+import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
+import {
+  admin,
+  captcha,
+  magicLink,
+  twoFactor,
+  username,
+} from "better-auth/plugins";
+import { createAccessControl } from "better-auth/plugins/access";
+import { defaultStatements } from "better-auth/plugins/admin/access";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import * as schema from "@/db/schema";
-import { authAccounts, authSessions, profiles, users } from "@/db/schema";
+import {
+  authAccounts,
+  authSessions,
+  authTwoFactors,
+  profiles,
+  users,
+} from "@/db/schema";
 import type { Db } from "@/db/types";
 import { writeAudit } from "@/audit/log";
 import { newId } from "@/lib/ids";
@@ -27,6 +42,7 @@ import { queueEmail } from "./email/outbox";
 import type { EmailSender } from "./email/sender";
 import type { EmailTemplate } from "./email/templates";
 import { completeSignUp } from "./consent";
+import { ROLE_PERMISSIONS } from "./roles";
 import {
   checkUsername,
   isValidUsernameFormat,
@@ -72,18 +88,15 @@ const SECURE_ACCOUNT_PATH = "/forgot-password";
 
 /**
  * Staff actions that need an audit row in the same transaction are ours (DM
- * 6.6), so no admin endpoint is reachable over HTTP except the two that only
- * the plugin can do: minting and ending an impersonation session. The list is
- * read from the plugin, so an endpoint a later release adds is closed too.
+ * 6.6), so no admin endpoint is reachable over HTTP. Impersonation still uses
+ * the plugin's two endpoints, but only through `auth.api`, from
+ * `startImpersonation` and `stopImpersonating`, which check the staff
+ * two-step and write the audit (DM 6.4). Over HTTP an admin could skip both.
+ * The list is read from the plugin, so an endpoint a later release adds is
+ * closed too.
  */
-const ADMIN_PATHS_OVER_HTTP = [
-  "/admin/impersonate-user",
-  "/admin/stop-impersonating",
-];
 export const DISABLED_AUTH_PATHS = [
-  ...Object.values(admin().endpoints)
-    .map((endpoint) => endpoint.path)
-    .filter((path) => !ADMIN_PATHS_OVER_HTTP.includes(path)),
+  ...Object.values(admin().endpoints).map((endpoint) => endpoint.path),
   // `deleteUser.enabled: false` makes these refuse, but they would still be
   // routed; Better Auth's deletion is a hard delete (DM 6.0).
   "/delete-user",
@@ -93,6 +106,39 @@ export const DISABLED_AUTH_PATHS = [
   // Read from the plugin, like the admin list.
   ...Object.values(username().endpoints).map((endpoint) => endpoint.path),
 ];
+
+/** The TOTP step, in seconds; `verifyStaffSession` checks codes with it. */
+export const TOTP_PERIOD_SECONDS = 30;
+
+/** An impersonation lasts this long (DM 6.4). */
+export const IMPERSONATION_SECONDS = 3600;
+
+/**
+ * The only writes an impersonated session may make: ending it (DM 6.4).
+ * Everything else that isn't a read is refused in `hooks.before`.
+ */
+const IMPERSONATION_EXITS = ["/sign-out", "/admin/stop-impersonating"];
+
+/** The refusal code, also what the read-only banner keys on. */
+export const IMPERSONATION_READ_ONLY = "IMPERSONATION_READ_ONLY";
+
+/**
+ * The admin plugin's access control (DM 6.4): its own statement names, with
+ * each role's permissions from `ROLE_PERMISSIONS` in roles.ts.
+ */
+const accessControl = createAccessControl(defaultStatements);
+const role = (
+  permissions: (typeof ROLE_PERMISSIONS)[keyof typeof ROLE_PERMISSIONS],
+) =>
+  accessControl.newRole({
+    user: [...permissions.user],
+    session: [...permissions.session],
+  });
+const ACCESS_ROLES = {
+  user: role(ROLE_PERMISSIONS.user),
+  moderator: role(ROLE_PERMISSIONS.moderator),
+  admin: role(ROLE_PERMISSIONS.admin),
+};
 
 /** Why a sign-up is refused. No address in it: errors reach logs. */
 const SIGN_UP_CLOSED = "Sign-up isn't open for this address.";
@@ -274,11 +320,20 @@ export function createAuth(db: Db, deps: AuthDeps) {
   // Auth ran, so the after-hook can compare with the database. Keyed by the
   // request object, so it lives and dies with the request.
   const emailBefore = new WeakMap<Request, { id: string; email: string }>();
+  // An impersonated session being signed out, by token, so the after-hook
+  // can audit the stop once the sign-out has worked.
+  const endingImpersonations = new Map<
+    string,
+    { id: string; userId: string; impersonatedBy: string }
+  >();
+  // Paths whose endpoint answers GET: a read. Filled in once the instance
+  // exists (below); an `auth.api` call carries no request to ask.
+  let readablePaths = new Set<string>();
   const hostnames = (() => {
     const hosts = env.baseUrl ? [new URL(env.baseUrl).hostname] : [];
     return env.local ? [...hosts, "localhost", "127.0.0.1"] : hosts;
   })();
-  return betterAuth({
+  const auth = betterAuth({
     secret: env.secret,
     logger: { log: logAuthEvent },
     // API errors still become responses; anything else (a database failure)
@@ -297,7 +352,16 @@ export function createAuth(db: Db, deps: AuthDeps) {
       // confirms, through the verification email above.
       changeEmail: { enabled: true, updateEmailWithoutVerification: true },
     },
-    session: { modelName: "authSessions" },
+    session: {
+      modelName: "authSessions",
+      // Set only by `verifyStaffSession`, by a direct write after a code
+      // check. `input: false` refuses it from any client (/update-session),
+      // and the create hook below clears it, so a session Better Auth makes
+      // from another (2FA enable, impersonation) never inherits it.
+      additionalFields: {
+        staffVerifiedAt: { type: "date", required: false, input: false },
+      },
+    },
     account: {
       modelName: "authAccounts",
       // M5 plan, finding 1: do NOT add `trustedProviders` (least of all
@@ -373,6 +437,42 @@ export function createAuth(db: Db, deps: AuthDeps) {
       // The same refusal as sign-up, so a reply says nothing about whether
       // an account exists and carries no address.
       before: createAuthMiddleware(async (ctx) => {
+        // An impersonated session is read-only (DM 6.4): every write but
+        // ending it is refused, whatever the endpoint, so one a later release
+        // adds is covered too. Reads pay nothing.
+        const method =
+          ctx.request?.method ?? (readablePaths.has(ctx.path) ? "GET" : "POST");
+        if (method !== "GET" && method !== "HEAD") {
+          const token = await ctx.getSignedCookie(
+            ctx.context.authCookies.sessionToken.name,
+            ctx.context.secret,
+          );
+          const [held] = token
+            ? await db
+                .select({
+                  id: authSessions.id,
+                  userId: authSessions.userId,
+                  impersonatedBy: authSessions.impersonatedBy,
+                })
+                .from(authSessions)
+                .where(eq(authSessions.token, token))
+            : [];
+          if (token && held?.impersonatedBy) {
+            if (!IMPERSONATION_EXITS.includes(ctx.path)) {
+              throw APIError.from("FORBIDDEN", {
+                message: "This session is read-only.",
+                code: IMPERSONATION_READ_ONLY,
+              });
+            }
+            if (ctx.path === "/sign-out") {
+              endingImpersonations.set(token, {
+                id: held.id,
+                userId: held.userId,
+                impersonatedBy: held.impersonatedBy,
+              });
+            }
+          }
+        }
         if (ctx.path === "/verify-email") {
           const claims = tokenClaims(ctx.query?.token);
           if (ctx.request && claims?.updateTo && claims.email) {
@@ -436,6 +536,28 @@ export function createAuth(db: Db, deps: AuthDeps) {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/sign-out") {
+          // `stopImpersonating` audits its own stop; this is the other way
+          // an impersonation ends early.
+          const token = await ctx.getSignedCookie(
+            ctx.context.authCookies.sessionToken.name,
+            ctx.context.secret,
+          );
+          const ended = token && endingImpersonations.get(token);
+          if (!token || !ended) return;
+          endingImpersonations.delete(token);
+          const failed = ctx.context.returned;
+          if (failed instanceof APIError && Number(failed.statusCode) >= 400) {
+            return;
+          }
+          await auditImpersonationStop(db, now(), {
+            adminUserId: ended.impersonatedBy,
+            targetUserId: ended.userId,
+            sessionId: ended.id,
+            via: "sign-out",
+          });
+          return;
+        }
         if (ctx.path === "/verify-email") {
           // The database decides: the change took effect if the user who held
           // the address now holds another one. A failed, forged or replayed
@@ -499,6 +621,14 @@ export function createAuth(db: Db, deps: AuthDeps) {
     },
     disabledPaths: DISABLED_AUTH_PATHS,
     databaseHooks: {
+      session: {
+        create: {
+          // A new session always starts locked for staff tools (DM 6.4).
+          before: async (session) => ({
+            data: { ...session, staffVerifiedAt: null },
+          }),
+        },
+      },
       user: {
         create: {
           before: async (user) => {
@@ -540,7 +670,23 @@ export function createAuth(db: Db, deps: AuthDeps) {
     },
     // `tanstackStartCookies` must stay last.
     plugins: [
-      admin(),
+      admin({
+        ac: accessControl,
+        roles: ACCESS_ROLES,
+        adminRoles: ["admin"],
+        defaultRole: "user",
+        impersonationSessionDuration: IMPERSONATION_SECONDS,
+      }),
+      // TOTP for staff (DM 6.4). It challenges password sign-in only; staff
+      // tools ask for a code once per session however the person signed in
+      // (`verifyStaffSession`). `allowPasswordless`: a Discord or
+      // magic-link staff member has no password to confirm with.
+      twoFactor({
+        issuer: "Gridlocked",
+        allowPasswordless: true,
+        totpOptions: { period: TOTP_PERIOD_SECONDS },
+        schema: { twoFactor: { modelName: "authTwoFactors" } },
+      }),
       // The plugin lower-cases `username` (the unique, case-insensitive key)
       // and keeps `displayUsername` as typed. The validator only says yes or
       // no; why a name is refused is `checkUsername`'s to say.
@@ -575,6 +721,109 @@ export function createAuth(db: Db, deps: AuthDeps) {
       tanstackStartCookies(),
     ],
   });
+  readablePaths = new Set(
+    Object.values(auth.api).flatMap((endpoint) => {
+      const { path, options } = endpoint as {
+        path?: string;
+        options?: { method?: string | string[] };
+      };
+      const methods = [options?.method ?? []].flat();
+      return path && (methods.includes("GET") || methods.includes("*"))
+        ? [path]
+        : [];
+    }),
+  );
+  return auth;
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/** The audit row for an impersonation that ended (DM 6.4, 6.6). */
+export function auditImpersonationStop(
+  db: Db,
+  now: Date,
+  input: {
+    adminUserId: string;
+    targetUserId: string;
+    sessionId: string;
+    via: "stop" | "sign-out";
+  },
+): Promise<string> {
+  return writeAudit(db, now, {
+    actorUserId: input.adminUserId,
+    impersonatingUserId: input.targetUserId,
+    actorKind: "admin",
+    actorLabel: null,
+    action: "user.impersonate.stop",
+    entityType: "user",
+    entityId: input.targetUserId,
+    before: null,
+    after: { sessionId: input.sessionId, via: input.via },
+    reason: null,
+    requestId: null,
+  });
+}
+
+/** Better Auth stores imported secrets base32 behind this prefix. */
+const BASE32_PREFIX = "base32:";
+
+/**
+ * A user's confirmed TOTP factor, decrypted with Better Auth's key, or null
+ * if they have none. For `verifyStaffSession`, which checks the code itself
+ * so it can use the caller's `now` and its own limit. Pass the transaction
+ * the check belongs to.
+ */
+export async function readTwoFactor(
+  auth: Auth,
+  db: Db,
+  userId: string,
+): Promise<{
+  /** The TOTP secret as bytes, or null if it's in a form we don't read. */
+  secret: Uint8Array | null;
+  /** Uses up `code` if it's one of the backup codes; true if it was. */
+  useBackupCode(code: string): Promise<boolean>;
+} | null> {
+  const [row] = await db
+    .select()
+    .from(authTwoFactors)
+    .where(
+      and(eq(authTwoFactors.userId, userId), eq(authTwoFactors.verified, true)),
+    );
+  if (!row) return null;
+  const { secretConfig } = await auth.$context;
+  const plain = await symmetricDecrypt({ key: secretConfig, data: row.secret });
+  // The plugin makes plain secrets; an imported base32 one isn't read here.
+  const secret = plain.startsWith(BASE32_PREFIX)
+    ? null
+    : new TextEncoder().encode(plain);
+  return {
+    secret,
+    async useBackupCode(code) {
+      let codes: unknown;
+      try {
+        codes = JSON.parse(
+          await symmetricDecrypt({ key: secretConfig, data: row.backupCodes }),
+        );
+      } catch {
+        return false;
+      }
+      if (!Array.isArray(codes) || !codes.includes(code)) return false;
+      const left = await symmetricEncrypt({
+        key: secretConfig,
+        data: JSON.stringify(codes.filter((c) => c !== code)),
+      });
+      // Compare-and-set, as the plugin does: of two uses at once, one wins.
+      const updated = await db
+        .update(authTwoFactors)
+        .set({ backupCodes: left })
+        .where(
+          and(
+            eq(authTwoFactors.id, row.id),
+            eq(authTwoFactors.backupCodes, row.backupCodes),
+          ),
+        )
+        .returning({ id: authTwoFactors.id });
+      return updated.length === 1;
+    },
+  };
+}
