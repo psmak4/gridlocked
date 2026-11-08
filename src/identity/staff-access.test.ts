@@ -242,6 +242,27 @@ describe("the staff two-step (DM 6.4)", () => {
     expect((await viewer(cookie))!.staffVerifiedAt).not.toBeNull();
   });
 
+  it("a burst of wrong codes at once still hits the limit", async () => {
+    const { secret } = await adminWithTotp();
+    const cookie = await signInWithTotp(auth, BOSS, secret);
+    const v = (await viewer(cookie))!;
+    const right = await totpCode(auth, secret);
+    const wrong = right === "000000" ? "111111" : "000000";
+    // All twelve start before any finishes; their database calls interleave
+    // on the one PGlite connection. Each attempt is counted by a single
+    // upsert before its code is checked, so only five can be checked.
+    const codes = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        errorCode(() =>
+          verifyStaffSession(auth, t.db, now(), { viewer: v, code: wrong }),
+        ),
+      ),
+    );
+    expect(codes.filter((c) => c === "invalid_code")).toHaveLength(5);
+    expect(codes.filter((c) => c === "rate_limited")).toHaveLength(7);
+    expect((await viewer(cookie))!.staffVerifiedAt).toBeNull();
+  });
+
   it("only failed codes count toward the limit", async () => {
     const { secret } = await adminWithTotp();
     const cookie = await signInWithTotp(auth, BOSS, secret);
@@ -361,11 +382,18 @@ describe("the staff two-step (DM 6.4)", () => {
   });
 
   describe("managing the second factor (ruling 37)", () => {
-    const post = (path: string, cookie: string, body: unknown = {}) =>
-      auth.handler(
+    // A fixed address per request, so no two share a rate-limit bucket.
+    let sent = 0;
+    const post = (
+      path: string,
+      cookie: string,
+      body: unknown = {},
+      on: TestAuth = auth,
+    ) =>
+      on.handler(
         authPost(path, body, {
           cookie,
-          "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 250)}`,
+          "x-forwarded-for": `198.51.100.${++sent}`,
         }),
       );
 
@@ -403,6 +431,25 @@ describe("the staff two-step (DM 6.4)", () => {
       expect(await errorCode(() => requireStaff(v, "admin"))).toBe(
         "staff_session_unverified",
       );
+    });
+
+    it("the check holds when our clock runs ahead of Better Auth's", async () => {
+      const { cookie } = await discordAdmin();
+      // A replay deployment whose simulated now is past the session's expiry,
+      // which Better Auth (on the wall clock) still accepts.
+      const ahead = testAuth(t.db, {
+        now: () => new Date(Date.now() + 30 * 24 * 3_600_000),
+        sender: mail.sender,
+        env: { discord: DISCORD },
+      });
+      const minted = await post(
+        "/two-factor/generate-backup-codes",
+        cookie,
+        {},
+        ahead,
+      );
+      expect(minted.status).toBe(403);
+      expect(await minted.text()).toContain("STAFF_SESSION_UNVERIFIED");
     });
 
     it("every /two-factor path needs an unlocked staff session", async () => {

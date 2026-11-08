@@ -165,24 +165,13 @@ export async function consumeRateLimit(
 }
 
 /**
- * True if `key` has already used its `max` attempts in the current window,
- * without counting this one. For limits that count only failures: check
- * with this first, and `consumeRateLimit` only when an attempt fails.
+ * Gives back one attempt counted by `consumeRateLimit`, for limits that
+ * count only failures: consume first (one atomic upsert, so a burst can't
+ * slip past), then release when the attempt turns out to be good.
  */
-export async function rateLimitReached(
-  db: Db,
-  now: Date,
-  key: string,
-  { windowSeconds, max }: { windowSeconds: number; max: number },
-): Promise<boolean> {
-  const [row] = await db
-    .select({
-      count: authRateLimits.count,
-      lastRequest: authRateLimits.lastRequest,
-    })
-    .from(authRateLimits)
+export async function releaseRateLimit(db: Db, key: string): Promise<void> {
+  await db
+    .update(authRateLimits)
+    .set({ count: sql`greatest(${authRateLimits.count} - 1, 0)` })
     .where(eq(authRateLimits.key, key));
-  if (!row) return false;
-  const open = now.getTime() - row.lastRequest < windowSeconds * 1000;
-  return open && row.count >= max;
 }

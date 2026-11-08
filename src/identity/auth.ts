@@ -25,7 +25,7 @@ import {
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements } from "better-auth/plugins/admin/access";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { and, eq, gt, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import {
   authAccounts,
@@ -477,8 +477,10 @@ export function createAuth(db: Db, deps: AuthDeps) {
             ctx.context.authCookies.sessionToken.name,
             ctx.context.secret,
           );
-          // A live session only: the sign-in challenge has none, just the
-          // two-factor cookie.
+          // The sign-in challenge has no session, just the two-factor
+          // cookie. No expiry filter: Better Auth decides expiry on its own
+          // clock, and judging it by ours could skip the checks below (fail
+          // open) when ours runs ahead, as in a replay deployment.
           const [held] = token
             ? await db
                 .select({
@@ -491,12 +493,7 @@ export function createAuth(db: Db, deps: AuthDeps) {
                 })
                 .from(authSessions)
                 .innerJoin(users, eq(users.id, authSessions.userId))
-                .where(
-                  and(
-                    eq(authSessions.token, token),
-                    gt(authSessions.expiresAt, now()),
-                  ),
-                )
+                .where(eq(authSessions.token, token))
             : [];
           // Ruling 37: a staff member's factor is managed only from an
           // unlocked session. Otherwise a session alone (a phished magic

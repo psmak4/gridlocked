@@ -14,7 +14,7 @@ import { hasStaffRole, type StaffRole } from "./roles";
 import {
   consumeRateLimit,
   IdentityError,
-  rateLimitReached,
+  releaseRateLimit,
   requireViewer,
   type Viewer,
 } from "./viewer";
@@ -107,8 +107,11 @@ export async function verifyStaffSession(
     throw new IdentityError("forbidden");
   }
   if (!v.twoFactorEnabled) throw new IdentityError("staff_two_factor_required");
+  // Ruling 40: the attempt is counted before the code is checked, by one
+  // atomic upsert, so attempts made at once can't all read a count under the
+  // limit. A right code gives its attempt back, so only failures count.
   const limitKey = `staff-verify:${v.userId}`;
-  if (await rateLimitReached(db, now, limitKey, VERIFY_LIMIT)) {
+  if (!(await consumeRateLimit(db, now, limitKey, VERIFY_LIMIT))) {
     throw new IdentityError("rate_limited");
   }
 
@@ -127,7 +130,7 @@ export async function verifyStaffSession(
     } else if (await factor.useBackupCode(code)) {
       method = "backup_code";
     } else {
-      // Nothing to write; the failure is counted after the transaction.
+      // Nothing to write; the attempt stays counted.
       return false;
     }
 
@@ -159,8 +162,6 @@ export async function verifyStaffSession(
     });
     return true;
   });
-  if (!unlocked) {
-    await consumeRateLimit(db, now, limitKey, VERIFY_LIMIT);
-    throw new IdentityError("invalid_code");
-  }
+  if (!unlocked) throw new IdentityError("invalid_code");
+  await releaseRateLimit(db, limitKey);
 }
