@@ -232,7 +232,7 @@ describe("trust levels in the database", () => {
           reason: "  ",
           actor: actor(mod),
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("needs a reason");
       await expect(
         setTrustLevel(t.db, NOW, {
           userId: id,
@@ -240,7 +240,7 @@ describe("trust levels in the database", () => {
           reason: "x",
           actor: actor(mod),
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("invalid_trust_level");
       expect(await changes(id)).toHaveLength(0);
     });
 

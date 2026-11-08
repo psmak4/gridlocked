@@ -15,6 +15,8 @@ import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import { getSetting } from "@/settings";
 import type { SettingValue } from "@/settings/defaults";
+import { requireReason } from "@/staff/roster";
+import { IdentityError } from "./viewer";
 
 export type TrustLevel = 0 | 1 | 2 | 3;
 export type TrustThresholds = SettingValue<"trust_thresholds">;
@@ -187,12 +189,6 @@ function auditFor(actor: TrustActor, reason: string) {
   };
 }
 
-function requireReason(reason: string): string {
-  const trimmed = reason.trim();
-  if (!trimmed) throw new Error("reason_required");
-  return trimmed;
-}
-
 async function lockProfile(tx: Db, userId: string) {
   const [row] = await tx
     .select({
@@ -202,7 +198,7 @@ async function lockProfile(tx: Db, userId: string) {
     .from(profiles)
     .where(eq(profiles.userId, userId))
     .for("update");
-  if (!row) throw new Error("no_such_user");
+  if (!row) throw new IdentityError("no_such_user");
   return row;
 }
 
@@ -223,7 +219,7 @@ export async function setTrustLevel(
 ): Promise<void> {
   const reason = requireReason(input.reason);
   if (![0, 1, 2, 3].includes(input.level)) {
-    throw new Error("invalid_trust_level");
+    throw new IdentityError("invalid_trust_level");
   }
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
