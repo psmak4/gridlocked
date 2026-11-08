@@ -43,6 +43,8 @@ export const settingSchemas = {
     reservedForUrgent: z.number().int().nonnegative(),
     alertAt: z.number().gt(0).max(1),
   }),
+  /** Days between username changes (DM 6.3). */
+  username_change_days: positiveInt,
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -73,4 +75,5 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     reservedForUrgent: 20,
     alertAt: 0.8,
   },
+  username_change_days: 30,
 };

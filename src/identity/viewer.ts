@@ -27,7 +27,17 @@ export type Viewer = {
 };
 
 export type IdentityErrorCode =
-  "unauthenticated" | "incomplete" | "read_only" | "unverified" | "inactive";
+  | "unauthenticated"
+  | "incomplete"
+  | "read_only"
+  | "unverified"
+  | "inactive"
+  // Usernames (DM 6.3): the four ways a name is refused, and the wait.
+  | "format"
+  | "reserved"
+  | "held"
+  | "taken"
+  | "username_too_soon";
 
 /** Carries a code and nothing personal: it can be logged and shown. */
 export class IdentityError extends Error {

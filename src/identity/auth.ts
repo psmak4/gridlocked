@@ -14,7 +14,7 @@ import {
   createAuthMiddleware,
   getSessionFromCtx,
 } from "better-auth/api";
-import { admin, captcha, magicLink } from "better-auth/plugins";
+import { admin, captcha, magicLink, username } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import * as schema from "@/db/schema";
@@ -26,6 +26,12 @@ import type { AuthEnv } from "./env";
 import { queueEmail } from "./email/outbox";
 import type { EmailSender } from "./email/sender";
 import type { EmailTemplate } from "./email/templates";
+import {
+  checkUsername,
+  isValidUsernameFormat,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+} from "./usernames";
 
 export type AuthDeps = {
   env: AuthEnv;
@@ -81,6 +87,10 @@ export const DISABLED_AUTH_PATHS = [
   // routed; Better Auth's deletion is a hard delete (DM 6.0).
   "/delete-user",
   "/delete-user/callback",
+  // Sign-in is by email, magic link or Discord, never by username, and
+  // availability is `checkUsername`'s to answer, not an open endpoint.
+  // Read from the plugin, like the admin list.
+  ...Object.values(username().endpoints).map((endpoint) => endpoint.path),
 ];
 
 /** Why a sign-up is refused. No address in it: errors reach logs. */
@@ -373,6 +383,42 @@ export function createAuth(db: Db, deps: AuthDeps) {
           }
           return;
         }
+        // `changeUsername` is the only rename path: it holds the 30-day wait,
+        // the history and the hold that this route would skip.
+        if (ctx.path === "/update-user") {
+          const body: unknown = ctx.body;
+          if (
+            typeof body === "object" &&
+            body !== null &&
+            ("username" in body || "displayUsername" in body)
+          ) {
+            throw new APIError("BAD_REQUEST", {
+              message: "A username is changed from settings.",
+            });
+          }
+        }
+        // The display name is the username with the user's capitals (DM 6.3),
+        // so it can't carry a name the username check would refuse.
+        if (ctx.path === "/sign-up/email") {
+          const body: unknown = ctx.body;
+          const record =
+            typeof body === "object" && body !== null
+              ? (body as Record<string, unknown>)
+              : {};
+          const display = record.displayUsername;
+          if (display !== undefined) {
+            const typed = record.username;
+            if (
+              typeof display !== "string" ||
+              typeof typed !== "string" ||
+              typed.toLowerCase() !== display.toLowerCase()
+            ) {
+              throw new APIError("BAD_REQUEST", {
+                message: "The display name must be the username.",
+              });
+            }
+          }
+        }
         const field = ADDRESS_FIELD[ctx.path];
         const body: unknown = ctx.body;
         if (!field || typeof body !== "object" || body === null) return;
@@ -466,6 +512,16 @@ export function createAuth(db: Db, deps: AuthDeps) {
     // `tanstackStartCookies` must stay last.
     plugins: [
       admin(),
+      // The plugin lower-cases `username` (the unique, case-insensitive key)
+      // and keeps `displayUsername` as typed. The validator only says yes or
+      // no; why a name is refused is `checkUsername`'s to say.
+      username({
+        minUsernameLength: USERNAME_MIN_LENGTH,
+        maxUsernameLength: USERNAME_MAX_LENGTH,
+        usernameValidator: async (name) =>
+          (await checkUsername(db, now(), name)) === null,
+        displayUsernameValidator: (name) => isValidUsernameFormat(name),
+      }),
       magicLink({
         expiresIn: MAGIC_LINK_SECONDS,
         storeToken: "hashed",
