@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
+import { Route as ApiTestEmailsRouteImport } from './routes/api/test.emails'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
+  id: '/api/test/emails',
+  path: '/api/test/emails',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/components': typeof DevComponentsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/test/emails': typeof ApiTestEmailsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/components': typeof DevComponentsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/test/emails': typeof ApiTestEmailsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_dev/components': typeof DevComponentsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/test/emails': typeof ApiTestEmailsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/components' | '/api/auth/$'
+  fullPaths: '/' | '/components' | '/api/auth/$' | '/api/test/emails'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/components' | '/api/auth/$'
-  id: '__root__' | '/' | '/_dev/components' | '/api/auth/$'
+  to: '/' | '/components' | '/api/auth/$' | '/api/test/emails'
+  id: '__root__' | '/' | '/_dev/components' | '/api/auth/$' | '/api/test/emails'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DevComponentsRoute: typeof DevComponentsRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiTestEmailsRoute: typeof ApiTestEmailsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/test/emails': {
+      id: '/api/test/emails'
+      path: '/api/test/emails'
+      fullPath: '/api/test/emails'
+      preLoaderRoute: typeof ApiTestEmailsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DevComponentsRoute: DevComponentsRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiTestEmailsRoute: ApiTestEmailsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

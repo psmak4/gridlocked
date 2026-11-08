@@ -1,17 +1,28 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
   authPost,
+  clickLink,
   cookieHeader,
+  linkIn,
   PASSWORD,
+  recordingSender,
   signUpRequest,
   testAuth,
   type TestAuth,
 } from "../../tests/helpers/auth";
 import { DISABLED_AUTH_PATHS } from "./auth";
-import { authRateLimits, authSessions, profiles, users } from "@/db/schema";
+import {
+  authRateLimits,
+  authSessions,
+  authVerifications,
+  emailOutbox,
+  profiles,
+  users,
+} from "@/db/schema";
 
 const UUID_V7 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -250,5 +261,184 @@ describe("Better Auth on the real tables", () => {
     expect(
       DISABLED_AUTH_PATHS.filter((p) => p.startsWith("/admin/")).length,
     ).toBe(13);
+  });
+});
+
+describe("magic link, verification and reset", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let auth: TestAuth;
+  let mail: ReturnType<typeof recordingSender>;
+  const EMAIL = "ada@example.test";
+  const FROM_IP = { "x-forwarded-for": "203.0.113.20" };
+  const requestLink = (email = EMAIL, extra: Record<string, unknown> = {}) =>
+    auth.handler(authPost("/sign-in/magic-link", { email, ...extra }, FROM_IP));
+  const hasSession = (response: Response) =>
+    response.headers.getSetCookie().some((c) => c.includes("session_token"));
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    mail = recordingSender();
+    auth = testAuth(t.db, { sender: mail.sender });
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("a magic link signs in once and not twice", async () => {
+    expect((await requestLink()).status).toBe(200);
+    const link = linkIn(mail.last(EMAIL, "sign-in link"));
+
+    const first = await auth.handler(clickLink(link));
+    expect(first.status).toBe(302);
+    expect(hasSession(first)).toBe(true);
+
+    const second = await auth.handler(clickLink(link));
+    expect(hasSession(second)).toBe(false);
+    expect(second.headers.get("location") ?? "").toContain("error=");
+  });
+
+  it("an expired link sends you to the error page, which offers a new one", async () => {
+    await requestLink();
+    const url = new URL(linkIn(mail.last(EMAIL, "sign-in link")));
+    url.searchParams.set("errorCallbackURL", "/sign-in/link-expired");
+    await t.db
+      .update(authVerifications)
+      .set({ expiresAt: new Date("2020-01-01T00:00:00Z") });
+
+    const response = await auth.handler(clickLink(url.toString()));
+    expect(hasSession(response)).toBe(false);
+    const location = new URL(response.headers.get("location") ?? "", url);
+    expect(location.pathname).toBe("/sign-in/link-expired");
+    expect(location.searchParams.get("error")).toBeTruthy();
+    // The error page's "send a new one" is this same request again.
+    expect((await requestLink()).status).toBe(200);
+  });
+
+  it("magic links are stored hashed", async () => {
+    await requestLink();
+    const link = new URL(linkIn(mail.last(EMAIL, "sign-in link")));
+    const token = link.searchParams.get("token")!;
+    const rows = await t.db.select().from(authVerifications);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.identifier).toMatch(/^magic-link:/);
+    expect(rows[0]!.identifier).not.toContain(token);
+    // Better Auth's own hash: SHA-256 of the token, base64url, no padding.
+    const hash = createHash("sha256").update(token).digest("base64url");
+    expect(rows[0]!.identifier).toBe(`magic-link:${hash}`);
+    // And it still works: the hash is of the token in the link.
+    expect(hasSession(await auth.handler(clickLink(link.toString())))).toBe(
+      true,
+    );
+  });
+
+  it("a magic link for system@gridlocked.invalid does nothing", async () => {
+    const response = await requestLink("system@gridlocked.invalid");
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain("gridlocked.invalid");
+    expect(mail.sent).toHaveLength(0);
+    expect(await t.db.select().from(authVerifications)).toHaveLength(0);
+    expect(await t.db.select().from(emailOutbox)).toHaveLength(0);
+  });
+
+  it("a reset and a verification for a .invalid address are refused the same way", async () => {
+    const address = "ghost@example.invalid";
+    const refusals = await Promise.all([
+      requestLink(address),
+      auth.handler(authPost("/request-password-reset", { email: address })),
+      auth.handler(authPost("/send-verification-email", { email: address })),
+    ]);
+    for (const response of refusals) {
+      expect(response.status).toBe(403);
+      expect(await response.text()).not.toContain(address);
+    }
+    expect(mail.sent).toHaveLength(0);
+  });
+
+  it("the link email expires with the link, in 15 minutes", async () => {
+    // No sender: the row stays queued, so its expiry can be read.
+    const queued = testAuth(t.db);
+    await queued.handler(
+      authPost("/sign-in/magic-link", { email: EMAIL }, FROM_IP),
+    );
+    const [row] = await t.db.select().from(emailOutbox);
+    expect(row?.template).toBe("magic_link");
+    expect(row?.expiresAt?.toISOString()).toBe("2026-11-07T12:15:00.000Z");
+  });
+
+  it("a reset revokes other sessions", async () => {
+    await auth.handler(signUpRequest(EMAIL));
+    await auth.handler(
+      authPost("/sign-in/email", { email: EMAIL, password: PASSWORD }),
+    );
+    expect(await t.db.select().from(authSessions)).toHaveLength(2);
+
+    const ask = await auth.handler(
+      authPost("/request-password-reset", { email: EMAIL }, FROM_IP),
+    );
+    expect(ask.status).toBe(200);
+    const link = linkIn(mail.last(EMAIL, "Reset your"));
+    const token = new URL(link).pathname.split("/").pop()!;
+    const reset = await auth.handler(
+      authPost("/reset-password", {
+        newPassword: "a brand new password",
+        token,
+      }),
+    );
+    expect(reset.status).toBe(200);
+    expect(await t.db.select().from(authSessions)).toHaveLength(0);
+
+    const signIn = await auth.handler(
+      authPost("/sign-in/email", {
+        email: EMAIL,
+        password: "a brand new password",
+      }),
+    );
+    expect(signIn.status).toBe(200);
+  });
+
+  it("a verification link marks the address verified", async () => {
+    const signUp = await auth.handler(signUpRequest(EMAIL));
+    expect(signUp.status).toBe(200);
+    const link = linkIn(mail.last(EMAIL, "Confirm your email"));
+    const [before] = await t.db
+      .select()
+      .from(users)
+      .where(eq(users.email, EMAIL));
+    expect(before?.emailVerified).toBe(false);
+
+    const response = await auth.handler(clickLink(link));
+    expect(response.status).toBeLessThan(400);
+    const [after] = await t.db
+      .select()
+      .from(users)
+      .where(eq(users.email, EMAIL));
+    expect(after?.emailVerified).toBe(true);
+  });
+
+  it("verifying an account ends the sessions it had, even with no sign-in link", async () => {
+    await auth.handler(signUpRequest(EMAIL));
+    await auth.handler(
+      authPost("/sign-in/email", { email: EMAIL, password: PASSWORD }),
+    );
+    const stray = (await t.db.select().from(authSessions)).map((s) => s.id);
+    expect(stray).toHaveLength(2);
+
+    const link = linkIn(mail.last(EMAIL, "Confirm your email"));
+    const response = await auth.handler(clickLink(link));
+    expect(response.status).toBeLessThan(400);
+    const after = await t.db.select().from(authSessions);
+    expect(after).toHaveLength(1);
+    expect(stray).not.toContain(after[0]!.id);
+    expect(hasSession(response)).toBe(true);
+  });
+
+  it("a resend inside 40 seconds is refused", async () => {
+    await auth.handler(signUpRequest(EMAIL));
+    const resend = () =>
+      auth.handler(
+        authPost("/send-verification-email", { email: EMAIL }, FROM_IP),
+      );
+    expect((await resend()).status).toBe(200);
+    expect((await resend()).status).toBe(429);
   });
 });
