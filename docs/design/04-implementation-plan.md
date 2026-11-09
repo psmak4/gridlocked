@@ -211,6 +211,20 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a Discord application, for OAuth;
   - a Vercel project, Hobby, against `gridlocked-staging` (moved here from M1 and M2 on 2026-10-28), at one fixed address so Discord and Turnstile work. The app deploys with Nitro's `vercel` preset, built in CI and uploaded prebuilt from the Deploy staging workflow (framework and hosting spike, 2026-10-31). The Vercel GitHub app and per-PR previews were dropped on 2026-11-07 ([M5 plan](../plans/M5-identity-and-accounts.md), decision 1);
   - an `exports` bucket on the existing Neon project, for data exports.
+- **Result (2026-11-09): met, with one staging check deferred to M9.**
+  - **The tasks:** all 15 tasks are merged (PRs #160–#176), plus the final review's fixes (#178).
+  - **Staging deploys:** Deploy staging run 42544208946 applied migrations 0034–0039 and created the `exports` bucket, and the `tick` was redeployed. Run 42554939551 deployed the site, aliased to https://gridlocked-staging.vercel.app.
+  - **Six of the seven staging checks passed:**
+    - email sign-up, verification and onboarding;
+    - a magic link that works once and is refused after that;
+    - Discord linking to the verified account;
+    - Turnstile refusing a sign-up with no token (`MISSING_RESPONSE`);
+    - `private, no-store` on auth responses, signed-in pages and cookie-dependent redirects, and no cookie on logged-out pages;
+    - `set-role` through the Staff action workflow (dry run 42557245660, then 42557323727), followed by a password and TOTP sign-in and an unlocked staff session.
+  - **The deletion check is deferred to M9.** Staging can email only the owner's address until there's a sending domain, and the owner is the only admin. It's covered locally by the settings e2e and `delete.test.ts`.
+  - **Two bugs only staging showed** were fixed (#176): duplicate countries from retired ISO codes, and no team or driver choices without a running game.
+  - **Tests:** `pnpm test` runs 1,975 tests in 130 files, and `pnpm e2e` runs 67.
+  - **The final whole-milestone review** found 0 Critical, 2 Important and 11 Minor issues. All but one Minor were fixed in #178. That Minor and the deferred items it placed are carried into M6–M9 below.
 
 ### M6 — Fantasy screens (target 22 Jan)
 - **Goal:** the game is playable on a phone.
@@ -225,6 +239,11 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 
   The design-system components are rebuilt on shadcn/ui with the same names and props (DS README).
 - **Key tests:** E2E at phone size for building a team, the lock, chips, joining a league, the breakdown, and spoiler-gated scores.
+- **Carried from M5:**
+  - the flaky `e2e/sign-up.spec.ts` (#177);
+  - toast blur and touch hover;
+  - locking `updateProfile`'s read of the profile once more screens write profiles, plus a rollback test for a failing `syncAutoLeagues`;
+  - a trust test with more than zero games.
 
 ### M7 — Community (target 5 Feb)
 - **Goal:** race weekends feel alive.
@@ -243,6 +262,12 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - the spoiler title check;
   - a report flow and auto-hide;
   - a data export including archived chat (moved from M5 on 2026-11-07).
+- **Carried from M5:**
+  - split `src/identity/auth.ts` (about 900 lines) before adding to it;
+  - the scoring correction notice's open points: the team diff between sessions in `runInline`, a crash between `recomputeTotals` and `finishRun`, and the missing `team_event_totals` and chain tests;
+  - whether a held username should also hold its 0/o look-alikes;
+  - whether `accountAgeDays` still earns its place in the trust rules;
+  - a test of `expireExports`' `failed` branch.
 
 ### M8 — Staff tools (target 12 Feb)
 - **Goal:** a normal weekend needs no staff, and an abnormal one is quick to fix.
@@ -260,6 +285,13 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - every staff write being audited with a reason;
   - a lock never moving into the past;
   - optimistic concurrency, so two staff can't resolve the same item.
+- **Carried from M5:**
+  - `auth_sessions.impersonated_by` becomes `ON DELETE CASCADE`;
+  - `requireStaff` runs before `setRole` and `banUser` on every staff screen;
+  - TOTP codes can't be replayed within their window;
+  - alerts and audit records for failed two-step codes;
+  - `setTrustLevel` writes nothing when the level doesn't change, and refuses a deleted profile;
+  - a missing staff reason refuses with an `IdentityError`.
 
 ### M9 — Hardening and closed beta (beta 15 Feb – 5 Mar)
 - **Goal:** prove it on real people with replayed 2026 weekends.
@@ -272,6 +304,24 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - legal pages from your lawyer;
   - the closed beta on replayed weekends;
   - a bug-fix pass.
+- **Carried from M5:**
+  - **Before sign-up opens beyond the owner** (decided 2026-11-08): when an address is confirmed from a browser that isn't signed in to that account, delete the sign-up password, the age and terms record and other sessions, then send the person to finish signing up.
+  - **The staging checks M5 couldn't run:**
+    - deleting a second account, which then can't sign in;
+    - an export link still working on day 6;
+    - one server-function POST, to confirm the CSRF check's fallback to Origin behind Vercel's proxy.
+  - **Measure in the budget run:** the per-request `ensureProfile` and `betterAuth()` cost.
+  - **Make sure work after a commit can't be lost.** Audits and emails that run after Better Auth's transaction, and `onPasswordReset`'s session revoke, should survive a failure.
+  - **Logging, with Sentry:** a value-free config-error class, and logging codes instead of "better-auth error: event".
+  - **Rate limits:** tune the per-IP and per-path limits with beta traffic.
+  - **Job hardening:**
+    - queue `identity_daily` even when `sync_calendar` fails;
+    - re-check a stale open export under a lock;
+    - pass the Neon plan step only the env it needs.
+  - **Legal review:**
+    - `pendingDocuments` filters future `published_at`;
+    - DM 6.7 states Neon's soft-delete duration.
+  - **A test** for the Discord ban message.
 - **Approval needed:**
   - the production Neon project;
   - the production Vercel project and domain;

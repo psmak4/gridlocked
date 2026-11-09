@@ -80,7 +80,7 @@ These five change what gets built. You approved all five recommendations, and th
 | Approval | What you create and enter (I never see these) | Where it goes | What it unlocks in Task 15 |
 |---|---|---|---|
 | **Vercel project, Hobby** | Project `gridlocked-staging`; an access token; a secret from `openssl rand -base64 32`; the staging pooled `DATABASE_URL` | Token: GitHub `staging` secret `VERCEL_TOKEN`. Org and project ids: GitHub `staging` variables. Secret and URL: Vercel env `BETTER_AUTH_SECRET`, `DATABASE_URL` | The site itself. Needed first |
-| **Resend account, Free** | An API key | GitHub `staging` secret `RESEND_API_KEY_STAGING` (for the tick), Vercel env `RESEND_API_KEY` | Real email: verification, magic links, resets |
+| **Resend account, Free** | An API key | GitHub `staging` secrets `RESEND_API_KEY` and `EMAIL_FROM` (for the tick; Ruling 56 corrected the name), Vercel env `RESEND_API_KEY` and `EMAIL_FROM` | Real email: verification, magic links, resets |
 | **Cloudflare Turnstile site key, free** | A widget for `gridlocked-staging.vercel.app` | Site key: GitHub `staging` variable `VITE_TURNSTILE_SITE_KEY`. Secret: Vercel env `TURNSTILE_SECRET_KEY` | The real bot check |
 | **Discord application** | An app with the redirect URL `https://gridlocked-staging.vercel.app/api/auth/callback/discord` | Vercel env `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | "Continue with Discord" (the button is hidden without them) |
 
