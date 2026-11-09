@@ -8,7 +8,7 @@ import {
   testAuth,
   testAuthEnv,
 } from "../../tests/helpers/auth";
-import { authRateLimits, profiles, users } from "@/db/schema";
+import { authRateLimits, authSessions, profiles, users } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { getViewer, type SessionDeps } from "@/server/session";
 import {
@@ -138,6 +138,31 @@ describe("getViewer and touchViewer", () => {
     at(13 * 60 * MINUTE + MINUTE);
     await getViewer(request(), deps);
     expect((await profileRow()).daysVisited).toBe(2);
+  });
+
+  it("an impersonated session records no visit", async () => {
+    // An admin looking through Ada's account (Ruling 58, M2).
+    const boss = await testAuth(t.db).handler(
+      signUpRequest("boss@example.test"),
+    );
+    expect(boss.status).toBe(200);
+    const [admin] = await t.db
+      .select()
+      .from(users)
+      .where(eq(users.email, "boss@example.test"));
+    await t.db
+      .update(authSessions)
+      .set({ impersonatedBy: admin!.id })
+      .where(eq(authSessions.userId, await adaId()));
+
+    const viewer = await getViewer(request(), deps);
+    expect(viewer?.impersonatedBy).toBe(admin!.id);
+    // Past the 15 minutes, inside the impersonation's hour.
+    at(20 * MINUTE);
+    expect((await getViewer(request(), deps))?.impersonatedBy).toBe(admin!.id);
+    const row = await profileRow();
+    expect(row.lastSeenAt).toBeNull();
+    expect(row.daysVisited).toBe(0);
   });
 
   it("crossing UTC midnight inside 15 minutes still counts the new day", async () => {

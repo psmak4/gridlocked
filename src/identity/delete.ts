@@ -279,6 +279,9 @@ export async function confirmDeletion(
   }
   const hash = hashToken(token);
   await staffTransaction(db, async (tx) => {
+    // Admin rows first, as in `scrubInTransaction` and `setRole`, so every
+    // path takes its locks in the same order (Ruling 58).
+    await lockAdmins(tx);
     const [claimed] = await tx
       .update(privacyRequests)
       .set({

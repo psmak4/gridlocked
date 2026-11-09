@@ -75,13 +75,19 @@ function DataExport() {
         ) : null}
         {state.status === "ready" ? (
           <div className="flex flex-col gap-space-2">
-            <a
-              href={state.url}
-              download
-              className={buttonVariants({ size: "l", block: true })}
-            >
-              Download the file
-            </a>
+            {state.url ? (
+              <a
+                href={state.url}
+                download
+                className={buttonVariants({ size: "l", block: true })}
+              >
+                Download the file
+              </a>
+            ) : (
+              <Notice>
+                A copy is ready. Only the account holder can download it.
+              </Notice>
+            )}
             <span className="text-[14px] text-ink-muted">
               Works until {state.worksUntil}. You can ask for a new copy once a
               day.

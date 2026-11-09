@@ -76,6 +76,11 @@ async function requestViewer(): Promise<Viewer | null> {
   return getViewer(getRequest());
 }
 
+/** An answer about the signed-in person: never stored by a cache (ruling 51e). */
+function privately() {
+  setResponseHeader("Cache-Control", "private, no-store");
+}
+
 /** Who is signed in, or null. Read by the gate on every page. */
 export const getAccount = createServerFn({ method: "GET" }).handler(
   async (): Promise<AccountSummary | null> => {
@@ -174,6 +179,7 @@ export const finishSignUp = createServerFn({ method: "POST" })
 /** Step 1 and 2 start from this: the saved choices, and the lists to pick from. */
 export const getOnboarding = createServerFn({ method: "GET" }).handler(
   async () => {
+    privately();
     const viewer = await requestViewer();
     return withRequestNow((db) => onboardingState(db, viewer));
   },
@@ -200,10 +206,6 @@ export const saveSpoilers = createServerFn({ method: "POST" })
 // --- Profile and settings (M5 task 13) --------------------------------------
 // Every one of these is about the signed-in person, so every answer is
 // private (ruling 51e), whatever the route's own headers say.
-
-function privately() {
-  setResponseHeader("Cache-Control", "private, no-store");
-}
 
 export const getProfile = createServerFn({ method: "GET" }).handler(
   async () => {

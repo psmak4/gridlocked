@@ -162,23 +162,6 @@ export async function favoriteChoices(db: Db): Promise<FavoriteChoices> {
   };
 }
 
-/** Codes that CLDR names but that aren't countries a person lives in. */
-const NOT_COUNTRIES = new Set([
-  "AC",
-  "CP",
-  "DG",
-  "EA",
-  "EU",
-  "EZ",
-  "IC",
-  "QO",
-  "TA",
-  "UN",
-  "XA",
-  "XB",
-  "ZZ",
-]);
-
 /** ISO 3166-1 alpha-2 codes with their English names, A to Z by name. */
 export function countryChoices(): { code: string; name: string }[] {
   const regions = new Intl.DisplayNames(["en"], {
@@ -189,10 +172,9 @@ export function countryChoices(): { code: string; name: string }[] {
   for (let a = 65; a <= 90; a++) {
     for (let b = 65; b <= 90; b++) {
       const code = String.fromCharCode(a, b);
-      // `normalizeCountryCode` also refuses the retired codes.
-      if (NOT_COUNTRIES.has(code) || normalizeCountryCode(code) === null) {
-        continue;
-      }
+      // `normalizeCountryCode` refuses the retired codes and the ones that
+      // aren't countries, so the list offers only what a save accepts.
+      if (normalizeCountryCode(code) === null) continue;
       const name = regions.of(code);
       if (name && name !== code) out.push({ code, name });
     }
@@ -247,17 +229,28 @@ export async function saveFavoritesAction(
   input: SaveFavoritesInput,
 ): Promise<ActionResult<{ version: number }>> {
   const v = requireWritable(viewer);
-  // A favorite is a pick from the latest season's grid, as the form offers.
-  const choices = await favoriteChoices(db);
-  if (
-    (input.favoriteConstructorId !== null &&
-      !choices.constructors.some(
-        (c) => c.id === input.favoriteConstructorId,
-      )) ||
-    (input.favoriteDriverId !== null &&
-      !choices.drivers.some((d) => d.id === input.favoriteDriverId))
-  ) {
-    return { ok: false, error: "invalid_choice" };
+  // A new favorite is a pick from the latest season's grid, as the form
+  // offers. The one already saved may have left the grid (a retired driver,
+  // a new season loaded): it stays as flair (DM 6.11), and the form posts it
+  // back, so it passes unchecked and a country change still saves.
+  const changedConstructor =
+    input.favoriteConstructorId !== null &&
+    input.favoriteConstructorId !== v.profile.favoriteConstructorId;
+  const changedDriver =
+    input.favoriteDriverId !== null &&
+    input.favoriteDriverId !== v.profile.favoriteDriverId;
+  if (changedConstructor || changedDriver) {
+    const choices = await favoriteChoices(db);
+    if (
+      (changedConstructor &&
+        !choices.constructors.some(
+          (c) => c.id === input.favoriteConstructorId,
+        )) ||
+      (changedDriver &&
+        !choices.drivers.some((d) => d.id === input.favoriteDriverId))
+    ) {
+      return { ok: false, error: "invalid_choice" };
+    }
   }
   try {
     await updateProfile(db, now, {

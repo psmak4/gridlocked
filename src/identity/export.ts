@@ -69,12 +69,13 @@ export async function requestExport(
 ): Promise<{ requestId: string }> {
   return db.transaction(async (tx) => {
     const t = tx as unknown as Db;
-    // The profile row serializes two requests from one user.
+    // The profile row serializes two requests from one user. FOR NO KEY
+    // UPDATE: it isn't deleted or re-keyed (Ruling 58).
     const [profile] = await t
       .select({ status: profiles.status })
       .from(profiles)
       .where(eq(profiles.userId, userId))
-      .for("update");
+      .for("no key update");
     if (!profile) throw new IdentityError("no_such_user");
     if (profile.status !== "active") throw new IdentityError("inactive");
 
@@ -224,7 +225,7 @@ export function createPrivacyExportHandler({
           .from(profiles)
           .innerJoin(users, eq(users.id, profiles.userId))
           .where(eq(profiles.userId, row.userId))
-          .for("update", { of: profiles });
+          .for("no key update", { of: profiles });
         if (!profile || profile.status === "deleted")
           return { kind: "deleted" };
         const done = await t

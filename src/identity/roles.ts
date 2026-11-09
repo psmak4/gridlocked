@@ -68,7 +68,11 @@ export const ROLE_PERMISSIONS = {
 
 type Tx = Db;
 
-/** The target, locked for this transaction. `system` can't be changed. */
+/**
+ * The target, locked for this transaction. `system` can't be changed. FOR NO
+ * KEY UPDATE (Ruling 58): the row isn't deleted or re-keyed here, so an
+ * insert elsewhere that points at it (KEY SHARE) needn't wait for it.
+ */
 async function lockTarget(tx: Tx, userId: string) {
   const [target] = await tx
     .select({
@@ -79,7 +83,7 @@ async function lockTarget(tx: Tx, userId: string) {
     })
     .from(users)
     .where(eq(users.id, userId))
-    .for("update");
+    .for("no key update");
   if (!target) throw new IdentityError("no_such_user");
   if (target.role === "system") throw new IdentityError("role_reserved");
   return target;
@@ -89,7 +93,8 @@ async function lockTarget(tx: Tx, userId: string) {
  * Locks every admin row, in id order, before anything else (ruling 39). Two
  * changes then take their locks in the same order, so two admins demoting
  * each other wait for one another instead of deadlocking, and the second
- * sees the first's result (`last_admin`).
+ * sees the first's result (`last_admin`). FOR NO KEY UPDATE still queues
+ * two of these; the scrub that re-keys a row locks it FOR UPDATE itself.
  */
 export async function lockAdmins(tx: Tx): Promise<void> {
   await tx
@@ -97,7 +102,7 @@ export async function lockAdmins(tx: Tx): Promise<void> {
     .from(users)
     .where(eq(users.role, "admin"))
     .orderBy(asc(users.id))
-    .for("update");
+    .for("no key update");
 }
 
 /** Postgres's deadlock code, on the error or the one drizzle wraps. */

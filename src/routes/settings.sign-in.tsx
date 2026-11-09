@@ -32,15 +32,15 @@ const REFUSALS: Record<string, string> = {
 
 /**
  * The ways in (ruling 51d): each linked method, with Remove unless it is the
- * last (the server refuses that too). Link Discord only when Discord is set
- * up on this site.
+ * last way in (the server refuses that too). A confirmed address is a way in
+ * of its own, by an emailed link (Ruling 58). Link Discord only when Discord
+ * is set up on this site.
  */
 function SignInMethods() {
   const state = Route.useLoaderData();
   const router = useRouter();
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string>();
-  const only = state.methods.length <= 1;
   const { hasPassword } = state;
   const hasDiscord = state.methods.some((m) => m.providerId === "discord");
 
@@ -97,11 +97,11 @@ function SignInMethods() {
                   <span className="text-[14px] break-all text-ink-muted">
                     {method.providerId === "credential"
                       ? state.email
-                      : only
+                      : !method.removable
                         ? null
                         : "Linked"}
                   </span>
-                  {only ? (
+                  {!method.removable ? (
                     <span className="text-[14px] text-ink-muted">
                       Your only way to sign in, so it can&apos;t be removed.
                     </span>
@@ -110,7 +110,7 @@ function SignInMethods() {
                 <Button
                   type="button"
                   variant="quiet"
-                  disabled={only || working}
+                  disabled={!method.removable || working}
                   onClick={() => remove(method.providerId)}
                   aria-label={`Remove ${method.label}`}
                 >

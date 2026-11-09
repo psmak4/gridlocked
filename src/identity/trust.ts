@@ -189,6 +189,7 @@ function auditFor(actor: TrustActor, reason: string) {
   };
 }
 
+/** FOR NO KEY UPDATE: a profile is never deleted or re-keyed here (Ruling 58). */
 async function lockProfile(tx: Db, userId: string) {
   const [row] = await tx
     .select({
@@ -197,7 +198,7 @@ async function lockProfile(tx: Db, userId: string) {
     })
     .from(profiles)
     .where(eq(profiles.userId, userId))
-    .for("update");
+    .for("no key update");
   if (!row) throw new IdentityError("no_such_user");
   return row;
 }

@@ -14,7 +14,7 @@ import {
   testAuth,
   type TestAuth,
 } from "../../tests/helpers/auth";
-import { DISABLED_AUTH_PATHS } from "./auth";
+import { DISABLED_AUTH_PATHS, MAGIC_LINK_SIGN_IN } from "./auth";
 import {
   authRateLimits,
   authSessions,
@@ -256,6 +256,150 @@ describe("Better Auth on the real tables", () => {
     expect(
       DISABLED_AUTH_PATHS.filter((p) => p.startsWith("/admin/")).length,
     ).toBe(15);
+  });
+
+  // Nothing of ours calls them (Ruling 58): a password oracle, provider
+  // tokens and profile data for the browser, and session writes.
+  const UNUSED = [
+    "/verify-password",
+    "/account-info",
+    "/get-access-token",
+    "/refresh-token",
+    "/update-session",
+  ];
+
+  it("closes the endpoints nothing of ours calls", async () => {
+    for (const path of UNUSED) expect(DISABLED_AUTH_PATHS).toContain(path);
+    const signUp = await auth.handler(signUpRequest("ada@example.test"));
+    const cookie = cookieHeader(signUp);
+    for (const path of UNUSED) {
+      for (const method of ["GET", "POST"]) {
+        const response = await auth.handler(
+          new Request(`http://localhost:3000/api/auth${path}`, {
+            method,
+            headers: {
+              cookie,
+              origin: "http://localhost:3000",
+              ...(method === "POST" && { "content-type": "application/json" }),
+            },
+            ...(method === "POST" && {
+              body: JSON.stringify({ password: PASSWORD, providerId: "x" }),
+            }),
+          }),
+        );
+        expect(response.status, `${method} ${path}`).toBe(404);
+      }
+    }
+  });
+
+  it("leaves open only the routes our pages and Better Auth's flows use", () => {
+    // Every routed path, after DISABLED_AUTH_PATHS: a new one in a later
+    // release shows up here to be judged.
+    const routed = Object.values(auth.api)
+      .map((endpoint) => (endpoint as { path?: string }).path)
+      .filter((path): path is string => typeof path === "string")
+      .filter((path) => !DISABLED_AUTH_PATHS.includes(path));
+    const open = [...new Set(routed)].sort();
+    for (const path of UNUSED) expect(open).not.toContain(path);
+    expect(open).toEqual(
+      [
+        "/callback/:id",
+        "/change-email",
+        "/change-password",
+        "/error",
+        "/get-session",
+        "/link-social",
+        "/list-accounts",
+        "/list-sessions",
+        "/magic-link/verify",
+        "/ok",
+        "/request-password-reset",
+        "/reset-password",
+        "/reset-password/:token",
+        "/revoke-other-sessions",
+        "/revoke-session",
+        "/revoke-sessions",
+        "/send-verification-email",
+        "/sign-in/email",
+        "/sign-in/magic-link",
+        "/sign-in/social",
+        "/sign-out",
+        "/sign-up/email",
+        "/two-factor/disable",
+        "/two-factor/enable",
+        "/two-factor/generate-backup-codes",
+        "/two-factor/get-totp-uri",
+        "/two-factor/send-otp",
+        "/two-factor/verify-backup-code",
+        "/two-factor/verify-otp",
+        "/two-factor/verify-totp",
+        "/update-user",
+        "/verify-email",
+      ].sort(),
+    );
+  });
+
+  it("says magic links are on exactly when the plugin is", () => {
+    expect("signInMagicLink" in auth.api).toBe(MAGIC_LINK_SIGN_IN);
+  });
+
+  it("/update-user refuses every field, name and image included", async () => {
+    const signUp = await auth.handler(signUpRequest("ada@example.test"));
+    const cookie = cookieHeader(signUp);
+    const before = (await people())[0]!;
+    for (const body of [
+      { name: "x".repeat(100_000) },
+      { image: "https://tracker.example/pixel.gif" },
+      { name: "Ada", image: null },
+      { username: "someone_else" },
+      { somethingElse: true },
+    ]) {
+      const response = await auth.handler(
+        authPost("/update-user", body, { cookie }),
+      );
+      expect(response.status, JSON.stringify(body).slice(0, 40)).toBe(400);
+    }
+    const after = (await people())[0]!;
+    expect(after.name).toBe(before.name);
+    expect(after.image).toBe(before.image);
+    expect(after.updatedAt).toEqual(before.updatedAt);
+  });
+
+  it("with the allowlist set, change-email refuses an address outside it, as sign-up does", async () => {
+    const closed = testAuth(t.db, {
+      env: {
+        signUpAllowlist: ["friend@example.test", "friend.new@example.test"],
+      },
+    });
+    const cookie = cookieHeader(
+      await closed.handler(signUpRequest("friend@example.test")),
+    );
+    const change = (newEmail: string) =>
+      closed.handler(authPost("/change-email", { newEmail }, { cookie }));
+
+    const refused = await change("stranger@example.test");
+    expect(refused.status).toBe(403);
+    const text = await refused.text();
+    expect(text).toContain("Sign-up isn't open for this address.");
+    expect(text).not.toContain("stranger@example.test");
+    expect((await people())[0]!.email).toBe("friend@example.test");
+
+    // An address on the list, in any case, is fine.
+    expect((await change("Friend.New@Example.test")).status).toBe(200);
+    expect((await people())[0]!.email).toBe("friend.new@example.test");
+
+    // With no allowlist, any address may be used.
+    const open = cookieHeader(
+      await auth.handler(signUpRequest("ada@example.test")),
+    );
+    const moved = await auth.handler(
+      authPost(
+        "/change-email",
+        { newEmail: "ada.new@example.test" },
+        { cookie: open },
+      ),
+    );
+    expect(moved.status).toBe(200);
   });
 });
 
