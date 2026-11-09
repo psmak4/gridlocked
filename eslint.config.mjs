@@ -44,6 +44,7 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Build output, and the route tree the Start plugin generates.
     ".output/**",
+    ".vercel/**",
     "dist/**",
     "src/routeTree.gen.ts",
     // Deliberately violates rules; linted only by tests/lint.

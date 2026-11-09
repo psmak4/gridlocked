@@ -3,7 +3,8 @@ name: Deploy staging
 # Manual only. Run it from the Actions tab (or `gh workflow run deploy-staging.yml`).
 # It takes the code to the Neon project `gridlocked-staging`, branch `main`:
 # migrations, an optional import of the 2026 season, and the `tick` function
-# with its two triggers (neon.ts).
+# with its two triggers (neon.ts). Once the Vercel project exists (VERCEL_TOKEN
+# is set), it also builds the website and deploys it to `gridlocked-staging`.
 on:
   workflow_dispatch:
     inputs:
@@ -23,6 +24,8 @@ concurrency:
 env:
   # Pinned: the version of the `neon` CLI from npm that this workflow uses.
   NEON_CLI_VERSION: 8.13.2
+  # Pinned: the version of the `vercel` CLI from npm that this workflow uses.
+  VERCEL_CLI_VERSION: 65.2.0
   NEON_PROJECT_ID: ancient-fog-03461181
   NEON_BRANCH: main
 
@@ -34,7 +37,10 @@ jobs:
     timeout-minutes: 20
     # Holds the staging secrets: NEON_API_KEY_STAGING, DATABASE_URL_STAGING and,
     # once Resend is approved, RESEND_API_KEY and EMAIL_FROM (neon.ts declares
-    # them for the function only when both are set).
+    # them for the function only when both are set). The website adds the secret
+    # VERCEL_TOKEN and the variables VERCEL_ORG_ID, VERCEL_PROJECT_ID and
+    # VITE_TURNSTILE_SITE_KEY. The site's own settings (BETTER_AUTH_SECRET,
+    # DATABASE_URL and so on) live in the Vercel project, not here.
     environment: staging
     steps:
       - name: Check out
@@ -105,3 +111,80 @@ jobs:
             | jq -r '(if type == "array" then . else (.triggers // []) end)[] | "trigger \(.trigger_id) \(.name) cron=\(.schedule.cron // "-") path=\(.function_path) enabled=\(.enabled) next_run_at=\(.next_run_at // "-")"'
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+
+      # The website steps below run only when the Vercel token is set, so the
+      # scheduler deploy above works on its own until then. They come last: a
+      # failed site build never stops the migrations or the function.
+      - name: Check for the Vercel token
+        id: vercel
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then
+            # With the token set, the rest must be set too; names only.
+            missing=""
+            [ -n "$VERCEL_ORG_ID" ] || missing="$missing VERCEL_ORG_ID"
+            [ -n "$VERCEL_PROJECT_ID" ] || missing="$missing VERCEL_PROJECT_ID"
+            [ -n "$VITE_TURNSTILE_SITE_KEY" ] || missing="$missing VITE_TURNSTILE_SITE_KEY"
+            if [ -n "$missing" ]; then
+              echo "::error::These staging variables are not set:$missing"
+              exit 1
+            fi
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VERCEL_TOKEN is not set in the staging environment, so the website build and deploy are skipped."
+          fi
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+
+      # No VITE_LOCAL_DB: this is the deployed build, with no local database.
+      # The vercel preset writes .vercel/output (Build Output API).
+      - name: Build the website for Vercel
+        if: steps.vercel.outputs.enabled == 'true'
+        run: pnpm build
+        env:
+          NITRO_PRESET: vercel
+          # Public, and read at build time.
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+
+      # The build must be a real Vercel output with none of the local-only
+      # code: no PGlite (by path or by import) and the same markers CI greps
+      # for in .output/server.
+      - name: Check the website build
+        if: steps.vercel.outputs.enabled == 'true'
+        run: |
+          if [ ! -f .vercel/output/config.json ]; then
+            echo "::error::.vercel/output/config.json is missing"
+            exit 1
+          fi
+          if [ -n "$(find .vercel/output \( -iname '*pglite*' -o -name '*.wasm' -o -name 'postgres.data' \))" ] || grep -rq '@electric-sql/pglite' .vercel/output; then
+            echo "::error::.vercel/output contains PGlite"
+            exit 1
+          fi
+          # The same list as CI's unflagged build, Task 13's hooks included.
+          for marker in migrationsFolder test-email-capture gl-test-busy \
+            test-hook-ban-account test-hook-make-admin test-hook-impersonate \
+            test-hook-run-exports test-hook-export-file \
+            test-hook-clear-acceptances; do
+            if grep -rq "$marker" .vercel/output; then
+              echo "::error::.vercel/output contains the local-only code ($marker)"
+              exit 1
+            fi
+          done
+
+      - name: Install the Vercel CLI
+        if: steps.vercel.outputs.enabled == 'true'
+        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+
+      # Deploys the output built above (--prebuilt); Vercel does not build.
+      # --prod makes it the project's fixed address. The CLI reads the token
+      # and the two ids from the environment. Prints the deployment URL.
+      - name: Deploy the website
+        if: steps.vercel.outputs.enabled == 'true'
+        run: vercel deploy --prebuilt --prod
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}

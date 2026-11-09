@@ -53,7 +53,11 @@ branch) and `NEON_API_KEY_STAGING`. Its steps:
    database that has already polled live data;
 4. `neon config plan`, then `neon deploy` (a pinned `neon` CLI): the
    `scheduler` bucket, the `tick` function and its two triggers;
-5. print the function URL and the trigger ids (never a secret).
+5. print the function URL and the trigger ids (never a secret);
+6. the website, only if the `staging` secret `VERCEL_TOKEN` is set (otherwise
+   a notice says it was skipped): `NITRO_PRESET=vercel pnpm build`, a check
+   that `.vercel/output` has `config.json` and no PGlite or other local-only
+   code, then `vercel deploy --prebuilt --prod` (a pinned `vercel` CLI).
 
 To run it, merge to `main` and then:
 
@@ -66,6 +70,41 @@ The same scripts work from a shell with a database URL in the environment:
 `DATABASE_URL=... pnpm db:migrate` and `DATABASE_URL=... pnpm import:2026`
 (`--dry-run` imports into an in-memory database and needs no URL). Never put
 a connection string or API key in a file or a commit.
+
+### The staging website
+
+The site is a Vercel project, `gridlocked-staging` (Hobby), deployed by the
+workflow above. Create each value yourself; none of them goes in a file, a
+commit, a chat or an issue.
+
+In GitHub, under Settings, Environments, `staging`:
+
+| Name                      | Kind     | What it is                                                   |
+| ------------------------- | -------- | ------------------------------------------------------------ |
+| `VERCEL_TOKEN`            | secret   | An access token from your Vercel account settings            |
+| `VERCEL_ORG_ID`           | variable | The team or account id (Vercel project settings)             |
+| `VERCEL_PROJECT_ID`       | variable | The id of `gridlocked-staging` (same page)                   |
+| `VITE_TURNSTILE_SITE_KEY` | variable | The Turnstile widget's site key (public, used at build time) |
+| `RESEND_API_KEY`          | secret   | The Resend key, for the tick                                 |
+| `EMAIL_FROM`              | secret   | `onboarding@resend.dev`, for the tick                        |
+
+In Vercel, under the project's Settings, Environment Variables (Production):
+
+| Name                                         | What it is                                                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`                         | The output of `openssl rand -base64 32`                                                                        |
+| `BETTER_AUTH_URL`                            | `https://gridlocked-staging.vercel.app`                                                                        |
+| `SIGN_UP_ALLOWED_EMAILS`                     | Your Resend account address: on staging, only it can sign up                                                   |
+| `DATABASE_URL`                               | The staging pooled connection string                                                                           |
+| `RESEND_API_KEY`                             | The Resend key                                                                                                 |
+| `EMAIL_FROM`                                 | `onboarding@resend.dev`                                                                                        |
+| `TURNSTILE_SECRET_KEY`                       | The Turnstile widget's secret key                                                                              |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The Discord application; its redirect URL is `https://gridlocked-staging.vercel.app/api/auth/callback/discord` |
+
+Until `VERCEL_TOKEN` is set, Deploy staging skips the website steps and
+everything else works as before. Run it only with your OK, and not on a race
+weekend. A local check of the same build needs no account:
+`NITRO_PRESET=vercel pnpm build`, then look in `.vercel/output`.
 
 ### Staff actions
 
