@@ -19,6 +19,19 @@ export const SERVER_ERROR = "server_error";
  * Start's redirect and notFound, as they are. Anything else is logged by its
  * name (and its cause's) and replaced with a value-free `Error`.
  */
+/**
+ * An error's class, never its message: its `name`, or its constructor's name
+ * when `name` is the generic "Error" (DrizzleQueryError sets none). Both are
+ * class names in code, so the line stays value-free (Ruling 59).
+ */
+function errorName(error: Error): string {
+  if (error.name !== "Error") return error.name;
+  const constructorName: unknown = error.constructor?.name;
+  return typeof constructorName === "string" && constructorName !== ""
+    ? constructorName
+    : "Error";
+}
+
 export function scrubServerFnError(error: unknown): unknown {
   if (
     error instanceof IdentityError ||
@@ -27,10 +40,10 @@ export function scrubServerFnError(error: unknown): unknown {
   ) {
     return error;
   }
-  const name = error instanceof Error ? error.name : typeof error;
+  const name = error instanceof Error ? errorName(error) : typeof error;
   const cause =
     error instanceof Error && error.cause instanceof Error
-      ? ` (cause: ${error.cause.name})`
+      ? ` (cause: ${errorName(error.cause)})`
       : "";
   console.error(`server function failed: ${name}${cause}`);
   return new Error(SERVER_ERROR);

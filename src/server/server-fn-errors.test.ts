@@ -75,8 +75,27 @@ describe("scrubServerFnError", () => {
     expect((scrubbed as Error).cause).toBeUndefined();
     expectValueFree(scrubbed);
     expect(logged).toEqual([
-      "server function failed: Error (cause: DatabaseError)",
+      "server function failed: DrizzleQueryError (cause: DatabaseError)",
     ]);
+  });
+
+  it("names a class whose name is the generic Error by its constructor, the cause too", () => {
+    class PgDriverError extends Error {}
+    class WrappedError extends Error {}
+    const scrubbed = scrubServerFnError(
+      new WrappedError(`wrapped ${LINK}`, {
+        cause: new PgDriverError(`duplicate ${ADDRESS}`),
+      }),
+    );
+    expectValueFree(scrubbed);
+    expect(logged).toEqual([
+      "server function failed: WrappedError (cause: PgDriverError)",
+    ]);
+    logged.length = 0;
+    // A plain Error stays "Error".
+    scrubServerFnError(new Error(ADDRESS, { cause: new Error(LINK) }));
+    expect(logged).toEqual(["server function failed: Error (cause: Error)"]);
+    expectValueFree(new Error(SERVER_ERROR));
   });
 
   it("scrubs any other error, and a thrown non-error, the same way", () => {
