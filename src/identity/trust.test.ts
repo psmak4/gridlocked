@@ -165,6 +165,25 @@ describe("trust levels in the database", () => {
     expect((await profile(id)).trustLevel).toBe(0);
   });
 
+  it("a user deleted after the read is not changed", async () => {
+    const id = await seedActive();
+    // The scrub lands between the read and the write: it keeps the users
+    // row, resets the profile to TL0 unlocked, and marks it deleted.
+    const scrubMeanwhile: TrustCounts = async (db, ids) => {
+      await db
+        .update(profiles)
+        .set({ status: "deleted" })
+        .where(eq(profiles.userId, id));
+      return withPosts(10)(db, ids);
+    };
+    const r = await recomputeTrustLevels(t.db, NOW, {
+      counts: scrubMeanwhile,
+    });
+    expect(r.changed).toBe(0);
+    expect((await profile(id)).trustLevel).toBe(0);
+    expect(await changes(id)).toHaveLength(0);
+  });
+
   it("works through more users than one batch", async () => {
     const ids = [await seedActive(), await seedActive(), await seedActive()];
     const r = await recomputeTrustLevels(t.db, NOW, {

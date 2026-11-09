@@ -223,6 +223,8 @@ export async function changeUsername(
   try {
     await db.transaction(async (tx) => {
       const t = tx as unknown as Db;
+      // FOR NO KEY UPDATE, as everywhere but a delete (Ruling 58): it still
+      // queues two renames; the rename itself takes the stronger lock.
       const [user] = await t
         .select({
           username: users.username,
@@ -230,7 +232,7 @@ export async function changeUsername(
         })
         .from(users)
         .where(eq(users.id, userId))
-        .for("update");
+        .for("no key update");
       if (!user) throw new IdentityError("unauthenticated");
 
       if (user.username?.toLowerCase() === lower) {

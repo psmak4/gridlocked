@@ -150,6 +150,11 @@ describe("the profile (DM 6.2, 6.11)", () => {
     [{ countryCode: "GB1" }, "invalid_country"],
     [{ countryCode: "USA" }, "invalid_country"],
     [{ countryCode: "XYZ" }, "invalid_country"],
+    // Named by CLDR, but not a country (Ruling 58): no "European Union fans".
+    [{ countryCode: "EU" }, "invalid_country"],
+    [{ countryCode: "UN" }, "invalid_country"],
+    [{ countryCode: "XA" }, "invalid_country"],
+    [{ countryCode: "xa" }, "invalid_country"],
     [{ timezone: "Mars/Base" }, "invalid_timezone"],
     [{ timezone: "" }, "invalid_timezone"],
   ])("a bad country or timezone is refused: %j", async (over, code) => {

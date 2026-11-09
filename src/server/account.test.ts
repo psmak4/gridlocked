@@ -16,7 +16,11 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
-import { RETIRED_REGION_CODES, normalizeCountryCode } from "@/identity/profile";
+import {
+  NOT_COUNTRIES,
+  RETIRED_REGION_CODES,
+  normalizeCountryCode,
+} from "@/identity/profile";
 import type { Viewer } from "@/identity/viewer";
 import {
   checkUsernameAction,
@@ -305,6 +309,24 @@ describe("account actions (M5 task 12)", () => {
       ).toEqual({ ok: false, error: "version_conflict" });
     });
 
+    it("refuses a code that CLDR names but isn't a country, and saves nothing", async () => {
+      const userId = await seedUser(db);
+      const viewer = await viewerOf(userId);
+      for (const countryCode of ["EU", "UN", "XA", "eu"]) {
+        expect(
+          await saveFavoritesAction(db, NOW, viewer, {
+            expectedVersion: 1,
+            favoriteConstructorId: null,
+            favoriteDriverId: null,
+            countryCode,
+          }),
+        ).toEqual({ ok: false, error: "invalid_country" });
+      }
+      const after = await viewerOf(userId);
+      expect(after.profile.countryCode).toBeNull();
+      expect(after.profile.version).toBe(1);
+    });
+
     it("needs a finished, writable account", async () => {
       const userId = await seedUser(db);
       const input = {
@@ -568,9 +590,90 @@ describe("the favorites grid (Ruling 57)", () => {
       }),
     ).toEqual({ ok: true, version: 2 });
   });
+
+  it("a saved favorite that left the grid doesn't block changing the country", async () => {
+    // Saved last season; neither is on the newest grid now (DM 6.11 flair).
+    const old = await season(2025);
+    const current = await season(2026);
+    const oldTeam = await team(old, "Old");
+    const retired = await driver("Rita");
+    await seat(old, retired, oldTeam, 7, "2025-01-01", "2025-12-31");
+    const newTeam = await team(current, "New");
+    const userId = await seedUser(db);
+    await db
+      .update(profiles)
+      .set({ favoriteConstructorId: oldTeam, favoriteDriverId: retired })
+      .where(eq(profiles.userId, userId));
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const [profile] = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, userId));
+    const viewer = {
+      userId,
+      role: user!.role,
+      banned: false,
+      username: user!.username,
+      displayUsername: user!.displayUsername,
+      emailVerified: user!.emailVerified,
+      twoFactorEnabled: false,
+      sessionId: newId(),
+      impersonatedBy: null,
+      staffVerifiedAt: null,
+      profile: profile!,
+      complete: true,
+    } as Viewer;
+    const choices = await favoriteChoices(db);
+    expect(choices.constructors.map((c) => c.id)).toEqual([newTeam]);
+    expect(choices.drivers.map((d) => d.id)).not.toContain(retired);
+
+    // The form posts the saved favorites back with the new country.
+    expect(
+      await saveFavoritesAction(db, NOW, viewer, {
+        expectedVersion: profile!.version,
+        favoriteConstructorId: oldTeam,
+        favoriteDriverId: retired,
+        countryCode: "IT",
+      }),
+    ).toEqual({ ok: true, version: profile!.version + 1 });
+    const [saved] = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, userId));
+    expect(saved).toMatchObject({
+      favoriteConstructorId: oldTeam,
+      favoriteDriverId: retired,
+      countryCode: "IT",
+    });
+
+    // Choosing an off-grid one anew is still refused.
+    const otherRetired = await driver("Otto");
+    await seat(old, otherRetired, oldTeam, 8, "2025-01-01", "2025-12-31");
+    expect(
+      await saveFavoritesAction(
+        db,
+        NOW,
+        { ...viewer, profile: saved! },
+        {
+          expectedVersion: saved!.version,
+          favoriteConstructorId: oldTeam,
+          favoriteDriverId: otherRetired,
+          countryCode: "IT",
+        },
+      ),
+    ).toEqual({ ok: false, error: "invalid_choice" });
+  });
 });
 
 describe("country choices (Ruling 57)", () => {
+  it("refuses every code that isn't a country, and the list leaves them out", () => {
+    const listed = new Set(countryChoices().map((c) => c.code));
+    for (const code of NOT_COUNTRIES) {
+      expect(normalizeCountryCode(code), code).toBeNull();
+      expect(listed.has(code), code).toBe(false);
+    }
+  });
+
   it("refuses every retired code", () => {
     for (const code of RETIRED_REGION_CODES) {
       expect(normalizeCountryCode(code)).toBeNull();

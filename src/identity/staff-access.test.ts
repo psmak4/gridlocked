@@ -328,6 +328,7 @@ describe("the staff two-step (DM 6.4)", () => {
   it("no client can set staff_verified_at", async () => {
     const { secret } = await adminWithTotp();
     const cookie = await signInWithTotp(auth, BOSS, secret);
+    // Closed over HTTP (Ruling 58); `input: false` refuses the field too.
     const response = await auth.handler(
       authPost(
         "/update-session",
@@ -335,7 +336,7 @@ describe("the staff two-step (DM 6.4)", () => {
         { cookie },
       ),
     );
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(404);
     const v = await viewer(cookie);
     const [row] = await t.db
       .select()

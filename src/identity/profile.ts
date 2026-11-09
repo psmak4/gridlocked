@@ -53,13 +53,35 @@ export const RETIRED_REGION_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Codes that CLDR names but that aren't countries a person lives in: unions,
+ * pseudo-locales, reserved and exceptionally reserved codes. A country league
+ * named after one ("European Union fans") would be nonsense.
+ */
+export const NOT_COUNTRIES: ReadonlySet<string> = new Set([
+  "AC",
+  "CP",
+  "DG",
+  "EA",
+  "EU",
+  "EZ",
+  "IC",
+  "QO",
+  "TA",
+  "UN",
+  "XA",
+  "XB",
+  "ZZ",
+]);
+
+/**
  * The upper-cased ISO 3166-1 alpha-2 code, or null when it is not one: two
- * letters that the runtime's CLDR region data knows, and that are not retired.
+ * letters that the runtime's CLDR region data knows, that are not retired and
+ * that name a country (Ruling 58: the server refuses what the list leaves out).
  */
 export function normalizeCountryCode(raw: string): string | null {
   const code = raw.trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(code)) return null;
-  if (code === "ZZ" || RETIRED_REGION_CODES.has(code)) return null;
+  if (RETIRED_REGION_CODES.has(code) || NOT_COUNTRIES.has(code)) return null;
   if (regions.of(code) === undefined) return null;
   return code;
 }

@@ -124,7 +124,7 @@ export function siteBaseUrl(
 /**
  * The viewer for a request, or null. With no session cookie it returns before
  * touching the database. Otherwise: read the session, make sure the profile
- * exists, then record the visit.
+ * exists, then record the visit (not for an impersonation).
  */
 export async function getViewer(
   request: Request,
@@ -190,6 +190,10 @@ export async function getViewer(
         profile.ageConfirmedAt !== null &&
         (await pendingDocuments(db, user.id)).length === 0,
     };
+    // An admin looking through the account is not the user being here: no
+    // visit is recorded, so it can't raise their trust level (DM 6.5), and a
+    // read-only session writes nothing.
+    if (viewer.impersonatedBy !== null) return viewer;
     return touchViewer(db, now, viewer);
   });
 }

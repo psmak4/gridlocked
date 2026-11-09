@@ -7,6 +7,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { authRateLimits, profiles, type UserRole } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { IdentityError } from "./identity-error";
 
 export type Profile = typeof profiles.$inferSelect;
 
@@ -28,55 +29,7 @@ export type Viewer = {
   complete: boolean;
 };
 
-export type IdentityErrorCode =
-  | "unauthenticated"
-  | "incomplete"
-  | "read_only"
-  | "unverified"
-  | "inactive"
-  // Usernames (DM 6.3): the four ways a name is refused, and the wait.
-  | "format"
-  | "reserved"
-  | "held"
-  | "taken"
-  | "username_too_soon"
-  // The profile (DM 6.2): a stale form, and values that aren't real.
-  | "version_conflict"
-  | "invalid_country"
-  | "invalid_timezone"
-  | "invalid_document"
-  // Roles, staff access and impersonation (DM 6.4).
-  | "forbidden"
-  | "staff_two_factor_required"
-  | "staff_session_unverified"
-  | "invalid_code"
-  | "rate_limited"
-  | "no_such_user"
-  | "role_reserved"
-  | "last_admin"
-  | "invalid_ban"
-  | "cannot_impersonate"
-  | "not_impersonating"
-  // Trust levels (DM 6.5): a moderator's level outside 0–3.
-  | "invalid_trust_level"
-  // Export and deletion (DM 6.7): an export already open or made today, the
-  // typed username that doesn't match, a sign-in too old to confirm by, and a
-  // confirmation link that is expired, used or replaced.
-  | "export_pending"
-  | "export_too_soon"
-  | "wrong_username"
-  | "sign_in_again"
-  | "invalid_link"
-  // Two staff changes deadlocked, and the retries did too.
-  | "try_again";
-
-/** Carries a code and nothing personal: it can be logged and shown. */
-export class IdentityError extends Error {
-  constructor(readonly code: IdentityErrorCode) {
-    super(code);
-    this.name = "IdentityError";
-  }
-}
+export { IdentityError, type IdentityErrorCode } from "./identity-error";
 
 export function requireViewer(viewer: Viewer | null): Viewer {
   if (!viewer) throw new IdentityError("unauthenticated");
@@ -125,7 +78,10 @@ export async function touchViewer(
     return viewer;
   }
   // Only the request that still sees the old `last_seen_at` writes, so two at
-  // once count a day once.
+  // once count a day once. The compare needs the stored value to round-trip
+  // exactly: every write is a JS Date, in milliseconds. A write of SQL
+  // `now()` (microseconds) would read back truncated, never match, and stop
+  // `last_seen_at` for good.
   const [updated] = await db
     .update(profiles)
     .set({

@@ -129,11 +129,13 @@ async function completeSignUpTransaction(
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
+    // FOR NO KEY UPDATE, as everywhere but a delete (Ruling 58): it still
+    // queues two finishes; setting the username takes the stronger lock then.
     const [user] = await t
       .select({ username: users.username })
       .from(users)
       .where(eq(users.id, input.userId))
-      .for("update");
+      .for("no key update");
     if (!user) throw new IdentityError("unauthenticated");
 
     if (!user.username && input.username !== undefined) {

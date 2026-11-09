@@ -26,6 +26,7 @@ import {
   users,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { MAGIC_LINK_SIGN_IN } from "@/identity/auth";
 import { confirmDeletion, requestDeletion } from "@/identity/delete";
 import type { EmailSender } from "@/identity/email/sender";
 import { requestExport } from "@/identity/export";
@@ -434,12 +435,35 @@ export type SignInMethodsState = {
   email: string;
   /** A password is set: a credential row with a hash, as on the security page. */
   hasPassword: boolean;
-  methods: { providerId: string; label: string }[];
+  /** A sign-in link can be emailed: the address is confirmed and magic links are on. */
+  emailLink: boolean;
+  /** `removable`: another way in would be left (`removeSignInMethodAction`'s rule). */
+  methods: { providerId: string; label: string; removable: boolean }[];
 };
 
 const holdsPassword = (
   methods: { providerId: string; password: string | null }[],
 ) => methods.some((m) => m.providerId === "credential" && m.password !== null);
+
+/** A confirmed address is a way in of its own while magic links are on. */
+const emailLinkWorks = (emailVerified: boolean) =>
+  MAGIC_LINK_SIGN_IN && emailVerified;
+
+/**
+ * Whether removing `providerId` leaves a way to sign in: another linked
+ * method, or a sign-in link to a confirmed address. So a magic-link user can
+ * unlink Discord, and an unconfirmed address never counts.
+ */
+function leavesAWayIn(
+  methods: { providerId: string }[],
+  providerId: string,
+  emailVerified: boolean,
+): boolean {
+  return (
+    methods.some((m) => m.providerId !== providerId) ||
+    emailLinkWorks(emailVerified)
+  );
+}
 
 export async function signInMethodsState(
   db: Db,
@@ -447,16 +471,19 @@ export async function signInMethodsState(
 ): Promise<SignInMethodsState> {
   const v = requireComplete(viewer);
   const [user] = await db
-    .select({ email: users.email })
+    .select({ email: users.email, emailVerified: users.emailVerified })
     .from(users)
     .where(eq(users.id, v.userId));
+  const emailVerified = user?.emailVerified ?? false;
   const methods = await linkedMethods(db, v.userId);
   return {
     email: user?.email ?? "",
     hasPassword: holdsPassword(methods),
+    emailLink: emailLinkWorks(emailVerified),
     methods: methods.map((m) => ({
       providerId: m.providerId,
       label: METHOD_LABEL[m.providerId] ?? m.providerId,
+      removable: leavesAWayIn(methods, m.providerId, emailVerified),
     })),
   };
 }
@@ -466,11 +493,12 @@ export const removeSignInMethodInput = z.object({
 });
 
 /**
- * Unlinks one sign-in method. The last one is refused (`last_method`), here
- * and not only by a disabled button (ruling 51d): the user's row is locked
- * so two removals at once can't leave none. Better Auth's own
- * `/unlink-account` is closed over HTTP, so this is the only way, and it is
- * audited.
+ * Unlinks one sign-in method. The last way in is refused (`last_method`),
+ * here and not only by a disabled button (ruling 51d): the user's row is
+ * locked so two removals at once can't leave none. A confirmed address counts
+ * as a way in while magic links are on (Ruling 58), so a magic-link user can
+ * unlink Discord. Better Auth's own `/unlink-account` is closed over HTTP, so
+ * this is the only way, and it is audited.
  */
 export async function removeSignInMethodAction(
   db: Db,
@@ -482,18 +510,22 @@ export async function removeSignInMethodAction(
     const v = requireWritable(viewer);
     return db.transaction(async (tx): Promise<SettingsResult> => {
       const t = tx as unknown as Db;
-      await t
-        .select({ id: users.id })
+      // The row isn't deleted or re-keyed, so a foreign-key insert for this
+      // user (KEY SHARE) needn't wait on it.
+      const [user] = await t
+        .select({ emailVerified: users.emailVerified })
         .from(users)
         .where(eq(users.id, v.userId))
-        .for("update");
+        .for("no key update");
       const methods = await t
         .select({ id: authAccounts.id, providerId: authAccounts.providerId })
         .from(authAccounts)
         .where(eq(authAccounts.userId, v.userId));
       const target = methods.filter((m) => m.providerId === input.providerId);
       if (target.length === 0) return { ok: false, error: "not_linked" };
-      if (methods.length - target.length < 1) {
+      if (
+        !leavesAWayIn(methods, input.providerId, user?.emailVerified ?? false)
+      ) {
         return { ok: false, error: "last_method" };
       }
       await t
@@ -550,9 +582,18 @@ export async function securityState(
 
 export type ExportState =
   | { status: "none" | "pending" | "expired" | "failed" }
-  | { status: "ready"; url: string; worksUntil: string };
+  | {
+      status: "ready";
+      /** Null for an admin looking through the session (ruling 52). */
+      url: string | null;
+      worksUntil: string;
+    };
 
-/** The latest export asked for, as the page shows it. */
+/**
+ * The latest export asked for, as the page shows it. An impersonated session
+ * sees the status but not the link: a presigned URL is a bearer copy of the
+ * whole export, and looking through an account isn't taking its data.
+ */
 export async function exportState(
   db: Db,
   now: Date,
@@ -582,7 +623,7 @@ export async function exportState(
     if (row.url && row.expiresAt && row.expiresAt.getTime() > now.getTime()) {
       return {
         status: "ready",
-        url: row.url,
+        url: v.impersonatedBy === null ? row.url : null,
         worksUntil: dayLabel(row.expiresAt, v.profile.timezone, now),
       };
     }

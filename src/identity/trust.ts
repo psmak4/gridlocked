@@ -16,6 +16,7 @@ import { newId } from "@/lib/ids";
 import { getSetting } from "@/settings";
 import type { SettingValue } from "@/settings/defaults";
 import { requireReason } from "@/staff/roster";
+import { lockUserRow } from "./locks";
 import { IdentityError } from "./viewer";
 
 export type TrustLevel = 0 | 1 | 2 | 3;
@@ -132,38 +133,42 @@ export async function recomputeTrustLevels(
         ? []
         : [{ userId: r.userId, from: r.trustLevel, to: level }];
     });
-    if (moves.length > 0) {
+    // One transaction per change, each locking the user's row before the
+    // profile, as the scrub does (Ruling 59). A batch-wide transaction would
+    // hold earlier users' rows while waiting for a later one, which a scrub
+    // holding the admin rows could be waiting on in turn.
+    for (const m of moves) {
       changed += await db.transaction(async (tx) => {
         const t = tx as unknown as Db;
-        let done = 0;
-        for (const m of moves) {
-          // Still at the level read and still unlocked: a moderator who
-          // locked it meanwhile wins.
-          const updated = await t
-            .update(profiles)
-            .set({ trustLevel: m.to, updatedAt: now })
-            .where(
-              and(
-                eq(profiles.userId, m.userId),
-                eq(profiles.trustLevel, m.from),
-                eq(profiles.trustLevelLocked, false),
-              ),
-            )
-            .returning({ userId: profiles.userId });
-          if (updated.length === 0) continue;
-          await t.insert(trustLevelChanges).values({
-            id: newId(),
-            userId: m.userId,
-            fromLevel: m.from,
-            toLevel: m.to,
-            source: "auto",
-            changedBy: null,
-            reason: null,
-            changedAt: now,
-          });
-          done++;
-        }
-        return done;
+        if (!(await lockUserRow(t, m.userId))) return 0;
+        // Still active, at the level read and unlocked: a moderator who
+        // locked it meanwhile wins, and an account deleted meanwhile keeps
+        // its users row (so the lock above still finds it) but is skipped
+        // here, so no history row is written after the scrub removed them.
+        const updated = await t
+          .update(profiles)
+          .set({ trustLevel: m.to, updatedAt: now })
+          .where(
+            and(
+              eq(profiles.userId, m.userId),
+              eq(profiles.status, "active"),
+              eq(profiles.trustLevel, m.from),
+              eq(profiles.trustLevelLocked, false),
+            ),
+          )
+          .returning({ userId: profiles.userId });
+        if (updated.length === 0) return 0;
+        await t.insert(trustLevelChanges).values({
+          id: newId(),
+          userId: m.userId,
+          fromLevel: m.from,
+          toLevel: m.to,
+          source: "auto",
+          changedBy: null,
+          reason: null,
+          changedAt: now,
+        });
+        return 1;
       });
     }
     if (rows.length < batch) break;
@@ -189,7 +194,15 @@ function auditFor(actor: TrustActor, reason: string) {
   };
 }
 
+/**
+ * The user's row, then their profile, as the scrub locks them (Ruling 59):
+ * every caller then inserts a row that points at the user. FOR NO KEY
+ * UPDATE: neither is deleted or re-keyed here (Ruling 58).
+ */
 async function lockProfile(tx: Db, userId: string) {
+  if (!(await lockUserRow(tx, userId))) {
+    throw new IdentityError("no_such_user");
+  }
   const [row] = await tx
     .select({
       trustLevel: profiles.trustLevel,
@@ -197,7 +210,7 @@ async function lockProfile(tx: Db, userId: string) {
     })
     .from(profiles)
     .where(eq(profiles.userId, userId))
-    .for("update");
+    .for("no key update");
   if (!row) throw new IdentityError("no_such_user");
   return row;
 }

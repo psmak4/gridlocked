@@ -57,6 +57,13 @@ export type AuthDeps = {
   sender: EmailSender | null;
 };
 
+/**
+ * Anyone with a confirmed address can sign in by an emailed link: the
+ * `magicLink` plugin below is always on. Settings counts that address as a
+ * way in when it decides whether a method is the last (Ruling 58).
+ */
+export const MAGIC_LINK_SIGN_IN = true;
+
 /** A magic link works once and for this long (the outbox row expires with it). */
 const MAGIC_LINK_SECONDS = 900;
 /** Verification and reset links; Better Auth's own default, and under the outbox's 24 h. */
@@ -108,6 +115,16 @@ export const DISABLED_AUTH_PATHS = [
   // Settings removes a sign-in method itself (`removeSignInMethodAction`):
   // under a row lock, so two removals can't leave none, and audited.
   "/unlink-account",
+  // Nothing of ours calls these (Ruling 58). A password check a session can
+  // call 100 times in 10 s is an oracle; provider tokens and the live Discord
+  // profile have no business in the browser (and /account-info can refresh a
+  // token on a GET, a write an impersonated session would get past); and
+  // session fields are set by our own code.
+  "/verify-password",
+  "/account-info",
+  "/get-access-token",
+  "/refresh-token",
+  "/update-session",
 ];
 
 /** The TOTP step, in seconds; `verifyStaffSession` checks codes with it. */
@@ -173,6 +190,18 @@ const ACCESS_ROLES = {
 
 /** Why a sign-up is refused. No address in it: errors reach logs. */
 const SIGN_UP_CLOSED = "Sign-up isn't open for this address.";
+
+/** `SIGN_UP_ALLOWED_EMAILS`, when set, names every address an account may have. */
+function allowedToSignUp(env: AuthEnv, address: string): boolean {
+  const allowlist = env.signUpAllowlist;
+  return allowlist === null || allowlist.includes(address.trim().toLowerCase());
+}
+
+/**
+ * The /update-user body fields our pages post: none. Better Auth itself
+ * needs none either (its client sends only what the caller passes).
+ */
+const UPDATE_USER_FIELDS: ReadonlySet<string> = new Set<string>();
 
 /**
  * Makes the user's `profiles` row if it is missing; safe to call again. The
@@ -543,17 +572,23 @@ export function createAuth(db: Db, deps: AuthDeps) {
           }
           return;
         }
-        // `changeUsername` is the only rename path: it holds the 30-day wait,
-        // the history and the hold that this route would skip.
+        // Our pages post nothing to /update-user, so every field is refused
+        // (Ruling 58): `name` and `image` are free text and a free URL that
+        // nothing checks. `changeUsername` is the only rename path: it holds
+        // the 30-day wait, the history and the hold that this route would
+        // skip. An empty body is Better Auth's own "No fields to update".
         if (ctx.path === "/update-user") {
           const body: unknown = ctx.body;
           if (
             typeof body === "object" &&
             body !== null &&
-            ("username" in body || "displayUsername" in body)
+            Object.keys(body).some((field) => !UPDATE_USER_FIELDS.has(field))
           ) {
             throw new APIError("BAD_REQUEST", {
-              message: "A username is changed from settings.",
+              message:
+                "username" in body || "displayUsername" in body
+                  ? "A username is changed from settings."
+                  : "Your account is changed from settings.",
             });
           }
         }
@@ -591,6 +626,16 @@ export function createAuth(db: Db, deps: AuthDeps) {
         if (!field || typeof body !== "object" || body === null) return;
         const address = (body as Record<string, unknown>)[field];
         if (typeof address === "string" && /\.invalid$/i.test(address.trim())) {
+          throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
+        }
+        // With the allowlist set, it names who has an account, so an account
+        // can't move to an address outside it either (Ruling 58): the same
+        // refusal as sign-up.
+        if (
+          ctx.path === "/change-email" &&
+          typeof address === "string" &&
+          !allowedToSignUp(env, address)
+        ) {
           throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
         }
       }),
@@ -721,11 +766,7 @@ export function createAuth(db: Db, deps: AuthDeps) {
         create: {
           before: async (user) => {
             const email = user.email.toLowerCase();
-            const allowlist = env.signUpAllowlist;
-            if (
-              /\.invalid$/.test(email) ||
-              (allowlist !== null && !allowlist.includes(email))
-            ) {
+            if (/\.invalid$/.test(email) || !allowedToSignUp(env, email)) {
               throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
             }
           },
@@ -736,7 +777,7 @@ export function createAuth(db: Db, deps: AuthDeps) {
             // it waits for Better Auth's to commit. If it is lost, the
             // account stays incomplete and `Viewer.complete` catches it.
             if (context?.path !== "/sign-up/email") return;
-            queueAfterTransactionHook(
+            await queueAfterTransactionHook(
               async () => {
                 await completeSignUp(db, now(), {
                   userId: user.id,

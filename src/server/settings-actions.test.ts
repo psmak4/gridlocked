@@ -245,9 +245,14 @@ describe("settings actions (M5 task 13)", () => {
       expect(await signInMethodsState(db, await viewerOf(userId))).toEqual({
         email: "me@example.test",
         hasPassword: true,
+        emailLink: true,
         methods: [
-          { providerId: "credential", label: "Email and password" },
-          { providerId: "discord", label: "Discord" },
+          {
+            providerId: "credential",
+            label: "Email and password",
+            removable: true,
+          },
+          { providerId: "discord", label: "Discord", removable: true },
         ],
       });
     });
@@ -271,7 +276,8 @@ describe("settings actions (M5 task 13)", () => {
     });
 
     it("refuses to remove the last method of a password-only account", async () => {
-      const userId = await seedUser(db);
+      // An unconfirmed address is no way in (a confirmed one would be).
+      const userId = await seedUser(db, { emailVerified: false });
       await addAccount(userId, "credential");
       expect(
         await removeSignInMethodAction(db, NOW, await viewerOf(userId), {
@@ -286,7 +292,7 @@ describe("settings actions (M5 task 13)", () => {
     });
 
     it("removes one of two, with an audit row", async () => {
-      const userId = await seedUser(db);
+      const userId = await seedUser(db, { emailVerified: false });
       await addAccount(userId, "credential");
       await addAccount(userId, "discord");
       expect(
@@ -315,6 +321,62 @@ describe("settings actions (M5 task 13)", () => {
           providerId: "credential",
         }),
       ).toEqual({ ok: false, error: "last_method" });
+    });
+
+    it("counts a confirmed address as a way in, so a magic-link user can unlink Discord", async () => {
+      const userId = await seedUser(db, { emailVerified: true });
+      await addAccount(userId, "discord");
+      const viewer = await viewerOf(userId);
+      // The page agrees with the server before the click.
+      expect(await signInMethodsState(db, viewer)).toMatchObject({
+        hasPassword: false,
+        emailLink: true,
+        methods: [{ providerId: "discord", removable: true }],
+      });
+      expect(
+        await removeSignInMethodAction(db, NOW, viewer, {
+          providerId: "discord",
+        }),
+      ).toEqual({ ok: true });
+      const left = await db
+        .select()
+        .from(authAccounts)
+        .where(eq(authAccounts.userId, userId));
+      expect(left).toHaveLength(0);
+      const [audit] = await db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, "user.sign_in_method.remove"));
+      expect(audit).toMatchObject({ after: { methodsLeft: 0 } });
+    });
+
+    it("with an unconfirmed address, still refuses the last method, and the page says so", async () => {
+      const userId = await seedUser(db, { emailVerified: false });
+      await addAccount(userId, "discord");
+      const viewer = await viewerOf(userId);
+      expect(await signInMethodsState(db, viewer)).toMatchObject({
+        emailLink: false,
+        methods: [{ providerId: "discord", removable: false }],
+      });
+      expect(
+        await removeSignInMethodAction(db, NOW, viewer, {
+          providerId: "discord",
+        }),
+      ).toEqual({ ok: false, error: "last_method" });
+      // The address is read under the lock, not from the session's copy.
+      expect(
+        await removeSignInMethodAction(
+          db,
+          NOW,
+          { ...viewer, emailVerified: true },
+          { providerId: "discord" },
+        ),
+      ).toEqual({ ok: false, error: "last_method" });
+      const left = await db
+        .select()
+        .from(authAccounts)
+        .where(eq(authAccounts.userId, userId));
+      expect(left).toHaveLength(1);
     });
 
     it("refuses a method that isn't linked, and an impersonated session", async () => {
@@ -473,6 +535,32 @@ describe("settings actions (M5 task 13)", () => {
           impersonated(await viewerOf(userId)),
         ),
       ).toEqual({ ok: false, error: "read_only" });
+    });
+
+    it("shows an impersonated session that a copy is ready, but not its link", async () => {
+      const userId = await seedUser(db);
+      const viewer = await viewerOf(userId);
+      await requestExportAction(db, NOW, viewer);
+      await db
+        .update(privacyRequests)
+        .set({
+          status: "completed",
+          completedAt: NOW,
+          exportUrl: "https://exports.example.test/file",
+          exportExpiresAt: later(7),
+        })
+        .where(eq(privacyRequests.userId, userId));
+      const seen = await exportState(db, later(1), impersonated(viewer));
+      expect(seen).toEqual({
+        status: "ready",
+        url: null,
+        worksUntil: "15 Nov",
+      });
+      expect(JSON.stringify(seen)).not.toContain("exports.example.test");
+      // The account holder still gets it.
+      expect(await exportState(db, later(1), viewer)).toMatchObject({
+        url: "https://exports.example.test/file",
+      });
     });
   });
 
