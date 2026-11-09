@@ -27,13 +27,40 @@ const regions = new Intl.DisplayNames(["en"], {
 });
 
 /**
+ * Retired ISO 3166 codes. Some runtimes' ICU data (Vercel's Node) still names
+ * them, so they would show up twice in the list (UK next to GB) and be
+ * accepted. Ruling 57.
+ */
+export const RETIRED_REGION_CODES: ReadonlySet<string> = new Set([
+  "AN",
+  "BU",
+  "CS",
+  "DD",
+  "DY",
+  "FX",
+  "HV",
+  "NH",
+  "NT",
+  "QU",
+  "RH",
+  "SU",
+  "TP",
+  "UK",
+  "VD",
+  "YD",
+  "YU",
+  "ZR",
+]);
+
+/**
  * The upper-cased ISO 3166-1 alpha-2 code, or null when it is not one: two
- * letters that the runtime's CLDR region data knows.
+ * letters that the runtime's CLDR region data knows, and that are not retired.
  */
 export function normalizeCountryCode(raw: string): string | null {
   const code = raw.trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(code)) return null;
-  if (code === "ZZ" || regions.of(code) === undefined) return null;
+  if (code === "ZZ" || RETIRED_REGION_CODES.has(code)) return null;
+  if (regions.of(code) === undefined) return null;
   return code;
 }
 
