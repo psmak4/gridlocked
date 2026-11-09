@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import {
   BackLink,
@@ -39,6 +39,149 @@ function signInMessage(error: { status?: number; code?: string }): string {
   return "That email and password don't match.";
 }
 
+/** The two-step code's refusals, plainly (ruling 53). */
+function codeMessage(
+  error: { status?: number; code?: string },
+  kind: "totp" | "backup",
+): string {
+  switch (error.code) {
+    case "INVALID_CODE":
+      return "That code didn't work. Check the app and try again.";
+    case "INVALID_BACKUP_CODE":
+      return "That backup code didn't work. Each one works once.";
+    case "ACCOUNT_TEMPORARILY_LOCKED":
+      return "Too many wrong codes. Wait a while, then sign in again.";
+  }
+  if (error.status === 429) {
+    return "Too many tries. Wait a moment, then try again.";
+  }
+  return kind === "totp"
+    ? "That code didn't work. Check the app and try again."
+    : "That backup code didn't work. Each one works once.";
+}
+
+/** The challenge has run out: the password step starts again. */
+const EXPIRED = new Set([
+  "INVALID_TWO_FACTOR_COOKIE",
+  "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE",
+]);
+
+/**
+ * The second step of a password sign-in for an account with two-step sign-in
+ * on (ruling 53): the authenticator's code, or a backup code instead. Better
+ * Auth's challenge cookie, not a session, carries the sign-in between steps.
+ */
+function TwoStepSignIn({
+  onDone,
+  onExpired,
+}: {
+  onDone: () => Promise<void>;
+  onExpired: (message: string) => void;
+}) {
+  const [kind, setKind] = useState<"totp" | "backup">("totp");
+  const [code, setCode] = useState("");
+  const [message, setMessage] = useState<string>();
+  const [working, setWorking] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
+  // The field takes focus as the step opens and on each switch, so the
+  // keyboard carries straight on.
+  useEffect(() => field.current?.focus(), [kind]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (working) return;
+    setMessage(undefined);
+    const typed = code.trim();
+    if (typed === "") {
+      setMessage(
+        kind === "totp"
+          ? "Enter the code from the app."
+          : "Enter a backup code.",
+      );
+      return;
+    }
+    setWorking(true);
+    const { error } =
+      kind === "totp"
+        ? await authClient.twoFactor.verifyTotp({ code: typed })
+        : await authClient.twoFactor.verifyBackupCode({ code: typed });
+    if (error) {
+      setWorking(false);
+      if (error.code && EXPIRED.has(error.code)) {
+        onExpired("That took too long. Sign in again.");
+        return;
+      }
+      setMessage(codeMessage(error, kind));
+      field.current?.focus();
+      return;
+    }
+    await onDone();
+  }
+
+  function toggle() {
+    setKind((k) => (k === "totp" ? "backup" : "totp"));
+    setCode("");
+    setMessage(undefined);
+  }
+
+  return (
+    <Screen>
+      <ScreenHeader>
+        <BackLink href="/sign-in" />
+      </ScreenHeader>
+      <form
+        method="post"
+        noValidate
+        onSubmit={submit}
+        className="flex flex-1 flex-col"
+      >
+        <Body>
+          <Title>Two-step sign-in</Title>
+          <p className="text-[16px] leading-[22px] text-ink-muted">
+            {kind === "totp"
+              ? "Open your authenticator app and enter the 6-digit code for Gridlocked."
+              : "Enter one of the backup codes you kept. Each one works once."}
+          </p>
+          <TextField
+            ref={field}
+            key={kind}
+            id="sign-in-code"
+            name="code"
+            label={
+              kind === "totp"
+                ? "Code from your authenticator app"
+                : "Backup code"
+            }
+            inputMode={kind === "totp" ? "numeric" : "text"}
+            autoComplete="one-time-code"
+            autoCapitalize="none"
+            spellCheck={false}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+          <FormMessage>{message}</FormMessage>
+          <div className="flex flex-col items-start">
+            <button
+              type="button"
+              onClick={toggle}
+              className={`${linkClass} inline-flex min-h-[44px] cursor-pointer items-center border-0 bg-transparent p-0 text-[16px]`}
+            >
+              {kind === "totp"
+                ? "Use a backup code"
+                : "Use the code from your app"}
+            </button>
+          </div>
+        </Body>
+        <BottomBar>
+          <Button type="submit" size="l" block disabled={working}>
+            Sign in
+          </Button>
+        </BottomBar>
+      </form>
+    </Screen>
+  );
+}
+
 function SignIn() {
   const { mode, changed } = Route.useSearch();
   const { discord } = Route.useLoaderData();
@@ -49,6 +192,7 @@ function SignIn() {
   const [resetKey, setResetKey] = useState(0);
   const [message, setMessage] = useState<string>();
   const [working, setWorking] = useState(false);
+  const [twoStep, setTwoStep] = useState(false);
   const linkMode = mode === "link";
 
   async function submit(event: FormEvent) {
@@ -96,20 +240,33 @@ function SignIn() {
       { email: email.trim(), password },
       { headers },
     );
-    if (
-      error ||
-      (data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect
-    ) {
+    if (error) {
       setWorking(false);
       setResetKey((k) => k + 1);
-      setMessage(
-        error
-          ? signInMessage(error)
-          : "This account needs a two-step code, which isn't on this screen yet.",
-      );
+      setMessage(signInMessage(error));
+      return;
+    }
+    if ((data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect) {
+      setWorking(false);
+      setTwoStep(true);
       return;
     }
     await router.navigate({ to: "/" });
+  }
+
+  if (twoStep) {
+    return (
+      <TwoStepSignIn
+        // Where the password sign-in would have gone.
+        onDone={() => router.navigate({ to: "/" })}
+        onExpired={(text) => {
+          setTwoStep(false);
+          setPassword("");
+          setResetKey((k) => k + 1);
+          setMessage(text);
+        }}
+      />
+    );
   }
 
   return (

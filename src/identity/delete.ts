@@ -248,7 +248,7 @@ export async function requestDeletion(
   });
 
   if (outcome.confirm === "email") {
-    const url = `${deps.baseUrl}/account/delete/confirm?token=${encodeURIComponent(outcome.token)}`;
+    const url = `${deps.baseUrl}/settings/delete/confirm?token=${encodeURIComponent(outcome.token)}`;
     await queueEmail(
       db,
       now,

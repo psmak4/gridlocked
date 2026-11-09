@@ -13,6 +13,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "@/db/schema";
 import type { EmailSender } from "@/identity/email/sender";
+import type { ExportStore } from "@/identity/export";
 import type { ServerDb } from "./db";
 
 /** What the memory sender has taken, for Playwright to read. Local builds only. */
@@ -28,6 +29,25 @@ export const memorySender: EmailSender = {
       text: message.text,
     });
     return { id: `test-email-capture-${capturedEmails.length}` };
+  },
+};
+
+/**
+ * The `exports` bucket for a local run: files in memory, and "signed" links
+ * to the local-only download route (`/api/test/export-file`), so Playwright
+ * can download one. A deployed build has no such store; its tick uses
+ * `createExportStoreFromEnv`.
+ */
+export const localExportFiles = new Map<string, string>();
+export const localExportStore: ExportStore = {
+  async put(key, body) {
+    localExportFiles.set(key, body);
+  },
+  async presign(key) {
+    return `/api/test/export-file?key=${encodeURIComponent(key)}`;
+  },
+  async delete(key) {
+    localExportFiles.delete(key);
   },
 };
 

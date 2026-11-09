@@ -3,8 +3,8 @@
  * through. Public pages stay public: a logged-out visitor is never touched.
  *
  * A signed-in person who hasn't finished (no username, no age confirmation or
- * a document still to accept) can do nothing but finish, read the terms, or
- * leave. A finished one has no use for the sign-in pages.
+ * a document still to accept) can do nothing but finish, read the terms,
+ * take their data, or leave. A finished one has no use for the sign-in pages.
  */
 export type GateAccount = { complete: boolean };
 
@@ -16,6 +16,11 @@ const OPEN_TO_UNFINISHED = [
   /^\/check-email$/,
   /^\/reset-password$/,
   /^\/forgot-password$/,
+  // Ruling 52: leaving, and taking your data with you, wait on nothing. The
+  // deletion link's token is the proof, whatever else is unfinished.
+  /^\/settings\/delete$/,
+  /^\/settings\/delete\/confirm$/,
+  /^\/settings\/data$/,
 ];
 
 /** Pages a finished account is sent home from. */

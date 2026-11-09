@@ -100,3 +100,55 @@ export async function expectNoSeriousAxeViolations(page: Page) {
 
 /** The label of the page's main heading. */
 export const heading = (page: Page) => page.getByRole("heading", { level: 1 });
+
+/** Signs in through the sign-in form and waits for home. */
+export async function signIn(
+  page: Page,
+  account: { email: string; password: string },
+) {
+  await page.goto("/sign-in");
+  await page.getByLabel("Email").fill(account.email);
+  await page.getByLabel("Password").fill(account.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL("/");
+}
+
+/**
+ * Follows the confirmation email's link, which also signs the browser in
+ * (`autoSignInAfterVerification`).
+ */
+export async function verifyByEmail(page: Page, email: string) {
+  const link = linkIn(await emailTo(page.request, email, "Confirm your email"));
+  await page.goto(link);
+  await expect(page).toHaveURL("/");
+}
+
+/**
+ * Posts JSON from inside the page, so the browser's own cookies go with it
+ * and any it is sent back land in the browser (a local-only test hook that
+ * acts as the signed-in person).
+ */
+export async function postFromPage(
+  page: Page,
+  path: string,
+  body: unknown = {},
+): Promise<{ status: number; json: unknown }> {
+  return page.evaluate(
+    async ({ path, body }) => {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const text = await response.text();
+      let json: unknown = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = text;
+      }
+      return { status: response.status, json };
+    },
+    { path, body },
+  );
+}

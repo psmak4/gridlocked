@@ -8,12 +8,11 @@ import {
   ScreenHeader,
   StepLabel,
   Title,
-  selectClass,
 } from "@/components/account-layout";
+import { FavoritesFields } from "@/components/favorites-fields";
 import { Button } from "@/components/ui/button";
 import { onboardingGuard } from "@/lib/onboarding-guard";
 import { privateHeaders } from "@/lib/private-headers";
-import { cn } from "@/lib/utils";
 import { getOnboarding, saveFavorites } from "@/server/account";
 
 export const Route = createFileRoute("/welcome/favorites")({
@@ -36,7 +35,6 @@ function Favorites() {
   const [country, setCountry] = useState(saved.countryCode ?? "");
   const [message, setMessage] = useState<string>();
   const [working, setWorking] = useState(false);
-  const { constructors, drivers } = saved.choices;
 
   async function next() {
     if (working) return;
@@ -94,82 +92,16 @@ function Favorites() {
           </p>
         </div>
 
-        {constructors.length > 0 ? (
-          <fieldset className="m-0 flex flex-col gap-space-2 border-0 p-0">
-            <legend className="pb-space-2 text-[14px] font-bold">
-              Favorite team
-            </legend>
-            <div className="grid grid-cols-3 gap-space-2">
-              {constructors.map((c) => {
-                const picked = team === c.id;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    aria-pressed={picked}
-                    onClick={() => setTeam(picked ? "" : c.id)}
-                    className={cn(
-                      "flex min-h-[64px] cursor-pointer flex-col items-center justify-center gap-[6px] rounded-radius-m border-2 bg-surface-raised px-[2px] py-space-2 font-sans text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
-                      picked ? "border-ink" : "border-transparent",
-                    )}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="h-[6px] w-[28px] rounded-radius-pill"
-                      style={{ backgroundColor: c.color }}
-                    />
-                    <span className="text-center text-[12px] leading-[14px] font-semibold">
-                      {c.name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
-        ) : null}
-
-        {drivers.length > 0 ? (
-          <div className="flex flex-col gap-[6px]">
-            <label htmlFor="fav-driver" className="text-[14px] font-bold">
-              Favorite driver
-            </label>
-            <select
-              id="fav-driver"
-              className={selectClass}
-              value={driver}
-              onChange={(e) => setDriver(e.target.value)}
-            >
-              <option value="">Choose later</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
-        <div className="flex flex-col gap-[6px]">
-          <label htmlFor="fav-country" className="text-[14px] font-bold">
-            Your country (optional)
-          </label>
-          <select
-            id="fav-country"
-            className={selectClass}
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
-          >
-            <option value="">Leave blank</option>
-            {saved.countries.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <span className="text-[14px] text-ink-muted">
-            Only used for a league of fans from your country.
-          </span>
-        </div>
+        <FavoritesFields
+          value={{ team, driver, country }}
+          onChange={(next) => {
+            setTeam(next.team);
+            setDriver(next.driver);
+            setCountry(next.country);
+          }}
+          choices={saved.choices}
+          countries={saved.countries}
+        />
         <FormMessage>{message}</FormMessage>
       </Body>
       <BottomBar>

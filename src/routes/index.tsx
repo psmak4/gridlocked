@@ -14,6 +14,14 @@ function Home() {
       {account ? (
         <div className="mt-space-4 flex flex-col items-start gap-space-2">
           <p>Signed in as {account.username}</p>
+          <p className="flex gap-space-4">
+            <a href="/profile" className={linkClass}>
+              Profile
+            </a>
+            <a href="/settings" className={linkClass}>
+              Settings
+            </a>
+          </p>
           <Button
             type="button"
             variant="quiet"
