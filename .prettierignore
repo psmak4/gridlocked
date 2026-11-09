@@ -2,6 +2,7 @@ docs/
 .superpowers/
 pnpm-lock.yaml
 .output/
+.vercel/
 dist/
 playwright-report/
 test-results/
