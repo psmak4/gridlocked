@@ -85,7 +85,7 @@ In GitHub, under Settings, Environments, `staging`:
 | `VERCEL_ORG_ID`           | variable | The team or account id (Vercel project settings)             |
 | `VERCEL_PROJECT_ID`       | variable | The id of `gridlocked-staging` (same page)                   |
 | `VITE_TURNSTILE_SITE_KEY` | variable | The Turnstile widget's site key (public, used at build time) |
-| `RESEND_API_KEY_STAGING`  | secret   | The Resend key, for the tick                                 |
+| `RESEND_API_KEY`          | secret   | The Resend key, for the tick                                 |
 
 In Vercel, under the project's Settings, Environment Variables (Production):
 
