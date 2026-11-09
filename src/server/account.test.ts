@@ -1,18 +1,22 @@
-import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedLeagueGames } from "../../tests/helpers/leagues-game";
 import { seedUser } from "../../tests/helpers/users";
 import {
-  games,
+  constructorSeasons,
+  constructors,
+  drivers,
   legalAcceptances,
-  poolAssets,
   profiles,
+  seasons,
+  seatAssignments,
   settings,
   users,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { RETIRED_REGION_CODES, normalizeCountryCode } from "@/identity/profile";
 import type { Viewer } from "@/identity/viewer";
 import {
   checkUsernameAction,
@@ -38,33 +42,6 @@ describe("account actions (M5 task 12)", () => {
     t = await createTestDb();
     db = t.db as unknown as Db;
     seeded = await seedLeagueGames(db, NOW);
-    await db
-      .update(games)
-      .set({ status: "running" })
-      .where(eq(games.id, seeded.gameId));
-    // Only some of the reference rows are in the running game's pool.
-    await db.insert(poolAssets).values([
-      ...seeded.constructorIds.slice(0, 2).map((constructorId) => ({
-        id: newId(),
-        gameId: seeded.gameId,
-        assetType: "constructor" as const,
-        constructorId,
-        status: "active" as const,
-        addedFromEventId: seeded.eventIds[0]!,
-        createdAt: NOW,
-        updatedAt: NOW,
-      })),
-      ...seeded.driverIds.slice(0, 3).map((driverId) => ({
-        id: newId(),
-        gameId: seeded.gameId,
-        assetType: "driver" as const,
-        driverId,
-        status: "active" as const,
-        addedFromEventId: seeded.eventIds[0]!,
-        createdAt: NOW,
-        updatedAt: NOW,
-      })),
-    ]);
   });
   afterEach(async () => {
     await t.close();
@@ -235,12 +212,19 @@ describe("account actions (M5 task 12)", () => {
   });
 
   describe("the favorites and spoilers steps", () => {
-    it("lists the running game's constructors and drivers, and the countries", async () => {
+    it("lists the latest season's constructors and drivers, and the countries", async () => {
       const choices = await favoriteChoices(db);
-      expect(choices.constructors.map((c) => c.id).sort()).toEqual(
-        seeded.constructorIds.slice(0, 2).sort(),
-      );
-      expect(choices.drivers).toHaveLength(3);
+      const [season] = await db
+        .select({ id: seasons.id })
+        .from(seasons)
+        .where(eq(seasons.year, 2026));
+      const [{ n: constructorCount }] = (await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(constructorSeasons)
+        .where(eq(constructorSeasons.seasonId, season!.id))) as [{ n: number }];
+      expect(choices.constructors).toHaveLength(constructorCount);
+      expect(choices.constructors.length).toBeGreaterThan(0);
+      expect(choices.drivers.length).toBeGreaterThan(0);
       expect(choices.constructors[0]).toMatchObject({
         name: expect.any(String),
         color: expect.stringMatching(/^#[0-9a-f]{6}$/i),
@@ -285,7 +269,7 @@ describe("account actions (M5 task 12)", () => {
       expect((await viewerOf(userId)).profile.spoilerProtection).toBe(false);
     });
 
-    it("refuses a stale version, an unreal country and a favorite the game lacks", async () => {
+    it("refuses a stale version, an unreal country and a favorite that is not on the grid", async () => {
       const userId = await seedUser(db);
       const viewer = await viewerOf(userId);
       const ok = {
@@ -310,7 +294,7 @@ describe("account actions (M5 task 12)", () => {
         await saveFavoritesAction(db, NOW, viewer, {
           ...ok,
           expectedVersion: 1,
-          favoriteConstructorId: seeded.constructorIds.at(-1)!,
+          favoriteConstructorId: newId(),
         }),
       ).toEqual({ ok: false, error: "invalid_choice" });
       expect(
@@ -415,5 +399,235 @@ describe("account actions (M5 task 12)", () => {
       // Nothing left for ordinary email: the notice shows.
       expect(await emailBusyAction(db, NOW)).toBe(true);
     });
+  });
+});
+
+describe("the favorites grid (Ruling 57)", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let db: Db;
+  beforeEach(async () => {
+    t = await createTestDb();
+    db = t.db as unknown as Db;
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  async function season(year: number) {
+    const id = newId();
+    await db.insert(seasons).values({
+      id,
+      year,
+      status: "upcoming",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    return id;
+  }
+  async function team(seasonId: string | null, name: string) {
+    const id = newId();
+    await db.insert(constructors).values({
+      id,
+      slug: `${name}-${id}`,
+      name,
+      nationality: "British",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    if (seasonId) {
+      await db.insert(constructorSeasons).values({
+        constructorId: id,
+        seasonId,
+        displayName: `${name} F1`,
+        shortName: name.slice(0, 3),
+        color: "#112233",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+    }
+    return id;
+  }
+  async function driver(name: string) {
+    const id = newId();
+    await db.insert(drivers).values({
+      id,
+      slug: `${name}-${id}`,
+      givenName: name,
+      familyName: "Tester",
+      nationality: "British",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    return id;
+  }
+  async function seat(
+    seasonId: string,
+    driverId: string,
+    constructorId: string,
+    carNumber: number,
+    validFrom: string,
+    validTo: string | null,
+    role: "race" | "reserve" = "race",
+  ) {
+    await db.insert(seatAssignments).values({
+      id: newId(),
+      seasonId,
+      driverId,
+      constructorId,
+      carNumber,
+      role,
+      validFrom,
+      validTo,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+  }
+
+  it("lists the season's grid with no game at all", async () => {
+    const s = await season(2026);
+    const haas = await team(s, "Haas");
+    const a = await driver("Aaa");
+    await seat(s, a, haas, 31, "2026-01-01", null);
+    const choices = await favoriteChoices(db);
+    expect(choices.constructors).toEqual([
+      { id: haas, name: "Haas F1", color: "#112233" },
+    ]);
+    expect(choices.drivers).toEqual([{ id: a, name: "Aaa Tester" }]);
+  });
+
+  it("uses only the newest season that has constructors", async () => {
+    const old = await season(2025);
+    const current = await season(2026);
+    await season(2027); // newer, but no constructors yet
+    const oldTeam = await team(old, "Old");
+    const newTeam = await team(current, "New");
+    const oldDriver = await driver("Olga");
+    const newDriver = await driver("Nina");
+    await seat(old, oldDriver, oldTeam, 1, "2025-01-01", "2025-12-31");
+    await seat(current, newDriver, newTeam, 2, "2026-01-01", null);
+    const choices = await favoriteChoices(db);
+    expect(choices.constructors.map((c) => c.id)).toEqual([newTeam]);
+    expect(choices.drivers.map((d) => d.id)).toEqual([newDriver]);
+  });
+
+  it("lists a driver who held a seat for only part of the season", async () => {
+    const s = await season(2026);
+    const haas = await team(s, "Haas");
+    const ocon = await driver("Esteban");
+    const camara = await driver("Camara");
+    const reserve = await driver("Reggie");
+    await seat(s, ocon, haas, 31, "2026-01-01", "2026-10-31");
+    await seat(s, camara, haas, 31, "2026-11-01", null);
+    await seat(s, reserve, haas, 99, "2026-01-01", null, "reserve");
+    const ids = (await favoriteChoices(db)).drivers.map((d) => d.id);
+    expect(ids.sort()).toEqual([ocon, camara].sort());
+  });
+
+  it("saves a favorite from the grid and still refuses an unknown id", async () => {
+    const s = await season(2026);
+    const haas = await team(s, "Haas");
+    const a = await driver("Aaa");
+    await seat(s, a, haas, 31, "2026-01-01", null);
+    const userId = await seedUser(db);
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const [profile] = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, userId));
+    const viewer = {
+      userId,
+      role: user!.role,
+      banned: false,
+      username: user!.username,
+      displayUsername: user!.displayUsername,
+      emailVerified: user!.emailVerified,
+      twoFactorEnabled: false,
+      sessionId: newId(),
+      impersonatedBy: null,
+      staffVerifiedAt: null,
+      profile: profile!,
+      complete: true,
+    } as Viewer;
+    const base = {
+      expectedVersion: 1,
+      favoriteConstructorId: null,
+      favoriteDriverId: null,
+      countryCode: null,
+    };
+    expect(
+      await saveFavoritesAction(db, NOW, viewer, {
+        ...base,
+        favoriteDriverId: newId(),
+      }),
+    ).toEqual({ ok: false, error: "invalid_choice" });
+    expect(
+      await saveFavoritesAction(db, NOW, viewer, {
+        ...base,
+        favoriteConstructorId: haas,
+        favoriteDriverId: a,
+      }),
+    ).toEqual({ ok: true, version: 2 });
+  });
+});
+
+describe("country choices (Ruling 57)", () => {
+  it("refuses every retired code", () => {
+    for (const code of RETIRED_REGION_CODES) {
+      expect(normalizeCountryCode(code)).toBeNull();
+      expect(normalizeCountryCode(code.toLowerCase())).toBeNull();
+    }
+    expect(RETIRED_REGION_CODES.size).toBe(18);
+  });
+
+  it("has no duplicate names and none of the retired codes", () => {
+    const countries = countryChoices();
+    const names = countries.map((c) => c.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const c of countries) {
+      expect(RETIRED_REGION_CODES.has(c.code)).toBe(false);
+    }
+  });
+
+  it("stays duplicate-free when the runtime names the retired codes", async () => {
+    const RealDisplayNames = Intl.DisplayNames;
+    const alias: Record<string, string> = {
+      UK: "United Kingdom",
+      DD: "Germany",
+      BU: "Myanmar",
+      YU: "Serbia",
+      CS: "Serbia",
+      SU: "Russia",
+      FX: "France",
+      ZR: "Congo - Kinshasa",
+    };
+    const spy = vi.spyOn(Intl, "DisplayNames").mockImplementation(function (
+      this: unknown,
+      ...args: ConstructorParameters<typeof Intl.DisplayNames>
+    ) {
+      const real = new RealDisplayNames(...args);
+      return {
+        of: (code: string) =>
+          alias[code] ??
+          (RETIRED_REGION_CODES.has(code)
+            ? code + " (retired)"
+            : real.of(code)),
+        resolvedOptions: () => real.resolvedOptions(),
+      } as Intl.DisplayNames;
+    } as unknown as typeof Intl.DisplayNames);
+    try {
+      // profile.ts builds its own DisplayNames when first loaded, so load a
+      // fresh copy of both modules under the stub.
+      vi.resetModules();
+      const fresh = await import("./account-actions");
+      const countries = fresh.countryChoices();
+      const names = countries.map((c) => c.name);
+      expect(new Set(names).size).toBe(names.length);
+      expect(countries.some((c) => RETIRED_REGION_CODES.has(c.code))).toBe(
+        false,
+      );
+      expect(countries.find((c) => c.code === "GB")).toBeDefined();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

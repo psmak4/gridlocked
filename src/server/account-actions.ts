@@ -3,14 +3,14 @@
  * each in a Zod-checked `createServerFn`). Kept apart so the logic can be
  * tested on a database without the Start runtime.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   constructors,
   constructorSeasons,
   drivers,
-  games,
-  poolAssets,
+  seasons,
+  seatAssignments,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { completeSignUp } from "@/identity/consent";
@@ -95,8 +95,22 @@ export type FavoriteChoices = {
   drivers: { id: string; name: string }[];
 };
 
-/** What the running game(s) can be favored from: its pool, by name. */
+/**
+ * What a fan can favor: the latest season's grid, by name. Favorites are
+ * global flair (DM 6.2), not a pick from any one game's pool, so this needs no
+ * game at all. The season is the newest (by year) that has any
+ * `constructor_seasons`; its drivers are everyone who held a race seat at any
+ * point in it, so a mid-season replacement is listed.
+ */
 export async function favoriteChoices(db: Db): Promise<FavoriteChoices> {
+  const [latest] = await db
+    .select({ seasonId: constructorSeasons.seasonId })
+    .from(constructorSeasons)
+    .innerJoin(seasons, eq(seasons.id, constructorSeasons.seasonId))
+    .orderBy(desc(seasons.year))
+    .limit(1);
+  if (!latest) return { constructors: [], drivers: [] };
+
   const constructorRows = await db
     .selectDistinct({
       id: constructors.id,
@@ -104,17 +118,12 @@ export async function favoriteChoices(db: Db): Promise<FavoriteChoices> {
       seasonName: constructorSeasons.displayName,
       color: constructorSeasons.color,
     })
-    .from(poolAssets)
-    .innerJoin(games, eq(games.id, poolAssets.gameId))
-    .innerJoin(constructors, eq(constructors.id, poolAssets.constructorId))
-    .leftJoin(
-      constructorSeasons,
-      and(
-        eq(constructorSeasons.constructorId, constructors.id),
-        eq(constructorSeasons.seasonId, games.seasonId),
-      ),
+    .from(constructorSeasons)
+    .innerJoin(
+      constructors,
+      eq(constructors.id, constructorSeasons.constructorId),
     )
-    .where(and(eq(games.status, "running"), eq(poolAssets.status, "active")));
+    .where(eq(constructorSeasons.seasonId, latest.seasonId));
   const driverRows = await db
     .selectDistinct({
       id: drivers.id,
@@ -122,10 +131,14 @@ export async function favoriteChoices(db: Db): Promise<FavoriteChoices> {
       familyName: drivers.familyName,
       displayName: drivers.displayName,
     })
-    .from(poolAssets)
-    .innerJoin(games, eq(games.id, poolAssets.gameId))
-    .innerJoin(drivers, eq(drivers.id, poolAssets.driverId))
-    .where(and(eq(games.status, "running"), eq(poolAssets.status, "active")))
+    .from(seatAssignments)
+    .innerJoin(drivers, eq(drivers.id, seatAssignments.driverId))
+    .where(
+      and(
+        eq(seatAssignments.seasonId, latest.seasonId),
+        eq(seatAssignments.role, "race"),
+      ),
+    )
     .orderBy(asc(drivers.familyName));
 
   const byName = (a: { name: string }, b: { name: string }) =>
@@ -176,6 +189,7 @@ export function countryChoices(): { code: string; name: string }[] {
   for (let a = 65; a <= 90; a++) {
     for (let b = 65; b <= 90; b++) {
       const code = String.fromCharCode(a, b);
+      // `normalizeCountryCode` also refuses the retired codes.
       if (NOT_COUNTRIES.has(code) || normalizeCountryCode(code) === null) {
         continue;
       }
@@ -233,7 +247,7 @@ export async function saveFavoritesAction(
   input: SaveFavoritesInput,
 ): Promise<ActionResult<{ version: number }>> {
   const v = requireWritable(viewer);
-  // A favorite is a pick from the running game's pool, as the form offers.
+  // A favorite is a pick from the latest season's grid, as the form offers.
   const choices = await favoriteChoices(db);
   if (
     (input.favoriteConstructorId !== null &&
