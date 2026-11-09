@@ -244,6 +244,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - toast blur and touch hover;
   - locking `updateProfile`'s read of the profile once more screens write profiles, plus a rollback test for a failing `syncAutoLeagues`;
   - a trust test with more than zero games.
+- **Plan:** [plans/M6-fantasy-screens.md](../plans/M6-fantasy-screens.md), a draft waiting on five decisions.
 
 ### M7 — Community (target 5 Feb)
 - **Goal:** race weekends feel alive.
