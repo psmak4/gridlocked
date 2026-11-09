@@ -86,14 +86,18 @@ In GitHub, under Settings, Environments, `staging`:
 | `VERCEL_PROJECT_ID`       | variable | The id of `gridlocked-staging` (same page)                   |
 | `VITE_TURNSTILE_SITE_KEY` | variable | The Turnstile widget's site key (public, used at build time) |
 | `RESEND_API_KEY`          | secret   | The Resend key, for the tick                                 |
+| `EMAIL_FROM`              | secret   | `onboarding@resend.dev`, for the tick                        |
 
 In Vercel, under the project's Settings, Environment Variables (Production):
 
 | Name                                         | What it is                                                                                                     |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `BETTER_AUTH_SECRET`                         | The output of `openssl rand -base64 32`                                                                        |
+| `BETTER_AUTH_URL`                            | `https://gridlocked-staging.vercel.app`                                                                        |
+| `SIGN_UP_ALLOWED_EMAILS`                     | Your Resend account address: on staging, only it can sign up                                                   |
 | `DATABASE_URL`                               | The staging pooled connection string                                                                           |
 | `RESEND_API_KEY`                             | The Resend key                                                                                                 |
+| `EMAIL_FROM`                                 | `onboarding@resend.dev`                                                                                        |
 | `TURNSTILE_SECRET_KEY`                       | The Turnstile widget's secret key                                                                              |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The Discord application; its redirect URL is `https://gridlocked-staging.vercel.app/api/auth/callback/discord` |
 

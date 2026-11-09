@@ -119,6 +119,15 @@ jobs:
         id: vercel
         run: |
           if [ -n "$VERCEL_TOKEN" ]; then
+            # With the token set, the rest must be set too; names only.
+            missing=""
+            [ -n "$VERCEL_ORG_ID" ] || missing="$missing VERCEL_ORG_ID"
+            [ -n "$VERCEL_PROJECT_ID" ] || missing="$missing VERCEL_PROJECT_ID"
+            [ -n "$VITE_TURNSTILE_SITE_KEY" ] || missing="$missing VITE_TURNSTILE_SITE_KEY"
+            if [ -n "$missing" ]; then
+              echo "::error::These staging variables are not set:$missing"
+              exit 1
+            fi
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
@@ -126,6 +135,9 @@ jobs:
           fi
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
 
       # No VITE_LOCAL_DB: this is the deployed build, with no local database.
       # The vercel preset writes .vercel/output (Build Output API).
@@ -147,11 +159,15 @@ jobs:
             echo "::error::.vercel/output/config.json is missing"
             exit 1
           fi
-          if [ -n "$(find .vercel/output -iname '*pglite*')" ] || grep -rq '@electric-sql/pglite' .vercel/output; then
+          if [ -n "$(find .vercel/output \( -iname '*pglite*' -o -name '*.wasm' -o -name 'postgres.data' \))" ] || grep -rq '@electric-sql/pglite' .vercel/output; then
             echo "::error::.vercel/output contains PGlite"
             exit 1
           fi
-          for marker in migrationsFolder test-email-capture gl-test-busy test-hook-ban-account; do
+          # The same list as CI's unflagged build, Task 13's hooks included.
+          for marker in migrationsFolder test-email-capture gl-test-busy \
+            test-hook-ban-account test-hook-make-admin test-hook-impersonate \
+            test-hook-run-exports test-hook-export-file \
+            test-hook-clear-acceptances; do
             if grep -rq "$marker" .vercel/output; then
               echo "::error::.vercel/output contains the local-only code ($marker)"
               exit 1
