@@ -141,14 +141,17 @@ export async function recomputeTrustLevels(
       changed += await db.transaction(async (tx) => {
         const t = tx as unknown as Db;
         if (!(await lockUserRow(t, m.userId))) return 0;
-        // Still at the level read and still unlocked: a moderator who
-        // locked it meanwhile wins.
+        // Still active, at the level read and unlocked: a moderator who
+        // locked it meanwhile wins, and an account deleted meanwhile keeps
+        // its users row (so the lock above still finds it) but is skipped
+        // here, so no history row is written after the scrub removed them.
         const updated = await t
           .update(profiles)
           .set({ trustLevel: m.to, updatedAt: now })
           .where(
             and(
               eq(profiles.userId, m.userId),
+              eq(profiles.status, "active"),
               eq(profiles.trustLevel, m.from),
               eq(profiles.trustLevelLocked, false),
             ),
