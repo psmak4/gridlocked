@@ -244,12 +244,20 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - toast blur and touch hover;
   - locking `updateProfile`'s read of the profile once more screens write profiles, plus a rollback test for a failing `syncAutoLeagues`;
   - a trust test with more than zero games.
-- **Plan:** [plans/M6-fantasy-screens.md](../plans/M6-fantasy-screens.md), a draft waiting on five decisions.
+- **Decided 2026-11-09** ([plan](../plans/M6-fantasy-screens.md), decisions 1–5):
+  - `session_watch_marks` (DM 5.7) and "Mark as watched" move here from M7;
+  - standings, season totals and ranks are covered while the latest event is hidden;
+  - the weekend hub, prices and How prices work are public and CDN-cached; every other fantasy page needs sign-in;
+  - price changes are spoilers, by the same rule as scores;
+  - the exit is local: the phone-size e2e on a replay-mode build. One staging deploy follows, to look at the screens.
+- **Exit:** the key tests above pass on the replay-mode build, every wave 2–3 board has a test or a named later milestone, and the M5 carry-overs are done.
+- **Approval needed:** none new. One Deploy staging run, with your OK, at the end.
+- **Plan:** [plans/M6-fantasy-screens.md](../plans/M6-fantasy-screens.md).
 
 ### M7 — Community (target 5 Feb)
 - **Goal:** race weekends feel alive.
 - **Scope:**
-  - DM Part 5: categories, threads, nested posts, votes, search (if you approve it at this milestone), watch marks;
+  - DM Part 5: categories, threads, nested posts, votes, search (if you approve it at this milestone), and watch marks on threads and chat (the table arrives in M6);
   - chat-mode threads that refresh every few seconds through the `RealtimeChannel` interface, cached per thread on the CDN (HLD decision 19), and the 30-day archive;
   - a staging load test that the CDN absorbs a race start's refreshes within Vercel Hobby's limits, counting CDN requests as well as invocations (HLD §11.4: about 50 people in chat a month on Hobby), with refreshes spread across the window as in the framework and hosting spike's staggered probe;
   - reports, the moderation queue and filters;

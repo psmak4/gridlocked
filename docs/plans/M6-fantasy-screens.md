@@ -39,23 +39,23 @@ I read the M3–M5 code these screens sit on. These change what the roadmap says
 8. **HLD §11.5 suggests TanStack Query,** which isn't installed. Route loaders, server functions and `router.invalidate()` cover these screens, as they did M5's, so M6 adds no dependency.
 9. **The plans live in `docs/plans/`,** so this one is there too.
 
-## Decisions for you (open)
-These change what gets built. Each has my recommendation first. Nothing is built until you choose.
+## Decisions (approved 9 Nov 2026)
+These five change what gets built. You approved all five recommendations, and the alternatives stay here for the record.
 
 1. **Watch marks: build them now or in M7?**
-   - **Recommended: now.** Task 4 adds DM 5.7's `session_watch_marks` table as written, with "Mark as watched" on the weekend hub, the breakdown and the locked team. M7 then uses the same table and check for threads and chat. It's one small table and one function, and the key test "spoiler-gated scores" proves the real thing.
+   - **Approved: now.** Task 4 adds DM 5.7's `session_watch_marks` table as written, with "Mark as watched" on the weekend hub, the breakdown and the locked team. M7 then uses the same table and check for threads and chat. It's one small table and one function, and the key test "spoiler-gated scores" proves the real thing.
    - **Not chosen: wait for M7.** M6 hides scores by the 7-day window and the profile switch only, with "Show it" for one item at a time. There's no "Mark as watched", so the boards' main reveal is missing for two milestones, and M6's spoiler test proves less.
 2. **What a viewer sees of standings and season totals while the latest event is hidden.** A season total or a rank includes the hidden event, so either one gives it away.
-   - **Recommended: cover them.** While any scored session of the latest event in a table is hidden, the table, the season total and the rank are replaced by a `SpoilerCover` ("Mexico City — standings are in") with Show it and Mark as watched. It reads the stored table once, as now.
+   - **Approved: cover them.** While any scored session of the latest event in a table is hidden, the table, the season total and the rank are replaced by a `SpoilerCover` ("Mexico City — standings are in") with Show it and Mark as watched. It reads the stored table once, as now.
    - **Not chosen: show them as they stood before the hidden event.** More useful, but a league's table before that event isn't stored (DM 4.7), so it's rebuilt on demand from `team_event_totals` for every hidden view, and the "up 3" arrows need their own rule.
 3. **Which M6 pages a logged-out visitor can open.**
-   - **Recommended: the weekend hub, prices and How prices work.** They're public, cached on the CDN for 60 seconds (`public, s-maxage=60, stale-while-revalidate=300`), and they read the database only on a cache miss. They never read a session. Teams, the breakdown, leagues and standings ask the visitor to sign in. The logged-out home stays the M5 page with a "See this weekend" link. M5's rule becomes "a logged-out request never reads a session; a public data page is cached".
+   - **Approved: the weekend hub, prices and How prices work.** They're public, cached on the CDN for 60 seconds (`public, s-maxage=60, stale-while-revalidate=300`), and they read the database only on a cache miss. They never read a session. Teams, the breakdown, leagues and standings ask the visitor to sign in. The logged-out home stays the M5 page with a "See this weekend" link. M5's rule becomes "a logged-out request never reads a session; a public data page is cached".
    - **Not chosen: global and league standings public too.** Good for sharing a league, but each one needs the logged-out reveal toggle that HLD §7.3 keeps in the browser, which is M7's key test ("logged-out visitors being spoiler-safe"). It's more to build now and to cache.
 4. **Are price changes spoilers?**
-   - **Recommended: yes, by the same rule as scores.** The "going up / going down" list and each row's ▲▼ are covered while the race of the event that moved them is hidden for the viewer, and current prices always show. For a logged-out visitor that's the 7-day window, and "Show it" links to `/prices?show=changes`, a separately cached page.
+   - **Approved: yes, by the same rule as scores.** The "going up / going down" list and each row's ▲▼ are covered while the race of the event that moved them is hidden for the viewer, and current prices always show. For a logged-out visitor that's the 7-day window, and "Show it" links to `/prices?show=changes`, a separately cached page.
    - **Not chosen: no.** Simpler, and the official game doesn't hide prices. But a fan who watches on Tuesday learns who had a great race from the prices page.
 5. **The exit, and staging.** The roadmap gives M6 no staging exit. Staging has no game, and 2026's last round is Abu Dhabi on 6 Dec.
-   - **Recommended: a local exit, plus one staging deploy to look at.** The exit is the replay-mode e2e (Task 15). Staging gets one deploy, with your OK and not on a race weekend, so you can open the screens on your phone. With no game they show their empty states ("The game opens before the first race"). Real play on staging comes with M9's closed beta on replayed weekends.
+   - **Approved: a local exit, plus one staging deploy to look at.** The exit is the replay-mode e2e (Task 15). Staging gets one deploy, with your OK and not on a race weekend, so you can open the screens on your phone. With no game they show their empty states ("The game opens before the first race"). Real play on staging comes with M9's closed beta on replayed weekends.
    - **Not chosen: a live game on staging for Abu Dhabi.** You'd play a real weekend on your phone through the real pipeline. It needs a new `pnpm staff create-game` command that starts a game at round 23 with our own prices (from our formula on the replay), a staging write through the Staff action workflow, and Tasks 6–9 merged by 4 Dec. If they're late, the chance is gone until March.
 
 **My calls (lower stakes; each is written into the DM or UI brief when its task lands):**
@@ -623,6 +623,6 @@ Tasks 1, 2, 3 and 4 touch nothing in common and can run alongside each other. Af
 
 ## After approval
 1. One task issue per task, as sub-issues of #7, with the board fields set.
-2. The roadmap's M6 section gains this plan's link, decision 5's exit, and (with decision 1) `session_watch_marks` moving from M7 to M6.
+2. The roadmap's M6 section has the decisions, the exit and the plan link, and M7's scope notes that the watch-marks table arrives in M6 (done in this PR).
 
-Work starts on Task 1 when you say so, with Tasks 2, 3 and 4 alongside it if you like. Nothing is built yet.
+Approved on 9 Nov 2026. Work starts on Task 1, with Tasks 2, 3 and 4 able to run alongside it.
