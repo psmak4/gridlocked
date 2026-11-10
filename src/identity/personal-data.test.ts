@@ -38,6 +38,15 @@ describe("the personal-data registry (DM 6.7)", () => {
     expect(keys.filter((key) => !registered.has(key))).toEqual([]);
   });
 
+  it("the registry covers session_watch_marks", () => {
+    // M6 builds DM 5.7's watch marks: deletion removes them, export lists them.
+    const entry = PERSONAL_DATA.find(
+      (e) => e.table === "session_watch_marks" && e.userColumn === "user_id",
+    );
+    expect(entry?.onDelete).toBe("delete");
+    expect(entry?.exportAs).toBe("watched_sessions");
+  });
+
   it("every entry names a real table and column", () => {
     const columns = new Map(
       tables.map((table) => {

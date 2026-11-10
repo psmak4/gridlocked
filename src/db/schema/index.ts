@@ -7,3 +7,4 @@ export * from "./game";
 export * from "./scoring";
 export * from "./leagues";
 export * from "./identity";
+export * from "./spoilers";
