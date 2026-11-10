@@ -7,6 +7,7 @@ import * as schema from "@/db/schema";
 import { profiles } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { scrubAccount } from "./delete";
+import { updateProfile } from "./profile";
 import { requestExport } from "./export";
 import { clearTrustLock, recomputeTrustLevels, setTrustLevel } from "./trust";
 
@@ -69,6 +70,20 @@ describe("lock order: users, then profiles", () => {
       actor: { kind: "user", userId, label: null },
     });
     expect(steps("audit_log").slice(0, 2)).toEqual(["users", "profiles"]);
+  });
+
+  it("updateProfile locks the profile row as it reads it", async () => {
+    const userId = await seedUser(t.db);
+    await updateProfile(db, NOW, {
+      userId,
+      expectedVersion: 1,
+      timezone: "Europe/London",
+    });
+    const reads = sent
+      .map((q) => q.toLowerCase())
+      .filter((q) => /^select .* from "profiles"/.test(q));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatch(/ for no key update$/);
   });
 
   it("requestExport", async () => {

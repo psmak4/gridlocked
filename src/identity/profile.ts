@@ -3,7 +3,7 @@
  * protection. A favorite or the country also decides which auto leagues the
  * user's teams are in (DM 4.6).
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { games, poolAssets, profiles } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { syncAutoLeagues } from "@/leagues/leagues";
@@ -98,8 +98,8 @@ function isTimezone(name: string): boolean {
 /**
  * Saves the profile fields given, if the profile is still at `expectedVersion`
  * (a compare-and-set that adds 1), otherwise `version_conflict`. When a
- * favorite or the country changed, moves the user's teams in every running
- * game into the right auto leagues. A favorite constructor the game doesn't
+ * favorite or the country changed, moves the user's teams in every open or
+ * running game (`gamesForAutoLeagues`) into the right auto leagues. A favorite constructor the game doesn't
  * have gets no constructor league there.
  */
 export async function updateProfile(
@@ -134,10 +134,13 @@ export async function updateProfile(
   // row lock queues two saves, and a failed sync rolls the save back.
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
+    // Locked as it is read, so a second save waits here and then sees the
+    // first one's version (lock order: the profile only, ruling 59).
     const [before] = await t
       .select()
       .from(profiles)
-      .where(eq(profiles.userId, input.userId));
+      .where(eq(profiles.userId, input.userId))
+      .for("no key update");
     if (!before) throw new IdentityError("unauthenticated");
 
     const [after] = await t
@@ -158,11 +161,7 @@ export async function updateProfile(
       after.countryCode !== before.countryCode;
     if (!leaguesChanged) return;
 
-    const running = await t
-      .select({ id: games.id })
-      .from(games)
-      .where(eq(games.status, "running"));
-    for (const game of running) {
+    for (const game of await gamesForAutoLeagues(t)) {
       const constructorId =
         after.favoriteConstructorId !== null &&
         (await gameHasConstructor(t, game.id, after.favoriteConstructorId))
@@ -177,6 +176,18 @@ export async function updateProfile(
       });
     }
   });
+}
+
+/**
+ * The games whose auto leagues follow profiles: `open` ones as well as
+ * `running`, since a game is `open` until its first lock and teams made in
+ * the preseason belong in their leagues too (M6 plan, finding 2).
+ */
+export async function gamesForAutoLeagues(db: Db): Promise<{ id: string }[]> {
+  return db
+    .select({ id: games.id })
+    .from(games)
+    .where(inArray(games.status, ["open", "running"]));
 }
 
 async function gameHasConstructor(

@@ -1740,7 +1740,7 @@ erDiagram
 | last_seen_at | timestamptz | Written at most every 15 minutes, not on every request, so idle sessions don't keep the database awake (HLD §11.4) |
 | broadcasts_read_at | timestamptz | The bell's read marker for broadcasts (5.11) |
 | username_changed_at | timestamptz, nullable | For the change limit (6.3) |
-| created_at, updated_at, version | | `updateProfile` is a compare-and-set on `version` (0.7): it takes the `expectedVersion` the form loaded and adds 1, and a stale save is `version_conflict`. Changing a favorite or the country then re-syncs the auto leagues (4.6) in every `running` game |
+| created_at, updated_at, version | | `updateProfile` is a compare-and-set on `version` (0.7): it takes the `expectedVersion` the form loaded and adds 1, and a stale save is `version_conflict`. It reads the row `FOR NO KEY UPDATE`, so a second save waits for the first. Changing a favorite or the country then re-syncs the auto leagues (4.6) in every `open` or `running` game (`gamesForAutoLeagues`; a game is `open` until its first lock, M6), in the same transaction, so a failed sync rolls the save back |
 
 Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC`; `age_confirmed_at` is nullable, since the system user never confirms; `trust_level`, `reputation` and `days_visited` default to 0; `trust_level_locked` to false; `version` to 1. A CHECK keeps `trust_level` between 0 and 3.
 
