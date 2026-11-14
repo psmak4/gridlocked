@@ -216,6 +216,9 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
   - "How prices work" uses a worked example marked "Example numbers", because the real constants are calibrated before launch (DM 3.5);
   - team value is shown in words ("up $1.0M since last race").
 - **Desktop:** the side menu replaces the bottom nav, with the same items plus Notifications. Tables become real tables, and a side card sums up your position. It stacks to one column at phone width.
+- **The app shell (built in M6).** Under 1024 px, the bottom nav is fixed at the bottom with the safe-area inset: Home, Team, Leagues, Profile. From 1024 px the side menu replaces it, with the "GRIDLOCKED" wordmark, the same four items and a main column of at most 1200 px. The site footer stays under both. **Forum and the bell (Notifications) join in M7**, in both the bottom nav and the side menu.
+  - Team and Leagues are for someone signed in: a logged-out visitor goes to sign in and comes back to the page afterwards (`/sign-in?next=`). The weekend hub and the prices stay public.
+  - Before the season's game opens, Team and Leagues say "No game yet" and "The game opens before the first race."
 
 ## Wave 4: community and account (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.

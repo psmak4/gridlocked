@@ -29,6 +29,7 @@ import {
   sessions,
 } from "@/db/schema";
 import { resolveClock } from "@/lib/resolve-clock";
+import { setSimulatedClock } from "@/replay/clock-loop";
 import { startLiveReplay, type LiveReplay } from "@/providers/replay/live-game";
 import { seedGame2026 } from "@/providers/replay/seed-2026";
 import { withDb } from "./db";
@@ -64,6 +65,17 @@ export function seedTestGame(at: Date): Promise<{ gameId: string }> {
       });
       live = { gameId, replay };
       return { gameId };
+    }),
+  );
+}
+
+/** Resets the database with no game, the clock at `at`: before a game opens. */
+export function clearTestGame(at: Date): Promise<void> {
+  return oneAtATime(() =>
+    withDb(async (db) => {
+      live = undefined;
+      await resetLocalDb(db);
+      await setSimulatedClock(db, at);
     }),
   );
 }

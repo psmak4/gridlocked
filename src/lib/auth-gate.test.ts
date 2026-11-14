@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gateRedirect } from "./auth-gate";
+import { gateRedirect, safeNext, signInFirst } from "./auth-gate";
 
 const incomplete = { complete: false };
 const complete = { complete: true };
@@ -72,6 +72,47 @@ describe("the signed-in gate", () => {
       "/auth-error",
     ]) {
       expect(gateRedirect(path, complete)).toBeNull();
+    }
+  });
+});
+
+describe("the sign-in-first pages (M6)", () => {
+  it("sends a logged-out visitor on Team or Leagues to sign in, with where they were going", () => {
+    expect(signInFirst("/team", "", null)).toBe("/team");
+    expect(signInFirst("/team/", "", null)).toBe("/team");
+    expect(signInFirst("/team/1/points", "", null)).toBe("/team/1/points");
+    expect(signInFirst("/leagues", "", null)).toBe("/leagues");
+    expect(signInFirst("/leagues/abc", "?tab=x", null)).toBe(
+      "/leagues/abc?tab=x",
+    );
+  });
+
+  it("leaves the public pages and anyone signed in alone", () => {
+    for (const path of ["/", "/weekend", "/prices", "/prices/how", "/teams"]) {
+      expect(signInFirst(path, "", null)).toBeNull();
+    }
+    expect(signInFirst("/team", "", complete)).toBeNull();
+    expect(signInFirst("/leagues", "", incomplete)).toBeNull();
+  });
+
+  it("takes back only a path on this site", () => {
+    expect(safeNext("/team")).toBe("/team");
+    expect(safeNext("/leagues/abc?tab=x")).toBe("/leagues/abc?tab=x");
+    for (const bad of [
+      undefined,
+      "",
+      "team",
+      "//evil.example",
+      "/\\evil.example",
+      "https://evil.example/team",
+      "/team\nx",
+      "/sign-in",
+      "/sign-in?next=/team",
+      "/sign-up/email",
+      `/${"a".repeat(600)}`,
+      42,
+    ]) {
+      expect(safeNext(bad)).toBeUndefined();
     }
   });
 });

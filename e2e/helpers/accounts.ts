@@ -62,13 +62,22 @@ export const linkIn = (email: Captured) =>
 /** Creates an account straight through the API, as the email form would. */
 export async function createAccount(
   request: APIRequestContext,
-  input: { email?: string; username?: string; password?: string } = {},
+  input: {
+    email?: string;
+    username?: string;
+    password?: string;
+    /** The server's own origin: the fantasy project's is another port. */
+    origin?: string;
+  } = {},
 ) {
   const email = input.email ?? newEmail();
   const username = input.username ?? newUsername();
   const password = input.password ?? PASSWORD;
   const response = await request.post("/api/auth/sign-up/email", {
-    headers: { origin: ORIGIN, "x-forwarded-for": randomAddress() },
+    headers: {
+      origin: input.origin ?? ORIGIN,
+      "x-forwarded-for": randomAddress(),
+    },
     data: {
       email,
       password,

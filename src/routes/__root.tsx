@@ -9,17 +9,24 @@ import {
 import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeScript } from "@/components/theme-script";
-import { gateRedirect } from "@/lib/auth-gate";
+import { gateRedirect, signInFirst } from "@/lib/auth-gate";
 import { privateHeaders } from "@/lib/private-headers";
-import { getAccount } from "@/server/account";
+import { getAccount, markPrivate } from "@/server/account";
 import appCss from "@/styles/globals.css?url";
 
 export const Route = createRootRoute({
   // The signed-in gate. With no session cookie `getAccount` answers null
   // without touching the database, and a logged-out visitor is never
-  // redirected, so public pages stay public and cacheable.
+  // redirected, except from the pages for someone signed in (Team and
+  // Leagues), which send them to sign in and back. That redirect depends on
+  // the cookie, so it is private (route `headers()` don't run for one).
   beforeLoad: async ({ location }) => {
     const account = await getAccount();
+    const next = signInFirst(location.pathname, location.searchStr, account);
+    if (next) {
+      await markPrivate();
+      throw redirect({ to: "/sign-in", search: { next } });
+    }
     const to = gateRedirect(location.pathname, account);
     if (to) throw redirect({ to });
     return { account };
@@ -76,7 +83,8 @@ function RootDocument({ children }: { children: ReactNode }) {
         <ThemeScript />
         <HeadContent />
       </head>
-      <body className="bg-surface text-ink font-sans">
+      {/* Room under the footer for the app shell's fixed bottom nav. */}
+      <body className="bg-surface text-ink font-sans has-[[data-slot=app-shell]]:pb-[calc(60px+env(safe-area-inset-bottom))] lg:has-[[data-slot=app-shell]]:pb-0">
         {children}
         <SiteFooter />
         <Scripts />
