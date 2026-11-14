@@ -16,6 +16,7 @@ import {
 import type { Db } from "@/db/types";
 import type { EmailSender } from "@/identity/email/sender";
 import type { Viewer } from "@/identity/viewer";
+import { createTeam } from "@/game/teams";
 import { newId } from "@/lib/ids";
 import {
   changeUsernameAction,
@@ -125,6 +126,35 @@ describe("settings actions (M5 task 13)", () => {
       expect(state.favorites.team?.name).toEqual(expect.any(String));
       expect(state.favorites.team?.color).toMatch(/^#/);
       expect(state.favorites.driver).toEqual(expect.any(String));
+    });
+
+    it("lists the teams in the current game by slot", async () => {
+      const seeded = await seedLeagueGames(db, NOW);
+      const userId = await seedUser(db);
+      expect((await profileState(db, await viewerOf(userId))).teams).toEqual(
+        [],
+      );
+      await createTeam(db, NOW, {
+        gameId: seeded.gameId,
+        userId,
+        name: "Second",
+        slot: 2,
+      });
+      await createTeam(db, NOW, {
+        gameId: seeded.gameId,
+        userId,
+        name: "First",
+      });
+      // Another game's team isn't the current game's.
+      await createTeam(db, NOW, {
+        gameId: seeded.otherGameId,
+        userId,
+        name: "Last year",
+      });
+      expect((await profileState(db, await viewerOf(userId))).teams).toEqual([
+        { slot: 1, name: "First", status: "active" },
+        { slot: 2, name: "Second", status: "active" },
+      ]);
     });
 
     it("can be read through an impersonated session", async () => {

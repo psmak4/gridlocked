@@ -13,6 +13,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import type { Viewer } from "@/identity/viewer";
 import { currentGame, type CurrentGame } from "@/play/current-game";
+import {
+  createTeamAction,
+  createTeamInput,
+  removeTeamAction,
+  removeTeamInput,
+  renameTeamAction,
+  renameTeamInput,
+  teamsPage,
+} from "@/play/teams";
 import { withDb, type ServerDb } from "./db";
 import {
   markSessionsWatchedAction,
@@ -70,3 +79,29 @@ export const getCurrentGame = createServerFn({ method: "GET" }).handler(
     return found;
   },
 );
+
+/** `/team` and the builder's header: the current game and the viewer's teams. */
+export const getTeams = createServerFn({ method: "GET" }).handler(() =>
+  playAction((db, _now, viewer) => teamsPage(db, viewer)),
+);
+
+/** "Create a team": the lowest free slot, and its auto leagues. */
+export const createMyTeam = createServerFn({ method: "POST" })
+  .validator(createTeamInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => createTeamAction(db, now, viewer, data)),
+  );
+
+/** "Rename" on the team list. */
+export const renameMyTeam = createServerFn({ method: "POST" })
+  .validator(renameTeamInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => renameTeamAction(db, now, viewer, data)),
+  );
+
+/** "Remove": deleted before the team's first lock, retired after. */
+export const removeMyTeam = createServerFn({ method: "POST" })
+  .validator(removeTeamInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => removeTeamAction(db, now, viewer, data)),
+  );

@@ -11,6 +11,15 @@ import { markWatched } from "@/spoilers/reveal";
 /** A refusal a screen can show, in wave 2's words. */
 export type Refusal = { ok: false; error: GameErrorCode };
 
+/** True for a refusal, so a loader can tell one from its answer. */
+export function isRefusal(value: unknown): value is Refusal {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { ok?: unknown }).ok === false
+  );
+}
+
 /**
  * Runs `fn`, turning a `GameError` into `{ ok: false, error }`. Anything else
  * is thrown on, for M5's middleware to send as `server_error`.
