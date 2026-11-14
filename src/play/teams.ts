@@ -127,7 +127,7 @@ export function createTeamAction(
 }
 
 /** The viewer's own team, or `team_not_owned`. */
-async function ownTeam(db: Db, userId: string, teamId: string) {
+export async function ownTeam(db: Db, userId: string, teamId: string) {
   const [team] = await db
     .select({ status: teams.status })
     .from(teams)

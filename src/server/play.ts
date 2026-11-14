@@ -12,6 +12,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import type { Viewer } from "@/identity/viewer";
+import {
+  builderForSlot,
+  getBuilderInput,
+  saveTeamAction,
+  saveTeamInput,
+} from "@/play/builder";
 import { currentGame, type CurrentGame } from "@/play/current-game";
 import {
   createTeamAction,
@@ -104,4 +110,18 @@ export const removeMyTeam = createServerFn({ method: "POST" })
   .validator(removeTeamInput)
   .handler(({ data }) =>
     playAction((db, now, viewer) => removeTeamAction(db, now, viewer, data)),
+  );
+
+/** The builder for one of the viewer's teams, by slot (M6 Task 7). */
+export const getBuilder = createServerFn({ method: "GET" })
+  .validator(getBuilderInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => builderForSlot(db, now, viewer, data)),
+  );
+
+/** "Save team": a new lineup version; `staleBase` when another came first. */
+export const saveTeam = createServerFn({ method: "POST" })
+  .validator(saveTeamInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => saveTeamAction(db, now, viewer, data)),
   );
