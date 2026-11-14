@@ -11,6 +11,7 @@ import {
   makePipeline,
 } from "../../tests/helpers/pipeline-2026";
 import { readFixture } from "../../tests/helpers/fixtures";
+import { seedLeagueGames } from "../../tests/helpers/leagues-game";
 import {
   eventEntries,
   events,
@@ -495,6 +496,20 @@ describe("the sync_calendar handler", () => {
         { maxJobs: 5, leaseMs: 5 * MIN },
       );
     }
+
+    it("sync_calendar queues one identity_daily a day with two running games", async () => {
+      // Two games, in 2026 and 2025 (one game per season and type).
+      await seedLeagueGames(t.db, T0);
+      await t.db.update(games).set({ status: "running" });
+      expect(
+        await t.db.select().from(games).where(eq(games.status, "running")),
+      ).toHaveLength(2);
+      await syncKeeping(T0);
+      await syncKeeping(new Date(T0.getTime() + 2 * HOUR));
+      expect((await daily()).map((j) => j.dedupeKey)).toEqual([
+        "identity_daily:2026-02-01",
+      ]);
+    });
 
     it("sync_calendar queues one identity_daily a day", async () => {
       await syncKeeping(T0);

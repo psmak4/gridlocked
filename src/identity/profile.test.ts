@@ -1,5 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedLeagueGames } from "../../tests/helpers/leagues-game";
 import { seedUser } from "../../tests/helpers/users";
@@ -13,6 +13,21 @@ import {
 import { newId } from "@/lib/ids";
 import { createTeam } from "@/game/teams";
 import { favoriteIsStale, updateProfile } from "./profile";
+
+// The real league sync, unless a test sets `syncFails` to make it throw.
+const sync = vi.hoisted(() => ({ fails: false }));
+vi.mock("@/leagues/leagues", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/leagues/leagues")>();
+  return {
+    ...real,
+    syncAutoLeagues: async (
+      ...args: Parameters<typeof real.syncAutoLeagues>
+    ) => {
+      if (sync.fails) throw new Error("sync failed");
+      return real.syncAutoLeagues(...args);
+    },
+  };
+});
 
 const NOW = new Date("2026-02-01T09:00:00.000Z");
 const LATER = new Date("2026-02-01T10:00:00.000Z");
@@ -51,6 +66,7 @@ describe("the profile (DM 6.2, 6.11)", () => {
     });
   });
   afterEach(async () => {
+    sync.fails = false;
     await t.close();
   });
 
@@ -163,12 +179,47 @@ describe("the profile (DM 6.2, 6.11)", () => {
     expect(await profile()).toEqual(before);
   });
 
-  it("a game that isn't running keeps its memberships", async () => {
+  it("changing favorite team moves auto leagues in an open game", async () => {
+    // A game is open, not running, until its first lock (M6 plan, finding 2).
     const otherTeam = await createTeam(t.db, NOW, {
       gameId: seeded.otherGameId,
       userId,
       name: "Other",
     });
+    await save({ countryCode: "GB" });
+    const rows = await t.db
+      .select({ kind: leagues.kind, countryCode: leagues.countryCode })
+      .from(leagueMemberships)
+      .innerJoin(leagues, eq(leagues.id, leagueMemberships.leagueId))
+      .where(
+        and(
+          eq(leagueMemberships.teamId, otherTeam),
+          isNull(leagueMemberships.leftAt),
+        ),
+      );
+    expect(rows).toEqual([{ kind: "auto_country", countryCode: "GB" }]);
+  });
+
+  it("a failing syncAutoLeagues rolls the profile change back", async () => {
+    const before = await profile();
+    sync.fails = true;
+    await expect(
+      save({ favoriteConstructorId: seeded.constructorIds[0]! }),
+    ).rejects.toThrow("sync failed");
+    expect(await profile()).toEqual(before);
+    expect(await autoLeagues()).toEqual([]);
+  });
+
+  it("a completed game keeps its memberships", async () => {
+    const otherTeam = await createTeam(t.db, NOW, {
+      gameId: seeded.otherGameId,
+      userId,
+      name: "Other",
+    });
+    await t.db
+      .update(games)
+      .set({ status: "completed" })
+      .where(eq(games.id, seeded.otherGameId));
     await save({
       favoriteConstructorId: seeded.constructorIds[0]!,
       countryCode: "GB",
