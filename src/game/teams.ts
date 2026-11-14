@@ -22,6 +22,28 @@ function cleanName(name: string): string {
 }
 
 /**
+ * How many teams one user may have in a game: the `teamsPerUser` of its
+ * latest ruleset version that isn't a correction.
+ */
+export async function teamsPerUser(db: Db, gameId: string): Promise<number> {
+  const [version] = await db
+    .select({ params: rulesetVersions.params })
+    .from(rulesetVersions)
+    .where(
+      and(
+        eq(rulesetVersions.gameId, gameId),
+        eq(rulesetVersions.isCorrection, false),
+      ),
+    )
+    .orderBy(desc(rulesetVersions.version))
+    .limit(1);
+  if (!version) {
+    throw new Error(`teamsPerUser: game ${gameId} has no ruleset version`);
+  }
+  return rulesetParamsSchema.parse(version.params).teamsPerUser;
+}
+
+/**
  * Creates an `active` team for a user and returns its ID. It takes `slot`, or
  * the lowest free one, up to the `teamsPerUser` of the game's latest version
  * that isn't a correction. A retired team still holds its slot. Refused unless the
@@ -47,23 +69,7 @@ export async function createTeam(
       throw new GameError("game_not_open", "teams can't be created yet");
     }
 
-    const [version] = await tx
-      .select({ params: rulesetVersions.params })
-      .from(rulesetVersions)
-      .where(
-        and(
-          eq(rulesetVersions.gameId, input.gameId),
-          eq(rulesetVersions.isCorrection, false),
-        ),
-      )
-      .orderBy(desc(rulesetVersions.version))
-      .limit(1);
-    if (!version) {
-      throw new Error(
-        `createTeam: game ${input.gameId} has no ruleset version`,
-      );
-    }
-    const { teamsPerUser } = rulesetParamsSchema.parse(version.params);
+    const perUser = await teamsPerUser(tx, input.gameId);
 
     const taken = new Set(
       (
@@ -77,7 +83,7 @@ export async function createTeam(
     );
     let slot = input.slot;
     if (slot === undefined) {
-      for (let s = 1; s <= teamsPerUser; s++) {
+      for (let s = 1; s <= perUser; s++) {
         if (!taken.has(s)) {
           slot = s;
           break;
@@ -88,7 +94,7 @@ export async function createTeam(
       slot === undefined ||
       !Number.isInteger(slot) ||
       slot < 1 ||
-      slot > teamsPerUser ||
+      slot > perUser ||
       taken.has(slot)
     ) {
       throw new GameError("no_free_slot", "that team slot is not available");

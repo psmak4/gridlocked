@@ -47,6 +47,8 @@ import {
   trustWords,
   type TrustWords,
 } from "@/lib/settings-words";
+import { currentGame } from "@/play/current-game";
+import { myTeams } from "@/play/teams";
 import { getSetting } from "@/settings";
 import {
   countryChoices,
@@ -138,6 +140,8 @@ export type ProfileState = {
     driver: string | null;
     country: string | null;
   };
+  /** The viewer's teams in the current game, by slot. */
+  teams: { slot: number; name: string; status: "active" | "retired" }[];
 };
 
 const regionNames = new Intl.DisplayNames(["en"], {
@@ -210,7 +214,19 @@ export async function profileState(
       v.profile.timezone,
     ),
     favorites: await favoriteNames(db, v.profile),
+    teams: await profileTeams(db, v.userId),
   };
+}
+
+async function profileTeams(
+  db: Db,
+  userId: string,
+): Promise<ProfileState["teams"]> {
+  const game = await currentGame(db);
+  if (!game) return [];
+  return (await myTeams(db, { gameId: game.id, userId })).map(
+    ({ slot, name, status }) => ({ slot, name, status }),
+  );
 }
 
 // --- Settings overview ------------------------------------------------------

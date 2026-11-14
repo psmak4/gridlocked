@@ -43,6 +43,7 @@ import { Route as ApiTestImpersonateRouteImport } from './routes/api/test.impers
 import { Route as ApiTestMakeAdminRouteImport } from './routes/api/test.make-admin'
 import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exports'
 import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
+import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -214,6 +215,11 @@ const SettingsDeleteConfirmRoute = SettingsDeleteConfirmRouteImport.update({
   path: '/settings/delete/confirm',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TeamSlotIndexRoute = TeamSlotIndexRouteImport.update({
+  id: '/team/$slot/',
+  path: '/team/$slot/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -250,6 +256,7 @@ export interface FileRoutesByFullPath {
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
+  '/team/$slot/': typeof TeamSlotIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -286,6 +293,7 @@ export interface FileRoutesByTo {
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
+  '/team/$slot': typeof TeamSlotIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -323,6 +331,7 @@ export interface FileRoutesById {
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
   '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
+  '/team/$slot/': typeof TeamSlotIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -361,6 +370,7 @@ export interface FileRouteTypes {
     | '/api/test/make-admin'
     | '/api/test/run-exports'
     | '/settings/delete/confirm'
+    | '/team/$slot/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -397,6 +407,7 @@ export interface FileRouteTypes {
     | '/api/test/make-admin'
     | '/api/test/run-exports'
     | '/settings/delete/confirm'
+    | '/team/$slot'
   id:
     | '__root__'
     | '/'
@@ -433,6 +444,7 @@ export interface FileRouteTypes {
     | '/api/test/make-admin'
     | '/api/test/run-exports'
     | '/settings/delete_/confirm'
+    | '/team/$slot/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -470,6 +482,7 @@ export interface RootRouteChildren {
   ApiTestMakeAdminRoute: typeof ApiTestMakeAdminRoute
   ApiTestRunExportsRoute: typeof ApiTestRunExportsRoute
   SettingsDeleteConfirmRoute: typeof SettingsDeleteConfirmRoute
+  TeamSlotIndexRoute: typeof TeamSlotIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -712,6 +725,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDeleteConfirmRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/team/$slot/': {
+      id: '/team/$slot/'
+      path: '/team/$slot'
+      fullPath: '/team/$slot/'
+      preLoaderRoute: typeof TeamSlotIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -750,6 +770,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTestMakeAdminRoute: ApiTestMakeAdminRoute,
   ApiTestRunExportsRoute: ApiTestRunExportsRoute,
   SettingsDeleteConfirmRoute: SettingsDeleteConfirmRoute,
+  TeamSlotIndexRoute: TeamSlotIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -162,19 +162,39 @@ export async function updateProfile(
     if (!leaguesChanged) return;
 
     for (const game of await gamesForAutoLeagues(t)) {
-      const constructorId =
-        after.favoriteConstructorId !== null &&
-        (await gameHasConstructor(t, game.id, after.favoriteConstructorId))
-          ? after.favoriteConstructorId
-          : null;
-      await syncAutoLeagues(t, now, {
-        userId: input.userId,
-        gameId: game.id,
-        constructorId,
-        driverId: after.favoriteDriverId,
-        countryCode: after.countryCode,
-      });
+      await syncProfileAutoLeagues(t, now, { gameId: game.id, profile: after });
     }
+  });
+}
+
+/**
+ * Moves a user's active teams in one game into the auto leagues their
+ * profile's favorites and country call for (`syncAutoLeagues`). A favorite
+ * constructor the game doesn't have gets no constructor league there.
+ */
+export async function syncProfileAutoLeagues(
+  db: Db,
+  now: Date,
+  input: {
+    gameId: string;
+    profile: Pick<
+      typeof profiles.$inferSelect,
+      "userId" | "favoriteConstructorId" | "favoriteDriverId" | "countryCode"
+    >;
+  },
+): Promise<void> {
+  const { gameId, profile } = input;
+  const constructorId =
+    profile.favoriteConstructorId !== null &&
+    (await gameHasConstructor(db, gameId, profile.favoriteConstructorId))
+      ? profile.favoriteConstructorId
+      : null;
+  await syncAutoLeagues(db, now, {
+    userId: profile.userId,
+    gameId,
+    constructorId,
+    driverId: profile.favoriteDriverId,
+    countryCode: profile.countryCode,
   });
 }
 

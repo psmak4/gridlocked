@@ -23,7 +23,7 @@ function initials(username: string): string {
 
 /**
  * The profile (wave 4): the username, the trust level in plain words,
- * favorites and the join date. Teams and recent posts join in M6 and M7.
+ * favorites, the join date and the teams (M6). Recent posts join in M7.
  */
 function Profile() {
   const profile = Route.useLoaderData();
@@ -126,6 +126,60 @@ function Profile() {
             .
           </p>
         )}
+
+        <section
+          aria-labelledby="profile-teams"
+          className="flex flex-col gap-space-2"
+        >
+          <h2
+            id="profile-teams"
+            className="m-0 text-[12px] font-bold tracking-[0.12em] text-ink-muted"
+          >
+            TEAMS
+          </h2>
+          {profile.teams.length > 0 ? (
+            <ul className="m-0 flex list-none flex-col gap-space-2 p-0">
+              {profile.teams.map((t) => (
+                <li key={t.slot}>
+                  {t.status === "active" ? (
+                    <a
+                      href={`/team/${t.slot}`}
+                      className="flex min-h-[44px] items-center justify-between gap-space-3 rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                    >
+                      <span className="min-w-0 font-bold break-words">
+                        {t.name}
+                      </span>
+                      <span className="shrink-0 text-[14px] text-ink-muted">
+                        Team {t.slot}
+                      </span>
+                    </a>
+                  ) : (
+                    <span className="flex min-h-[44px] items-center justify-between gap-space-3 rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink-muted">
+                      <span className="min-w-0 font-bold break-words">
+                        {t.name}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-space-2 text-[14px]">
+                        Team {t.slot}
+                        <Badge tone="neutral">Retired</Badge>
+                      </span>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[14px] leading-[20px] text-ink-muted">
+              No team yet.{" "}
+              <a
+                href="/team"
+                className="font-bold text-heat-text underline-offset-2 hover:underline"
+              >
+                Create a team
+              </a>
+              .
+            </p>
+          )}
+        </section>
       </Body>
     </Screen>
   );
