@@ -22,6 +22,8 @@ test.describe("hydration", () => {
     await page.goto("/components");
     const toast = page.getByRole("status").filter({ hasText: "Team saved" });
     await expect(toast).toBeVisible();
+    // Its timer starts once the page has hydrated.
+    await expect(page.getByRole("button", { name: "Save team" })).toBeEnabled();
     await expect(toast).toBeHidden({ timeout: 8000 });
   });
 });

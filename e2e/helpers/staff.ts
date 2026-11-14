@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
-import { ORIGIN } from "./accounts";
+import { hydrated, ORIGIN } from "./accounts";
 
 /** Local-only hook: makes the account with this address an admin. */
 export async function makeAdmin(request: APIRequestContext, email: string) {
@@ -59,6 +59,9 @@ export async function setUpTotp(
 ): Promise<{ setupKey: string; backupCodes: string[] }> {
   await page.goto("/settings/security");
   const section = page.getByRole("region", { name: "Two-step sign-in" });
+  await hydrated(
+    section.getByRole("button", { name: "Set up an authenticator app" }),
+  );
   await section.getByLabel("Your password").fill(password);
   await section
     .getByRole("button", { name: "Set up an authenticator app" })

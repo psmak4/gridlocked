@@ -7,9 +7,11 @@ import {
 import {
   createAccount,
   heading,
+  hydrated,
   ownAddress,
   postFromPage,
   signIn,
+  signInButton,
 } from "./helpers/accounts";
 import { makeAdmin, setUpTotp, totpCode } from "./helpers/staff";
 
@@ -46,6 +48,7 @@ test.describe("staff access", () => {
     await expect(section.getByTestId("backup-codes")).toHaveCount(0);
 
     // A kept backup code unlocks staff tools for this session.
+    await hydrated(section.getByRole("button", { name: "Unlock staff tools" }));
     await section
       .getByLabel("Code from your app, or a backup code")
       .fill(backupCodes[0]!);
@@ -89,6 +92,7 @@ test.describe("staff access", () => {
     account: { email: string; password: string },
   ) {
     await page.goto("/sign-in");
+    await hydrated(signInButton(page));
     await page.getByLabel("Email").fill(account.email);
     await page.getByLabel("Password").fill(account.password);
     await page.getByLabel("Password").press("Enter");

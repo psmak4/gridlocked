@@ -5,12 +5,15 @@ import {
   emailTo,
   expectNoSeriousAxeViolations,
   heading,
+  hydrated,
   linkIn,
   newUsername,
   ORIGIN,
   ownAddress,
+  pageHydrated,
   postFromPage,
   signIn,
+  signInButton,
   verifyByEmail,
 } from "./helpers/accounts";
 
@@ -61,6 +64,7 @@ test.describe("settings", () => {
     await page.getByRole("link", { name: /^Username/ }).click();
     await expect(heading(page)).toHaveText("Username");
     await expect(page.getByText("You can change it now.")).toBeVisible();
+    await hydrated(page.getByRole("button", { name: "Change username" }));
 
     const first = newUsername();
     await page.getByLabel("New username").fill(first);
@@ -113,6 +117,7 @@ test.describe("settings", () => {
 
     await page.getByRole("link", { name: /^Favorites/ }).click();
     await expect(heading(page)).toHaveText("Favorites");
+    await hydrated(page.getByRole("button", { name: "Save" }));
     await page.getByLabel("Your country (optional)").selectOption("IT");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(
@@ -213,6 +218,7 @@ test.describe("settings", () => {
 
     const button = page.getByRole("button", { name: "Delete my account" });
     const field = page.getByLabel("Type your username to confirm");
+    await pageHydrated(page);
     await expect(button).toBeDisabled();
     await field.fill("someone_else");
     await expect(button).toBeDisabled();
@@ -240,6 +246,7 @@ test.describe("settings", () => {
     await expect(heading(page)).toHaveText("That link has expired");
 
     await page.goto("/sign-in");
+    await hydrated(signInButton(page));
     await page.getByLabel("Email").fill(account.email);
     await page.getByLabel("Password").fill(account.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -278,6 +285,7 @@ test.describe("settings", () => {
       "href",
       "/welcome",
     );
+    await pageHydrated(page);
     await page
       .getByLabel("Type your username to confirm")
       .fill(account.username);

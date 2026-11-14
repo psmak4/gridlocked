@@ -9,6 +9,7 @@ import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
 import { ltree } from "@electric-sql/pglite/contrib/ltree";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "@/db/schema";
@@ -51,11 +52,25 @@ export const localExportStore: ExportStore = {
   },
 };
 
+const migrationsFolder = () => path.join(process.cwd(), "src/db/migrations");
+
 export async function localDb(): Promise<ServerDb> {
   const client = new PGlite({ extensions: { btree_gist, ltree } });
   const db = drizzle(client, { schema });
-  await migrate(db, {
-    migrationsFolder: path.join(process.cwd(), "src/db/migrations"),
-  });
+  await migrate(db, { migrationsFolder: migrationsFolder() });
   return db as unknown as ServerDb;
+}
+
+/**
+ * Empties the local database back to a fresh migrate: every table, accounts
+ * included, and the migrations' own rows put back. The fantasy e2e server
+ * calls it before each seed (`/api/test/game`), on the same handle.
+ */
+export async function resetLocalDb(db: ServerDb): Promise<void> {
+  await db.execute(sql`drop schema if exists drizzle cascade`);
+  await db.execute(sql`drop schema public cascade`);
+  await db.execute(sql`create schema public`);
+  await migrate(db as unknown as Parameters<typeof migrate>[0], {
+    migrationsFolder: migrationsFolder(),
+  });
 }
