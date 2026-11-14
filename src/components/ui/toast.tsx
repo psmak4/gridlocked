@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type FocusEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,7 @@ type ToastProps = {
   children?: ReactNode;
   actionLabel?: string;
   onAction?: () => void;
-  /** Called after 4 seconds, unless the toast is focused or hovered. */
+  /** Called after 4 seconds, unless the toast is focused or hovered with a mouse. */
   onDismiss?: () => void;
   className?: string;
 };
@@ -44,6 +45,25 @@ function Toast({
     return () => clearTimeout(timer);
   }, [held, hasDismiss]);
 
+  // A focus pause ends when the window loses focus: the button keeps focus
+  // while the person is in another app, and the toast should still go. When
+  // the window comes back, the browser focuses the button again.
+  useEffect(() => {
+    if (!focused) return;
+    const onWindowBlur = () => setFocused(false);
+    window.addEventListener("blur", onWindowBlur);
+    return () => window.removeEventListener("blur", onWindowBlur);
+  }, [focused]);
+
+  // Only a mouse hovers. A tap on a touch screen also sends pointerenter, and
+  // no pointerleave until the next tap elsewhere, so it would hold the toast.
+  const onPointerEnter = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse") setHovered(true);
+  };
+  const onPointerLeave = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse") setHovered(false);
+  };
+
   const onBlur = (event: FocusEvent<HTMLDivElement>) => {
     // Blur bubbles: only focus leaving the toast ends the pause.
     if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
@@ -53,8 +73,8 @@ function Toast({
     <div
       role="status"
       data-slot="toast"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
       onFocus={() => setFocused(true)}
       onBlur={onBlur}
       className={cn(

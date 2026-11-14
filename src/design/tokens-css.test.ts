@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { palette, type ColorToken } from "./tokens";
+import { palette, teamTint, type ColorToken } from "./tokens";
 
 // Strip comments and normalize whitespace after commas, so Prettier's line
 // breaks in selector lists don't matter.
@@ -75,5 +75,18 @@ describe("tokens.css matches tokens.ts", () => {
     ]) {
       expect(root.has(key), key).toBe(true);
     }
+  });
+
+  it("sets --team-tint to teamTint's share in each theme block", () => {
+    const percent = (share: number) => `${Math.round(share * 100)}%`;
+    expect(
+      declarationsOf(':root, [data-theme="light"]').get("--team-tint"),
+    ).toBe(percent(teamTint.light));
+    expect(declarationsOf('[data-theme="dark"]').get("--team-tint")).toBe(
+      percent(teamTint.dark),
+    );
+    expect(
+      declarationsOf(':root:not([data-theme="light"])').get("--team-tint"),
+    ).toBe(percent(teamTint.dark));
   });
 });
