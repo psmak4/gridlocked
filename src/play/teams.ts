@@ -129,7 +129,7 @@ export function createTeamAction(
 /** The viewer's own team, or `team_not_owned`. */
 export async function ownTeam(db: Db, userId: string, teamId: string) {
   const [team] = await db
-    .select({ status: teams.status })
+    .select({ status: teams.status, gameId: teams.gameId })
     .from(teams)
     .where(and(eq(teams.id, teamId), eq(teams.userId, userId)));
   if (!team) throw new GameError("team_not_owned", "not your team");
