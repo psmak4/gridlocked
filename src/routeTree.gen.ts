@@ -17,6 +17,7 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
+import { Route as LeaguesIndexRouteImport } from './routes/leagues.index'
 import { Route as LegalKindRouteImport } from './routes/legal.$kind'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsDataRouteImport } from './routes/settings.data'
@@ -27,6 +28,7 @@ import { Route as SettingsSignInRouteImport } from './routes/settings.sign-in'
 import { Route as SettingsUsernameRouteImport } from './routes/settings.username'
 import { Route as SignUpIndexRouteImport } from './routes/sign-up.index'
 import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
+import { Route as TeamIndexRouteImport } from './routes/team.index'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
 import { Route as WelcomeFavoritesRouteImport } from './routes/welcome.favorites'
 import { Route as WelcomeSpoilersRouteImport } from './routes/welcome.spoilers'
@@ -82,6 +84,11 @@ const DevComponentsRoute = DevComponentsRouteImport.update({
   path: '/components',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LeaguesIndexRoute = LeaguesIndexRouteImport.update({
+  id: '/leagues/',
+  path: '/leagues/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LegalKindRoute = LegalKindRouteImport.update({
   id: '/legal/$kind',
   path: '/legal/$kind',
@@ -130,6 +137,11 @@ const SignUpIndexRoute = SignUpIndexRouteImport.update({
 const SignUpEmailRoute = SignUpEmailRouteImport.update({
   id: '/sign-up/email',
   path: '/sign-up/email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeamIndexRoute = TeamIndexRouteImport.update({
+  id: '/team/',
+  path: '/team/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WelcomeIndexRoute = WelcomeIndexRouteImport.update({
@@ -222,8 +234,10 @@ export interface FileRoutesByFullPath {
   '/sign-up/email': typeof SignUpEmailRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/leagues/': typeof LeaguesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
+  '/team/': typeof TeamIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
@@ -256,8 +270,10 @@ export interface FileRoutesByTo {
   '/sign-up/email': typeof SignUpEmailRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/leagues': typeof LeaguesIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/sign-up': typeof SignUpIndexRoute
+  '/team': typeof TeamIndexRoute
   '/welcome': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
@@ -291,8 +307,10 @@ export interface FileRoutesById {
   '/sign-up/email': typeof SignUpEmailRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/leagues/': typeof LeaguesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
+  '/team/': typeof TeamIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
@@ -327,8 +345,10 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/leagues/'
     | '/settings/'
     | '/sign-up/'
+    | '/team/'
     | '/welcome/'
     | '/api/auth/$'
     | '/api/test/ban'
@@ -361,8 +381,10 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/leagues'
     | '/settings'
     | '/sign-up'
+    | '/team'
     | '/welcome'
     | '/api/auth/$'
     | '/api/test/ban'
@@ -395,8 +417,10 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/leagues/'
     | '/settings/'
     | '/sign-up/'
+    | '/team/'
     | '/welcome/'
     | '/api/auth/$'
     | '/api/test/ban'
@@ -430,8 +454,10 @@ export interface RootRouteChildren {
   SignUpEmailRoute: typeof SignUpEmailRoute
   WelcomeFavoritesRoute: typeof WelcomeFavoritesRoute
   WelcomeSpoilersRoute: typeof WelcomeSpoilersRoute
+  LeaguesIndexRoute: typeof LeaguesIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   SignUpIndexRoute: typeof SignUpIndexRoute
+  TeamIndexRoute: typeof TeamIndexRoute
   WelcomeIndexRoute: typeof WelcomeIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiTestBanRoute: typeof ApiTestBanRoute
@@ -504,6 +530,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevComponentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/leagues/': {
+      id: '/leagues/'
+      path: '/leagues'
+      fullPath: '/leagues/'
+      preLoaderRoute: typeof LeaguesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/legal/$kind': {
       id: '/legal/$kind'
       path: '/legal/$kind'
@@ -572,6 +605,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-up/email'
       fullPath: '/sign-up/email'
       preLoaderRoute: typeof SignUpEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/team/': {
+      id: '/team/'
+      path: '/team'
+      fullPath: '/team/'
+      preLoaderRoute: typeof TeamIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/welcome/': {
@@ -694,8 +734,10 @@ const rootRouteChildren: RootRouteChildren = {
   SignUpEmailRoute: SignUpEmailRoute,
   WelcomeFavoritesRoute: WelcomeFavoritesRoute,
   WelcomeSpoilersRoute: WelcomeSpoilersRoute,
+  LeaguesIndexRoute: LeaguesIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   SignUpIndexRoute: SignUpIndexRoute,
+  TeamIndexRoute: TeamIndexRoute,
   WelcomeIndexRoute: WelcomeIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiTestBanRoute: ApiTestBanRoute,

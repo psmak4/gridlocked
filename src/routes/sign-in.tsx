@@ -16,16 +16,22 @@ import { CAPTCHA_HEADER, Turnstile } from "@/components/turnstile";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { authClient } from "@/identity/auth-client";
+import { safeNext } from "@/lib/auth-gate";
 import { checkEmailState } from "@/lib/check-email-state";
 import { getSignInOptions } from "@/server/account";
 
-type SignInSearch = { mode?: "link"; changed?: "1" };
+/** `next`: where to go back to after signing in (a page that asked first). */
+type SignInSearch = { mode?: "link"; changed?: "1"; next?: string };
 
 export const Route = createFileRoute("/sign-in")({
-  validateSearch: (search: Record<string, unknown>): SignInSearch => ({
-    ...(search.mode === "link" ? { mode: "link" as const } : {}),
-    ...(search.changed === "1" ? { changed: "1" as const } : {}),
-  }),
+  validateSearch: (search: Record<string, unknown>): SignInSearch => {
+    const next = safeNext(search.next);
+    return {
+      ...(search.mode === "link" ? { mode: "link" as const } : {}),
+      ...(search.changed === "1" ? { changed: "1" as const } : {}),
+      ...(next ? { next } : {}),
+    };
+  },
   head: () => ({ meta: [{ title: "Sign in · Gridlocked" }] }),
   loader: () => getSignInOptions(),
   component: SignIn,
@@ -183,7 +189,8 @@ function TwoStepSignIn({
 }
 
 function SignIn() {
-  const { mode, changed } = Route.useSearch();
+  const { mode, changed, next } = Route.useSearch();
+  const back = next ?? "/";
   const { discord } = Route.useLoaderData();
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -213,7 +220,7 @@ function SignIn() {
       const { error } = await authClient.signIn.magicLink(
         {
           email: email.trim(),
-          callbackURL: "/",
+          callbackURL: back,
           newUserCallbackURL: "/welcome",
           errorCallbackURL: "/auth-error",
         },
@@ -251,14 +258,14 @@ function SignIn() {
       setTwoStep(true);
       return;
     }
-    await router.navigate({ to: "/" });
+    await router.navigate({ href: back });
   }
 
   if (twoStep) {
     return (
       <TwoStepSignIn
         // Where the password sign-in would have gone.
-        onDone={() => router.navigate({ to: "/" })}
+        onDone={() => router.navigate({ href: back })}
         onExpired={(text) => {
           setTwoStep(false);
           setPassword("");
@@ -291,7 +298,7 @@ function SignIn() {
               it starts your account.
             </p>
           ) : discord ? (
-            <DiscordButton />
+            <DiscordButton next={back} />
           ) : null}
           <TextField
             id="email"
@@ -324,7 +331,7 @@ function SignIn() {
                 Forgot your password?
               </a>
               <a
-                href="/sign-in?mode=link"
+                href={`/sign-in?mode=link${next ? `&next=${encodeURIComponent(next)}` : ""}`}
                 className={`${linkClass} inline-flex min-h-[44px] items-center text-[16px]`}
               >
                 Email me a sign-in link

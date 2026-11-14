@@ -6,6 +6,9 @@ import { expect, type APIRequestContext } from "@playwright/test";
 // seed the recorded 2026 game and move the simulated clock on a replay-mode
 // server. Only one spec runs at a time against it, since there is one clock.
 
+/** The fantasy project's server (playwright.config). */
+export const FANTASY_ORIGIN = "http://localhost:3101";
+
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
 
@@ -92,6 +95,21 @@ export async function seedGame(
   });
   expect(response.status(), await response.text()).toBe(200);
   return (await response.json()) as { gameId: string };
+}
+
+/**
+ * Resets the local database with no game at all, and sets the simulated
+ * clock to `at`: the site before a game opens.
+ */
+export async function clearGame(
+  request: APIRequestContext,
+  at: string,
+): Promise<void> {
+  const response = await request.delete("/api/test/game", {
+    data: { at },
+    ...SLOW,
+  });
+  expect(response.status(), await response.text()).toBe(200);
 }
 
 /**

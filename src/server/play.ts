@@ -12,7 +12,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import type { Viewer } from "@/identity/viewer";
-import type { ServerDb } from "./db";
+import { currentGame, type CurrentGame } from "@/play/current-game";
+import { withDb, type ServerDb } from "./db";
 import {
   markSessionsWatchedAction,
   markSessionsWatchedInput,
@@ -28,7 +29,10 @@ import { getViewer, withRequestNow } from "./session";
  * turned into `{ ok: false, error }`. The guard (`requireComplete` for a
  * read, `requireWritable` for a write) is the action's own first line.
  */
-export async function playAction<T>(
+// Not exported: only the handlers below use it, so the client build drops it
+// with them (a route's import of this file would otherwise pull in
+// `@tanstack/react-start/server`).
+async function playAction<T>(
   fn: (db: ServerDb, now: Date, viewer: Viewer | null) => Promise<T>,
 ): Promise<T | Refusal> {
   setResponseHeader("Cache-Control", "private, no-store");
@@ -44,3 +48,25 @@ export const markSessionsWatched = createServerFn({ method: "POST" })
       markSessionsWatchedAction(db, now, viewer, data),
     ),
   );
+
+/** Each request's answer, so the loaders of one page read it once. */
+const currentGameByRequest = new WeakMap<
+  Request,
+  Promise<CurrentGame | null>
+>();
+
+/**
+ * The season's game, or null before it opens (`<NoGame />`). The same for
+ * everyone, so it is read without the viewer, once per request.
+ */
+export const getCurrentGame = createServerFn({ method: "GET" }).handler(
+  (): Promise<CurrentGame | null> => {
+    const request = getRequest();
+    let found = currentGameByRequest.get(request);
+    if (!found) {
+      found = withDb((db) => currentGame(db));
+      currentGameByRequest.set(request, found);
+    }
+    return found;
+  },
+);
