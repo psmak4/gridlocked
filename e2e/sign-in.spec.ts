@@ -3,10 +3,12 @@ import {
   createAccount,
   emailTo,
   heading,
+  hydrated,
   linkIn,
   newEmail,
   ORIGIN,
   ownAddress,
+  signInButton,
 } from "./helpers/accounts";
 
 test.beforeEach(async ({ page }) => {
@@ -21,6 +23,7 @@ test.describe("sign in", () => {
     const { email, username, password } = await createAccount(request);
     await page.goto("/sign-in");
     await expect(heading(page)).toHaveText("Sign in");
+    await hydrated(signInButton(page));
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -35,6 +38,7 @@ test.describe("sign in", () => {
   test("a wrong password says so plainly", async ({ page, request }) => {
     const { email } = await createAccount(request);
     await page.goto("/sign-in");
+    await hydrated(signInButton(page));
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill("not the password");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -54,6 +58,7 @@ test.describe("sign in", () => {
     await page.goto("/sign-in");
     await page.getByRole("link", { name: "Forgot your password?" }).click();
     await expect(heading(page)).toHaveText("Reset your password");
+    await hydrated(page.getByRole("button", { name: "Send reset link" }));
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Send reset link" }).click();
     await expect(heading(page)).toHaveText("Check your email");
@@ -62,6 +67,7 @@ test.describe("sign in", () => {
     await page.goto(link);
     await expect(page).toHaveURL(/\/reset-password\?token=/);
     await expect(heading(page)).toHaveText("Choose a new password");
+    await hydrated(page.getByRole("button", { name: "Save password" }));
     await page.getByLabel("New password").fill(fresh);
     await page.getByRole("button", { name: "Save password" }).click();
     await expect(page).toHaveURL(/\/sign-in/);
@@ -100,6 +106,7 @@ test.describe("sign in", () => {
     expect(banned.status()).toBe(200);
 
     await page.goto("/sign-in");
+    await hydrated(signInButton(page));
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -113,6 +120,7 @@ test.describe("sign in", () => {
     page,
   }) => {
     await page.goto("/sign-in?mode=link");
+    await hydrated(page.getByRole("button", { name: "Send link" }));
     await page.getByLabel("Email").fill(newEmail());
     await page.getByRole("button", { name: "Send link" }).click();
     await expect(heading(page)).toHaveText("Check your email");
@@ -121,9 +129,7 @@ test.describe("sign in", () => {
   test("each form works with the keyboard alone", async ({ page, request }) => {
     const { email, password } = await createAccount(request);
     await page.goto("/sign-in");
-    await expect(
-      page.getByRole("button", { name: "Sign in", exact: true }),
-    ).toBeEnabled();
+    await hydrated(signInButton(page));
     await page.getByLabel("Email").focus();
     await page.keyboard.type(email);
     await page.keyboard.press("Tab");
@@ -134,9 +140,7 @@ test.describe("sign in", () => {
     // The reset form.
     await page.context().clearCookies();
     await page.goto("/reset-password");
-    await expect(
-      page.getByRole("button", { name: "Send reset link" }),
-    ).toBeEnabled();
+    await hydrated(page.getByRole("button", { name: "Send reset link" }));
     await page.getByLabel("Email").focus();
     await page.keyboard.type(email);
     await page.keyboard.press("Enter");
@@ -161,6 +165,7 @@ test.describe("sign in", () => {
       data: { email, reason: "posting spam links" },
     });
     await page.goto("/sign-in?mode=link");
+    await hydrated(page.getByRole("button", { name: "Send link" }));
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Send link" }).click();
     await expect(heading(page)).toHaveText("Check your email");
@@ -177,6 +182,7 @@ test.describe("sign in", () => {
     // Someone signed in but unfinished is bounced from home to /welcome.
     const email = `e2e-${crypto.randomUUID()}@example.test`;
     await page.goto("/sign-in?mode=link");
+    await hydrated(page.getByRole("button", { name: "Send link" }));
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Send link" }).click();
     await expect(heading(page)).toHaveText("Check your email");

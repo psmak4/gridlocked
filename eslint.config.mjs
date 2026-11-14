@@ -131,6 +131,15 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // The fantasy e2e harness wires the replay to the providers, as the
+    // replay harness does. Local builds only (VITE_LOCAL_DB=1): the one file
+    // in src/server that may import src/providers.
+    files: ["src/server/test-game.ts"],
+    rules: {
+      "no-restricted-imports": "off",
+    },
+  },
+  {
     // The scoring engine is pure (HLD §5.6): rules and results in, lines out.
     // It never reads the database, the clock or the filesystem.
     files: ["src/scoring/**"],

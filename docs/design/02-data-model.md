@@ -1485,21 +1485,16 @@ The thread page replays the archive under the discussion. Removed messages aren'
 - Changing or removing a vote updates the post's and thread's counters in the same transaction.
 - **Reputation** is recomputed by a daily job from votes cast by TL1+ users only, so brand-new accounts can't farm or bomb it. It's stored on the profile (Part 6).
 
-### 5.7 `session_watch_marks` (spoiler state; decided, HLD §7.3; built in M6)
+### 5.7 `session_watch_marks` (spoiler state; decided, HLD §7.3)
 | Column | Type | Notes |
 |---|---|---|
-| user_id, session_id | composite PK | "I've watched this; show me everything". `user_id` FK → users and `session_id` FK → sessions, both `ON DELETE RESTRICT` |
-| marked_at | timestamptz | The first mark. Marking again changes nothing (`ON CONFLICT DO NOTHING`) |
+| user_id, session_id | composite PK | "I've watched this; show me everything" |
+| marked_at | timestamptz | |
 
 **A session is revealed for a user if** they've marked it, **or** its spoiler window (session start + 7 days, decided) has ended, **or** they've turned spoiler protection off in their profile (Part 6). It's checked in one batched lookup for every session that appears on a page.
 
-- **Logged-out visitors** keep their reveal choice in the browser (decided). Until M7 adds that toggle, a logged-out visitor sees a session once its window has ended.
-- **Fantasy scores and standings** use the same check, with `points_by_session` (4.4). So do price changes, which give a race away (M6 plan, decision 4).
-- **Built in M6** (`src/spoilers/reveal.ts`), ahead of the rest of Part 5, so fantasy scores can wait for "Mark as watched" (M6 plan, decision 1). M7's threads and chat use the same table and check:
-  - `isRevealed({ sessionStart, now, watched, protection })`, pure. A session that hasn't started has nothing to hide, so it counts as revealed; from its start it's hidden until it's watched or `SPOILER_WINDOW_DAYS` (7) have passed.
-  - `revealedSessions(db, now, reader, sessionIds)`: the revealed ids, in one query for all of them. `reader` is `{ userId, spoilerProtection }`, or null for a logged-out visitor. An id that isn't a session is never revealed.
-  - `markWatched(db, now, { userId, sessionIds })`, behind the `markSessionsWatched` server function (`requireWritable`, 1 to 10 ids). "Show it" isn't stored: it reveals one item until the page is left.
-  - Deletion removes the rows and the export lists them (`watched_sessions`; 6.7).
+- **Logged-out visitors** keep their reveal choice in the browser (decided).
+- **Fantasy scores and standings** use the same check, with `points_by_session` (4.4).
 
 ### 5.8 `reports` (flags from anyone)
 | Column | Type | Notes |
@@ -1832,19 +1827,18 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
 | export_url | text, nullable | Where the user downloads the export (added in M5) |
 | confirm_token_hash, confirm_expires_at | text, timestamptz, nullable | A deletion waits for the emailed confirmation link. Only the token's hash is kept (added in M5) |
 
-**The registry (built in M5).** `PERSONAL_DATA` in `src/identity/personal-data.ts` has one entry per user column: the table, the column, what deletion does (`delete`, `scrub`, `retire` or `keep`, with why) and the export section it feeds, if any. The export and the deletion both walk it, in its order. A test walks every table in the Drizzle schema (`getTableConfig`) and fails for any foreign key to `users` with no entry, so M7's tables can't be missed by either. M6 registered `session_watch_marks` (5.7). Two entries aren't foreign keys but are keyed by the address: `auth_verifications` and `email_outbox`.
+**The registry (built in M5).** `PERSONAL_DATA` in `src/identity/personal-data.ts` has one entry per user column: the table, the column, what deletion does (`delete`, `scrub`, `retire` or `keep`, with why) and the export section it feeds, if any. The export and the deletion both walk it, in its order. A test walks every table in the Drizzle schema (`getTableConfig`) and fails for any foreign key to `users` with no entry, so M7's tables can't be missed by either. Two entries aren't foreign keys but are keyed by the address: `auth_verifications` and `email_outbox`.
 
 **Export:** `requestExport` allows one open request per user and one a day (`export_pending`, `export_too_soon`); a request still open after a day counts as failed. It queues the `privacy_export` job, which builds one JSON file from the registry, stores it at `exports/<request id>.json` in the `exports` bucket (neon.ts), signs a 7-day download link, sets the request `completed` with `export_expires_at` and `export_url`, and emails the link (`export_ready`, an email row expiring within a day). The file has:
 - the account and profile, the sessions (times, IP and browser) and the sign-in methods (provider names, not tokens);
 - teams, with their lineups, chip plays and league memberships, and the leagues the user owns;
-- old usernames, legal acceptances, trust level changes (with the moderator's reason, not who made them; DM 6.5) and privacy requests;
-- the sessions they marked watched (`watched_sessions`: the event, the session's kind and sequence, and when; added in M6).
+- old usernames, legal acceptances, trust level changes (with the moderator's reason, not who made them; DM 6.5) and privacy requests.
 
 It never holds a token, hash, secret, password or two-factor data: every reader names its columns. A job for a deleted account stops and writes nothing. The job records `export_object_key` (always `exports/<request id>.json`) in its own committed write before it writes the file, so a run that dies after the write still leaves a row pointing at it. The daily `expireExports` step (`identity_daily`) deletes the file, by that key, once its 7 days are up, at the next run for a deleted account, and for a request that is `failed` or still open a day after it was asked for; then it clears the key and the link, so each request is swept once.
 
 Deleting an object doesn't erase it at once: Neon Object Storage soft-deletes it on the current branch, so it stays in the branch's history, as Postgres rows do in point-in-time history, for the branch's history window. Neither this document nor `neon.ts` sets that window, so it is the project's default.
 
-**Moves to M7, through the same registry:** posts, including revisions, and chat, including archived chat (5.5); votes, notifications, push subscriptions and notification preferences. Each table registers its user column, how deletion treats it and its export section.
+**Moves to M7, through the same registry:** posts, including revisions, and chat, including archived chat (5.5); votes, watch marks, notifications, push subscriptions and notification preferences. Each table registers its user column, how deletion treats it and its export section.
 
 It covers GDPR and CCPA access requests (HLD §13.6).
 
@@ -1856,7 +1850,7 @@ It covers GDPR and CCPA access requests (HLD §13.6).
    - the email becomes `deleted-<id>@deleted.invalid`, which keeps the email unique; name, username, display username, image and any ban are cleared, and the role becomes `user`;
    - profile fields go back to empty or their defaults, and `status = deleted`.
 3. **Game data:** the user's teams are retired and renamed "Deleted team", and every open league membership ends. Past lock records and standings keep them. Leagues they owned stay active with no owner until an admin reassigns them (4.5).
-4. **Personal leftovers removed:** pending email outbox rows, privacy request links and token hashes (the export file goes at the next daily run), and watch marks (5.7, since M6). M7 adds notifications, push subscriptions and notification preferences.
+4. **Personal leftovers removed:** pending email outbox rows, privacy request links and token hashes (the export file goes at the next daily run). M7 adds notifications, push subscriptions, notification preferences and watch marks.
 5. **What stays, tied to the tombstone ID:** legal acceptances, trust level changes (reason included), and staff columns (filter rules, settings, exceptions, overrides, reviews, the audit log). In M7: posts and chat (anonymized), votes (counted but never shown per user), and reports they filed. Moderation history about them stays for the 2-year retention period (5.10).
 6. Audit entry: `user.delete`, with the actor (the user, or a moderator with a reason, e.g. an under-16 account; a staff deletion must give one) and no address or name. M8 adds the rank rule: a moderator can't delete staff.
 

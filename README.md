@@ -35,6 +35,16 @@ Before the first `pnpm e2e`, install the browser once:
 pnpm exec playwright install chromium
 ```
 
+`pnpm e2e` runs two Playwright projects on the same `VITE_LOCAL_DB=1` build:
+
+- `chromium` (port 3100): everything outside `e2e/fantasy/`, on the system
+  clock;
+- `fantasy` (port 3101, `CLOCK_MODE=replay`): the specs in `e2e/fantasy/`, one
+  at a time. Each seeds the recorded 2026 game with `seedGame` and moves the
+  simulated clock with `moveClock` (`e2e/helpers/game.ts`), so the real lock,
+  scoring, finalize and price jobs run on recorded results. Run it alone with
+  `pnpm e2e --project=fantasy --workers=1`.
+
 ## Staging
 
 The results pipeline runs on the Neon project `gridlocked-staging` (branch

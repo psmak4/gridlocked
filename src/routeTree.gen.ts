@@ -33,8 +33,10 @@ import { Route as WelcomeSpoilersRouteImport } from './routes/welcome.spoilers'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiTestBanRouteImport } from './routes/api/test.ban'
 import { Route as ApiTestClearAcceptancesRouteImport } from './routes/api/test.clear-acceptances'
+import { Route as ApiTestClockRouteImport } from './routes/api/test.clock'
 import { Route as ApiTestEmailsRouteImport } from './routes/api/test.emails'
 import { Route as ApiTestExportFileRouteImport } from './routes/api/test.export-file'
+import { Route as ApiTestGameRouteImport } from './routes/api/test.game'
 import { Route as ApiTestImpersonateRouteImport } from './routes/api/test.impersonate'
 import { Route as ApiTestMakeAdminRouteImport } from './routes/api/test.make-admin'
 import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exports'
@@ -160,6 +162,11 @@ const ApiTestClearAcceptancesRoute = ApiTestClearAcceptancesRouteImport.update({
   path: '/api/test/clear-acceptances',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTestClockRoute = ApiTestClockRouteImport.update({
+  id: '/api/test/clock',
+  path: '/api/test/clock',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
   id: '/api/test/emails',
   path: '/api/test/emails',
@@ -168,6 +175,11 @@ const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
 const ApiTestExportFileRoute = ApiTestExportFileRouteImport.update({
   id: '/api/test/export-file',
   path: '/api/test/export-file',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestGameRoute = ApiTestGameRouteImport.update({
+  id: '/api/test/game',
+  path: '/api/test/game',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTestImpersonateRoute = ApiTestImpersonateRouteImport.update({
@@ -216,8 +228,10 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
+  '/api/test/clock': typeof ApiTestClockRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
+  '/api/test/game': typeof ApiTestGameRoute
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
@@ -248,8 +262,10 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
+  '/api/test/clock': typeof ApiTestClockRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
+  '/api/test/game': typeof ApiTestGameRoute
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
@@ -281,8 +297,10 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
+  '/api/test/clock': typeof ApiTestClockRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
+  '/api/test/game': typeof ApiTestGameRoute
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
@@ -315,8 +333,10 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
+    | '/api/test/clock'
     | '/api/test/emails'
     | '/api/test/export-file'
+    | '/api/test/game'
     | '/api/test/impersonate'
     | '/api/test/make-admin'
     | '/api/test/run-exports'
@@ -347,8 +367,10 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
+    | '/api/test/clock'
     | '/api/test/emails'
     | '/api/test/export-file'
+    | '/api/test/game'
     | '/api/test/impersonate'
     | '/api/test/make-admin'
     | '/api/test/run-exports'
@@ -379,8 +401,10 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
+    | '/api/test/clock'
     | '/api/test/emails'
     | '/api/test/export-file'
+    | '/api/test/game'
     | '/api/test/impersonate'
     | '/api/test/make-admin'
     | '/api/test/run-exports'
@@ -412,8 +436,10 @@ export interface RootRouteChildren {
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiTestBanRoute: typeof ApiTestBanRoute
   ApiTestClearAcceptancesRoute: typeof ApiTestClearAcceptancesRoute
+  ApiTestClockRoute: typeof ApiTestClockRoute
   ApiTestEmailsRoute: typeof ApiTestEmailsRoute
   ApiTestExportFileRoute: typeof ApiTestExportFileRoute
+  ApiTestGameRoute: typeof ApiTestGameRoute
   ApiTestImpersonateRoute: typeof ApiTestImpersonateRoute
   ApiTestMakeAdminRoute: typeof ApiTestMakeAdminRoute
   ApiTestRunExportsRoute: typeof ApiTestRunExportsRoute
@@ -590,6 +616,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTestClearAcceptancesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/test/clock': {
+      id: '/api/test/clock'
+      path: '/api/test/clock'
+      fullPath: '/api/test/clock'
+      preLoaderRoute: typeof ApiTestClockRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/test/emails': {
       id: '/api/test/emails'
       path: '/api/test/emails'
@@ -602,6 +635,13 @@ declare module '@tanstack/react-router' {
       path: '/api/test/export-file'
       fullPath: '/api/test/export-file'
       preLoaderRoute: typeof ApiTestExportFileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/game': {
+      id: '/api/test/game'
+      path: '/api/test/game'
+      fullPath: '/api/test/game'
+      preLoaderRoute: typeof ApiTestGameRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/test/impersonate': {
@@ -660,8 +700,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiTestBanRoute: ApiTestBanRoute,
   ApiTestClearAcceptancesRoute: ApiTestClearAcceptancesRoute,
+  ApiTestClockRoute: ApiTestClockRoute,
   ApiTestEmailsRoute: ApiTestEmailsRoute,
   ApiTestExportFileRoute: ApiTestExportFileRoute,
+  ApiTestGameRoute: ApiTestGameRoute,
   ApiTestImpersonateRoute: ApiTestImpersonateRoute,
   ApiTestMakeAdminRoute: ApiTestMakeAdminRoute,
   ApiTestRunExportsRoute: ApiTestRunExportsRoute,

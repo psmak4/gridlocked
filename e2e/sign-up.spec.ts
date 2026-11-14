@@ -4,6 +4,7 @@ import {
   emailTo,
   expectNoSeriousAxeViolations,
   heading,
+  hydrated,
   linkIn,
   newEmail,
   newUsername,
@@ -32,6 +33,7 @@ async function arriveByMagicLink(page: Page) {
   await page.goto("/sign-up");
   await page.getByRole("link", { name: "Email me a sign-in link" }).click();
   await expect(page).toHaveURL(/\/sign-in\?mode=link/);
+  await hydrated(page.getByRole("button", { name: "Send link" }));
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send link" }).click();
   await expect(heading(page)).toHaveText("Check your email");
@@ -91,6 +93,7 @@ test.describe("signing up", () => {
     await page.goto("/sign-up");
     await page.getByRole("link", { name: "Sign up with email" }).click();
     await expect(heading(page)).toHaveText("Create your account");
+    await hydrated(page.getByRole("button", { name: "Create account" }));
     await fillEmailForm(page, { email, username });
     await page.getByRole("checkbox", { name: "I'm 16 or older" }).check();
     await page.getByRole("checkbox", { name: /I agree to the Terms/ }).check();
@@ -108,6 +111,7 @@ test.describe("signing up", () => {
     await expect(page).toHaveURL(/\/welcome\/favorites$/);
     await expect(heading(page)).toHaveText("Who do you support?");
     await expect(page.getByText("STEP 1 OF 2")).toBeVisible();
+    await hydrated(page.getByRole("button", { name: "Continue" }));
     await page.getByLabel("Your country (optional)").selectOption("IT");
     await page.getByRole("button", { name: "Continue" }).click();
 
@@ -130,6 +134,7 @@ test.describe("signing up", () => {
     await arriveByMagicLink(page);
     await expect(page).toHaveURL(/\/welcome$/);
     await expect(heading(page)).toHaveText("Finish signing up");
+    await hydrated(page.getByRole("button", { name: "Finish signing up" }));
 
     const username = newUsername();
     await page.getByLabel("Username").fill(username);
@@ -190,6 +195,7 @@ test.describe("signing up", () => {
 
     // The same on Finish signing up.
     await arriveByMagicLink(page);
+    await hydrated(page.getByRole("button", { name: "Finish signing up" }));
     await page.getByLabel("Username").fill(newUsername());
     await page.getByRole("button", { name: "Finish signing up" }).click();
     await expect(page.getByText("Confirm you're 16 or older.")).toBeVisible();
@@ -270,6 +276,7 @@ test.describe("signing up", () => {
   test("an expired link offers a new one", async ({ page }) => {
     const email = newEmail();
     await page.goto("/sign-in?mode=link");
+    await hydrated(page.getByRole("button", { name: "Send link" }));
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Send link" }).click();
     await expect(heading(page)).toHaveText("Check your email");
@@ -281,6 +288,7 @@ test.describe("signing up", () => {
     await page.goto(link);
     await expect(page).toHaveURL(/\/auth-error\?error=INVALID_TOKEN/);
     await expect(heading(page)).toHaveText("That link has expired");
+    await hydrated(page.getByRole("button", { name: "Email me a new link" }));
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Email me a new link" }).click();
     await expect(heading(page)).toHaveText("Check your email");
@@ -347,6 +355,7 @@ test.describe("keyboard", () => {
     await page.getByRole("link", { name: "Look around for now" }).focus();
     await page.keyboard.press("Enter");
     await expect(heading(page)).toHaveText("Who do you support?");
+    await hydrated(page.getByRole("button", { name: "Continue" }));
     await page.getByRole("button", { name: "Continue" }).focus();
     await page.keyboard.press("Enter");
     await expect(heading(page)).toHaveText("Do you watch live?");

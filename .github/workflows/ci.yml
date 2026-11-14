@@ -78,10 +78,11 @@ jobs:
           fi
           # Task 13's hooks: make an admin, start an impersonation, run the
           # export jobs, serve an export file from memory, and forget which
-          # documents an account accepted.
+          # documents an account accepted. M6's: seed the fantasy game and
+          # move its simulated clock.
           for marker in test-hook-make-admin test-hook-impersonate \
             test-hook-run-exports test-hook-export-file \
-            test-hook-clear-acceptances; do
+            test-hook-clear-acceptances test-hook-game test-hook-clock; do
             if grep -rq "$marker" .output/server; then
               echo "::error::.output/server contains the test hook $marker"
               exit 1
@@ -98,7 +99,12 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: End-to-end tests
-        run: pnpm e2e
+        run: pnpm e2e --project=chromium
+
+      # The fantasy specs move the simulated clock of their own replay-mode
+      # server, which has one clock, so they run one at a time.
+      - name: Fantasy end-to-end tests
+        run: pnpm e2e --project=fantasy --workers=1
 
       - name: Upload Playwright report
         if: failure()

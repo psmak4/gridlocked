@@ -163,11 +163,11 @@ jobs:
             echo "::error::.vercel/output contains PGlite"
             exit 1
           fi
-          # The same list as CI's unflagged build, Task 13's hooks included.
+          # The same list as CI's unflagged build, Task 13's and M6's hooks included.
           for marker in migrationsFolder test-email-capture gl-test-busy \
             test-hook-ban-account test-hook-make-admin test-hook-impersonate \
             test-hook-run-exports test-hook-export-file \
-            test-hook-clear-acceptances; do
+            test-hook-clear-acceptances test-hook-game test-hook-clock; do
             if grep -rq "$marker" .vercel/output; then
               echo "::error::.vercel/output contains the local-only code ($marker)"
               exit 1

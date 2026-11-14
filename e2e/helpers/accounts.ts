@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
-import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 export const ORIGIN = "http://localhost:3100";
 export const PASSWORD = "correct horse battery";
@@ -101,12 +106,52 @@ export async function expectNoSeriousAxeViolations(page: Page) {
 /** The label of the page's main heading. */
 export const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 
+/**
+ * Waits until the page has hydrated, by a control that stays disabled until
+ * then (Button's rule, HLD §11.4). Wait for it before typing into, or
+ * toggling, a page that has just loaded: hydration sets each controlled field
+ * back to its state, so text typed before it is lost, and a switch or
+ * checkbox clicked before it does nothing. Under load that window is long
+ * enough to lose a test (#177).
+ */
+export async function hydrated(control: Locator) {
+  await expect(control).toBeEnabled();
+}
+
+/**
+ * The same wait for a page with no control that is disabled until hydrated
+ * (the delete page's button waits for the username instead): React has
+ * committed the page's hydration. It reads React's root, so prefer
+ * `hydrated` where the page has such a control.
+ */
+export async function pageHydrated(page: Page) {
+  await page.waitForFunction(() => {
+    const key = Object.keys(document).find((k) =>
+      k.startsWith("__reactContainer$"),
+    );
+    const root = key
+      ? (document as unknown as Record<string, unknown>)[key]
+      : undefined;
+    const state = (
+      root as
+        { stateNode?: { current?: { memoizedState?: unknown } } } | undefined
+    )?.stateNode?.current?.memoizedState as
+      { isDehydrated?: boolean } | undefined;
+    return state?.isDehydrated === false;
+  });
+}
+
+/** The sign-in form's own button. */
+export const signInButton = (page: Page) =>
+  page.getByRole("button", { name: "Sign in", exact: true });
+
 /** Signs in through the sign-in form and waits for home. */
 export async function signIn(
   page: Page,
   account: { email: string; password: string },
 ) {
   await page.goto("/sign-in");
+  await hydrated(signInButton(page));
   await page.getByLabel("Email").fill(account.email);
   await page.getByLabel("Password").fill(account.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
