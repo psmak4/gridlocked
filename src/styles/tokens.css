@@ -19,6 +19,8 @@
   --veil: #e6e6f0;
   --focus-ring: #0b0b1e;
   --shadow-sheet: 0 -8px 24px rgba(11, 11, 30, 0.16);
+  /* Team color share in a row tint (src/design/team-ink.ts). */
+  --team-tint: 12%;
 }
 
 [data-theme="dark"] {
@@ -41,6 +43,7 @@
   --veil: #23234a;
   --focus-ring: #ffd23f;
   --shadow-sheet: 0 -8px 24px rgba(0, 0, 0, 0.5);
+  --team-tint: 22%;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -64,6 +67,7 @@
     --veil: #23234a;
     --focus-ring: #ffd23f;
     --shadow-sheet: 0 -8px 24px rgba(0, 0, 0, 0.5);
+    --team-tint: 22%;
   }
 }
 
