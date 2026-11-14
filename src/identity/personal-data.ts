@@ -3,8 +3,8 @@
  * export (`buildExport`) and the deletion (`scrubAccount`) walk this list, so
  * a table that isn't here is missed by both. `personal-data.test.ts` walks the
  * schema and fails for any foreign key to `users` that has no entry, which is
- * what makes M7 register its posts, votes, chat, notifications and watch
- * marks.
+ * what makes M7 register its posts, votes, chat and notifications (M6
+ * registered the watch marks).
  *
  * - `onDelete` is what the scrub does: `delete` the rows, `scrub` them (clear
  *   the personal fields, keep the row on the tombstone), `retire` them (the
@@ -41,6 +41,8 @@ import {
   poolAssets,
   privacyRequests,
   profiles,
+  sessionWatchMarks,
+  sessions,
   teams,
   trustLevelChanges,
   usernameHistory,
@@ -518,6 +520,33 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
         .update(leagues)
         .set({ ownerUserId: null, updatedAt: now })
         .where(eq(leagues.ownerUserId, userId));
+    },
+  },
+  {
+    table: "session_watch_marks",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "which sessions they marked watched (DM 5.7): spoiler state that means nothing without the account",
+    exportAs: "watched_sessions",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          event: events.slug,
+          session: sessions.kind,
+          sequence: sessions.sequence,
+          markedAt: sessionWatchMarks.markedAt,
+        })
+        .from(sessionWatchMarks)
+        .innerJoin(sessions, eq(sessions.id, sessionWatchMarks.sessionId))
+        .innerJoin(events, eq(events.id, sessions.eventId))
+        .where(eq(sessionWatchMarks.userId, userId))
+        .orderBy(asc(sessions.scheduledStart), asc(sessions.id));
+      return rows.map((r) => ({ ...r, markedAt: iso(r.markedAt) }));
+    },
+    async scrub(tx, { userId }) {
+      await tx
+        .delete(sessionWatchMarks)
+        .where(eq(sessionWatchMarks.userId, userId));
     },
   },
   {

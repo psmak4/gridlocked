@@ -144,6 +144,7 @@ describe("data export (DM 6.7)", () => {
         "teams",
         "trustLevelChanges",
         "usernameHistory",
+        "watched_sessions",
       ].sort(),
     );
     expect(data.account).toMatchObject({
