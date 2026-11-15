@@ -184,6 +184,15 @@ The screens are on the canvas [Gridlocked wave 2](https://claude.ai/artifact/6ff
 - **Discussion** replies indent up to 3 levels, then "Continue thread". Results are a link, not shown inline, so the thread itself stays spoiler-light.
 - **"Show it" versus "Mark as watched":** Show it reveals just this item. Mark as watched reveals that session everywhere. The hidden thread explains the difference in two lines.
 
+**As built (M6 Task 8, the builder and the driver picker):**
+- **The heading is the team's name**, not "My team", since a player may have three. "Your teams" sits under it.
+- **An empty slot is a dashed "Add a driver" (or "Add a constructor") row** that opens the picker. The boards only show a full team.
+- **The picker is for one slot's kind**, so it has no Drivers/Constructors tabs. For a pick being replaced it adds a "2× Boost" switch ("Albon scores double points.") and "Remove Albon", which is how a team frees money for a dearer driver.
+- **Rows show ownership ("34% picked") as their second figure**, where the boards show season points: points per asset come with the breakdown (Task 11).
+- **Over the cap only happens from a draft** saved before a pool or price change: the picker never offers what the team can't afford.
+- **Chips** stays out of the bar until the chip sheet (Task 9). The chip sentences are the board's.
+- **A save names the round it was built for.** A page left open across a lock says "Your team locked at 14:00." and turns to the locked team, even if the next round has opened since. The draft stays in the browser.
+
 ## Wave 3: weekend and game (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF1XbqGJnSS9SwGRh1pHD) (private to you). It uses the same design system and rules as wave 2. The sample week is before round 19, the Mexico City Grand Prix, with points from round 18. Numbers, usernames and results are illustrative.
 

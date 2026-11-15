@@ -109,6 +109,11 @@ export type BuilderState = {
   pool: PoolRow[];
   /** The team's latest save for the event. */
   latest: { versionId: string; picks: LineupPick[] } | null;
+  /**
+   * The team's latest version of any event and kind: what a save from this
+   * read is based on, so `staleBase` means another save came in between.
+   */
+  basedOnVersionId: string | null;
   /** The lineup transfers count against; null at the team's first event. */
   base: LineupPick[] | null;
   purchasingPower: MoneyUnits;
@@ -127,15 +132,15 @@ export type BuilderState = {
   locked: LockedView | null;
 };
 
-/** One sentence for each chip, by what it does (the chip sheet). */
+/** One sentence for each chip, by what it does: the wave 2 chip sheet's. */
 const CHIP_SENTENCES: Record<ChipEffect, string> = {
-  autopilot: "After the race, your Boost moves to your best-scoring driver.",
-  triple_boost: "One driver you choose scores triple points this weekend.",
-  no_negative: "Any score below zero counts as zero this weekend.",
-  wildcard: "Unlimited transfers this weekend, within your budget.",
+  autopilot: "After the weekend, your Boost moves to your top scorer.",
+  triple_boost: "One driver scores 3× this weekend.",
+  no_negative: "No scoring category can go below zero this weekend.",
+  wildcard: "Unlimited free changes until lock, within budget.",
   limitless:
-    "Unlimited transfers and no budget cap for one weekend. Your team goes back after.",
-  final_fix: "One change after qualifying, before the race.",
+    "Unlimited changes and no cap for one race. Your team comes back after.",
+  final_fix: "One swap after qualifying.",
 };
 
 const LOCKED_OR_SCORED = new Set(["locked", "scored"]);
@@ -349,6 +354,14 @@ export async function builderState(
     };
   });
 
+  // What `saveLineup` calls the team's latest: any event, any kind.
+  const [lastSaved] = await db
+    .select({ id: lineupVersions.id })
+    .from(lineupVersions)
+    .where(eq(lineupVersions.teamId, teamId))
+    .orderBy(desc(lineupVersions.savedAt), desc(lineupVersions.id))
+    .limit(1);
+
   const squad = { ...params.squad };
   const base: BuilderState = {
     team: { id: team.id, slot: team.slot, name: team.name },
@@ -356,6 +369,7 @@ export async function builderState(
     phase,
     pool: [],
     latest: null,
+    basedOnVersionId: lastSaved?.id ?? null,
     base: null,
     purchasingPower: 0,
     freeTransfers: null,
@@ -465,6 +479,18 @@ export async function builderState(
       chip?.effect === "triple_boost" ? chip.targetAssetId : null,
     lateCallOpen: phase === "locked" && state.late_call === true,
   };
+}
+
+/**
+ * A constructor's badge code (TeamBadge holds three letters): the first three
+ * letters of its short name without "F1 Team", so "McLaren" is MCL, "Haas F1
+ * Team" HAA, "Aston Martin" AST and "RB F1 Team" RB.
+ */
+export function constructorCode(shortName: string): string {
+  const letters = shortName
+    .replace(/\bF1 Team\b/i, "")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+  return letters.slice(0, 3).toUpperCase();
 }
 
 /** The priced pool at an event, with what each row shows. */
@@ -638,7 +664,7 @@ async function poolRows(
         ? (lineUp.get(asset.constructorId) ?? [])
         : []
       ).join(" · "),
-      code: team?.shortName ?? asset.constructorName ?? "",
+      code: constructorCode(team?.shortName ?? asset.constructorName ?? ""),
       color: team?.color ?? "#808080",
     };
   });
@@ -657,18 +683,27 @@ export const getBuilderInput = z.object({
   slot: z.number().int().min(1).max(10),
 });
 
-/** The builder for the viewer's team in `slot` of the current game. */
+/** The builder page: the state, and what the screen needs to show time. */
+export type BuilderPage = {
+  state: BuilderState;
+  /** The request's "now", so the countdown runs on the server's clock. */
+  now: string;
+  /** The viewer's IANA time zone (`profiles.timezone`), for the lock time. */
+  timeZone: string;
+};
+
+/** The builder for the viewer's active team in `slot` of the current game. */
 export async function builderForSlot(
   db: Db,
   now: Date,
   viewer: Viewer | null,
   data: z.infer<typeof getBuilderInput>,
-): Promise<BuilderState> {
+): Promise<BuilderPage> {
   const v = requireComplete(viewer);
   const game = await currentGame(db);
   if (!game) throw new GameError("game_not_open", "no game is open");
   const [team] = await db
-    .select({ id: teams.id })
+    .select({ id: teams.id, status: teams.status })
     .from(teams)
     .where(
       and(
@@ -678,39 +713,89 @@ export async function builderForSlot(
       ),
     );
   if (!team) throw new GameError("team_not_owned", "no team in that slot");
-  return builderState(db, now, {
+  if (team.status === "retired") {
+    throw new GameError("team_retired", "that team is retired");
+  }
+  const state = await builderState(db, now, {
     teamId: team.id,
     reader: {
       userId: v.userId,
       spoilerProtection: v.profile.spoilerProtection,
     },
   });
+  return { state, now: now.toISOString(), timeZone: v.profile.timezone };
 }
 
 export const saveTeamInput = z.object({
   teamId: z.uuid(),
+  /** The event the page was built for: a save never lands in another. */
+  eventId: z.uuid(),
   picks: z.array(z.object({ assetId: z.uuid(), isBoost: z.boolean() })).max(20),
   basedOnVersionId: z.uuid().nullable(),
 });
 
+export type SaveTeamResult =
+  | {
+      ok: true;
+      versionId: string;
+      staleBase: boolean;
+      /** With `staleBase`: the picks of the save this one came after. */
+      theirs: LineupPick[] | null;
+    }
+  | Refusal;
+
 /**
  * Saves a lineup for one of the viewer's teams (`saveLineup`): a new version,
- * with `staleBase` when another save came first. The database's checks
- * decide; a refusal is `{ ok: false, error }`.
+ * with `staleBase` and the other save's picks when another save came first.
+ * A page built for an event that is no longer the open one (it locked, and
+ * maybe the next opened) is `window_closed`, so a save never lands in an
+ * event the player hasn't seen. The database's checks decide the rest; a
+ * refusal is `{ ok: false, error }`.
  */
 export function saveTeamAction(
   db: Db,
   now: Date,
   viewer: Viewer | null,
   data: z.infer<typeof saveTeamInput>,
-): Promise<{ ok: true; versionId: string; staleBase: boolean } | Refusal> {
+): Promise<SaveTeamResult> {
   const v = requireWritable(viewer);
   return refusalOf(async () => {
     const team = await ownTeam(db, v.userId, data.teamId);
     if (team.status === "retired") {
       throw new GameError("team_retired", "a retired team can't be changed");
     }
-    const saved = await saveLineup(db, now, data);
-    return { ok: true as const, ...saved };
+    const [open] = await db
+      .select({ eventId: gameEvents.eventId })
+      .from(gameEvents)
+      .where(
+        and(eq(gameEvents.gameId, team.gameId), eq(gameEvents.status, "open")),
+      );
+    if (open?.eventId !== data.eventId) {
+      throw new GameError("window_closed", "that event isn't open");
+    }
+    const saved = await saveLineup(db, now, {
+      teamId: data.teamId,
+      picks: data.picks,
+      basedOnVersionId: data.basedOnVersionId,
+    });
+    let theirs: LineupPick[] | null = null;
+    if (saved.staleBase) {
+      // The version saved just before this one: the other device's.
+      const [before] = await db
+        .select({ id: lineupVersions.id })
+        .from(lineupVersions)
+        .where(
+          and(
+            eq(lineupVersions.teamId, data.teamId),
+            ne(lineupVersions.id, saved.versionId),
+          ),
+        )
+        .orderBy(desc(lineupVersions.savedAt), desc(lineupVersions.id))
+        .limit(1);
+      if (before) {
+        theirs = (await picksOf(db, [before.id])).get(before.id) ?? [];
+      }
+    }
+    return { ok: true as const, ...saved, theirs };
   });
 }

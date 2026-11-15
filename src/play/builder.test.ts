@@ -30,6 +30,7 @@ import { setSimulatedClock } from "@/replay/clock-loop";
 import { markWatched } from "@/spoilers/reveal";
 import {
   builderState,
+  constructorCode,
   poolAvailability,
   saveTeamAction,
   type BuilderState,
@@ -101,6 +102,16 @@ async function picksOf(db: Db, versionId: string): Promise<LineupPick[]> {
 
 const byAsset = (picks: LineupPick[]) =>
   [...picks].sort((a, b) => a.assetId.localeCompare(b.assetId));
+
+describe("constructorCode", () => {
+  it("is three letters of the short name, without F1 Team", () => {
+    expect(
+      ["McLaren", "Haas F1 Team", "Aston Martin", "RB F1 Team", "Red Bull"].map(
+        constructorCode,
+      ),
+    ).toEqual(["MCL", "HAA", "AST", "RB", "RED"]);
+  });
+});
 
 describe("builderState before round 1's lock", () => {
   let t: TestDb;
@@ -179,6 +190,7 @@ describe("builderState before round 1's lock", () => {
     expect(
       await saveTeamAction(db, now, await viewerOf(db, other), {
         teamId,
+        eventId: (await round2026(db, 1)).id,
         picks: [],
         basedOnVersionId: null,
       }),
@@ -197,17 +209,25 @@ describe("builderState before round 1's lock", () => {
 
     const first = await saveTeamAction(db, now, viewer, {
       teamId,
+      eventId: state.event!.id,
       picks,
-      basedOnVersionId: null,
+      basedOnVersionId: state.basedOnVersionId,
     });
-    expect(first).toMatchObject({ ok: true, staleBase: false });
-    // A second device, still editing the blank start.
+    expect(first).toMatchObject({ ok: true, staleBase: false, theirs: null });
+    // A second device, still editing the blank start, with its own picks.
+    const mine = picks.map((p) => ({ ...p, isBoost: false }));
+    mine[1] = { ...mine[1]!, isBoost: true };
     const second = await saveTeamAction(db, now, viewer, {
       teamId,
-      picks,
-      basedOnVersionId: null,
+      eventId: state.event!.id,
+      picks: mine,
+      basedOnVersionId: state.basedOnVersionId,
     });
     expect(second).toMatchObject({ ok: true, staleBase: true });
+    // "See their team": the first device's picks.
+    expect(byAsset((second as { theirs: LineupPick[] }).theirs)).toEqual(
+      byAsset(picks),
+    );
 
     const after = await builderState(db, now, {
       teamId,
@@ -216,7 +236,8 @@ describe("builderState before round 1's lock", () => {
     expect(after.latest?.versionId).toBe(
       (second as { versionId: string }).versionId,
     );
-    expect(byAsset(after.latest!.picks)).toEqual(byAsset(picks));
+    expect(byAsset(after.latest!.picks)).toEqual(byAsset(mine));
+    expect(after.basedOnVersionId).toBe(after.latest!.versionId);
   });
 
   it("a save after the lock is window_closed", async () => {
@@ -231,6 +252,7 @@ describe("builderState before round 1's lock", () => {
     expect(
       await saveTeamAction(db, late, viewer, {
         teamId,
+        eventId: state.event!.id,
         picks: cheapest(state),
         basedOnVersionId: null,
       }),
@@ -298,7 +320,12 @@ describe("builderState after round 1 is final", () => {
                 db,
                 at,
                 await viewerOf(db, made.userId),
-                { teamId: made.teamId, picks, basedOnVersionId: null },
+                {
+                  teamId: made.teamId,
+                  eventId: state.event!.id,
+                  picks,
+                  basedOnVersionId: state.basedOnVersionId,
+                },
               );
               expect(saved).toMatchObject({ ok: true });
             }
@@ -375,6 +402,31 @@ describe("builderState after round 1 is final", () => {
     expect(state.chips.find((c) => c.name === "Rebuild")?.status).toBe(
       "available",
     );
+  });
+
+  it("a page built for round 1 can't save into round 2", async () => {
+    const team = await lockedTeam();
+    const round1 = await round2026(db, 1);
+    const state = await builderState(db, now, {
+      teamId: team.teamId,
+      reader: unprotected(team.userId),
+    });
+    const viewer = await viewerOf(db, team.userId);
+    const save = (eventId: string) =>
+      saveTeamAction(db, now, viewer, {
+        teamId: team.teamId,
+        eventId,
+        picks: state.base!,
+        basedOnVersionId: state.basedOnVersionId,
+      });
+    expect(await save(round1.id)).toEqual({
+      ok: false,
+      error: "window_closed",
+    });
+    expect(await save(state.event!.id)).toMatchObject({
+      ok: true,
+      staleBase: false,
+    });
   });
 
   it("a withdrawn driver shows as withdrawn, and only an owner sees him pickable", async () => {
@@ -502,9 +554,15 @@ describe("builderState after round 1 is final", () => {
         db,
         now,
         await viewerOf(db, made.userId),
-        { teamId: made.teamId, picks, basedOnVersionId: null },
+        {
+          teamId: made.teamId,
+          eventId: state.event!.id,
+          picks,
+          basedOnVersionId: state.basedOnVersionId,
+        },
       );
-      expect(saved).toMatchObject({ ok: true });
+      // Based on round 1's lineup: a first save for round 2 isn't stale.
+      expect(saved).toMatchObject({ ok: true, staleBase: false });
       previews.set(made.teamId, preview);
     }
 

@@ -54,6 +54,7 @@ function state(over: Partial<BuilderState> = {}): BuilderState {
     phase: "open",
     pool: POOL,
     latest: null,
+    basedOnVersionId: null,
     base: null,
     purchasingPower: 1100,
     freeTransfers: null,

@@ -17,9 +17,10 @@
  * file in src/server that may import src/providers (eslint.config.mjs).
  */
 import path from "node:path";
-import { count, eq, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import {
   assetPrices,
+  drivers,
   events,
   gameEvents,
   games,
@@ -28,6 +29,7 @@ import {
   scoringRuns,
   sessions,
 } from "@/db/schema";
+import { withdrawPoolAsset } from "@/game/pool";
 import { resolveClock } from "@/lib/resolve-clock";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { startLiveReplay, type LiveReplay } from "@/providers/replay/live-game";
@@ -102,6 +104,40 @@ export function moveTestClock(
     const { jobsRun } = await live.replay.advance(to);
     return { now: live.replay.now.toISOString(), jobsRun };
   });
+}
+
+/**
+ * Withdraws the driver with `code` (e.g. "VER") from the open event, as
+ * staff would: a pool change under an open builder (M6 Review Focus 4).
+ */
+export function withdrawTestDriver(code: string): Promise<{ assetId: string }> {
+  return oneAtATime(() =>
+    withDb(async (db) => {
+      if (!live) throw new HarnessError(409, "Seed the game first");
+      const { gameId } = live;
+      const now = (await resolveClock({ mode: "replay", db })).now();
+      const [open] = await db
+        .select({ eventId: gameEvents.eventId })
+        .from(gameEvents)
+        .where(
+          and(eq(gameEvents.gameId, gameId), eq(gameEvents.status, "open")),
+        );
+      if (!open) throw new HarnessError(409, "No event is open");
+      const [asset] = await db
+        .select({ id: poolAssets.id })
+        .from(poolAssets)
+        .innerJoin(drivers, eq(drivers.id, poolAssets.driverId))
+        .where(and(eq(poolAssets.gameId, gameId), eq(drivers.code, code)));
+      if (!asset) throw new HarnessError(400, `No driver ${code} in the pool`);
+      await withdrawPoolAsset(db, now, {
+        assetId: asset.id,
+        fromEventId: open.eventId,
+        reason: "Fantasy e2e: a pool change under an open builder",
+        actor: { kind: "admin", label: "e2e" },
+      });
+      return { assetId: asset.id };
+    }),
+  );
 }
 
 /**

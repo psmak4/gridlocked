@@ -143,3 +143,17 @@ export function roundOf(state: GameState, round: number) {
   if (!found) throw new Error(`the game has no round ${round}`);
   return found;
 }
+
+/**
+ * Withdraws the driver with `code` (e.g. "VER") from the open event, as staff
+ * would: the pool changing under an open builder.
+ */
+export async function withdrawDriver(
+  request: APIRequestContext,
+  code: string,
+): Promise<void> {
+  const response = await request.patch("/api/test/game", {
+    data: { withdraw: code },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}

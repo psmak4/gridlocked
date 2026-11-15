@@ -83,17 +83,18 @@ function Sheet({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 bg-surface/80 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-surface/80 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />
         <Dialog.Popup
           data-slot="sheet"
           className={cn(
             panel,
-            "fixed inset-x-0 bottom-0 max-h-[90dvh] overflow-y-auto rounded-t-radius-l outline-none",
+            "fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-radius-l outline-none",
             "transition-transform duration-150 data-ending-style:translate-y-full data-starting-style:translate-y-full motion-reduce:transition-none",
             "lg:top-1/2 lg:right-auto lg:bottom-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-radius-l lg:data-ending-style:-translate-y-1/2 lg:data-ending-style:opacity-0 lg:data-starting-style:-translate-y-1/2 lg:data-starting-style:opacity-0",
             className,
           )}
         >
+          {/* Above the fixed bars (the bottom nav, a screen's action bar). */}
           {/* The grab handle: a swipe down from here closes the sheet. */}
           <div
             data-slot="sheet-grab"

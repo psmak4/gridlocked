@@ -8,6 +8,8 @@ import { withNoStore } from "@/server/no-store";
 // - DELETE `{ at }` resets it with no game and the clock at `at`: the site
 //   before a game opens.
 // - GET reports the seeded game and its rounds, for the harness's own spec.
+// - PATCH `{ withdraw: "VER" }` withdraws that driver from the open event, as
+//   staff would: the pool changing under an open builder.
 // The flag is replaced at build time, so a normal build keeps the 404 and
 // drops the rest. `test-hook-game` marks this handler for the CI build check.
 const notFound = () => withNoStore(new Response("Not found", { status: 404 }));
@@ -57,12 +59,36 @@ async function state(): Promise<Response> {
   );
 }
 
+async function change(request: Request): Promise<Response> {
+  if (import.meta.env.VITE_LOCAL_DB !== "1") return notFound();
+  const body = (await request.json().catch(() => ({}))) as {
+    withdraw?: unknown;
+  };
+  if (typeof body.withdraw !== "string") {
+    return withNoStore(
+      new Response("`withdraw` must be a driver code", { status: 400 }),
+    );
+  }
+  const { withdrawTestDriver, HarnessError } =
+    await import("@/server/test-game");
+  try {
+    const done = await withdrawTestDriver(body.withdraw);
+    return withNoStore(Response.json({ ...done, hook: "test-hook-game" }));
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      return withNoStore(new Response(error.message, { status: error.status }));
+    }
+    throw error;
+  }
+}
+
 export const Route = createFileRoute("/api/test/game")({
   server: {
     handlers: {
       POST: ({ request }) => seed(request),
       DELETE: ({ request }) => clear(request),
       GET: () => state(),
+      PATCH: ({ request }) => change(request),
     },
   },
 });
