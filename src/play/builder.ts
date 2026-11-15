@@ -21,13 +21,15 @@ import {
   lineupVersions,
   poolAssets,
   rulesetVersions,
+  sessions,
   teamEventStates,
+  teamEventTotals,
   teams,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { playedChips } from "@/game/chips";
+import { playChip, playedChips, saveFinalFix } from "@/game/chips";
 import { GameError } from "@/game/errors";
-import { saveLineup, type LineupPick } from "@/game/lineups";
+import { lockedLineup, saveLineup, type LineupPick } from "@/game/lineups";
 import {
   rulesetParamsSchema,
   type ChipEffect,
@@ -40,6 +42,7 @@ import {
   type Viewer,
 } from "@/identity/viewer";
 import type { MoneyUnits } from "@/lib/money";
+import { SCORED_KINDS } from "@/results/validate";
 import { refusalOf, type Refusal } from "@/server/play-actions";
 import { revealedSessions, type Reader } from "@/spoilers/reveal";
 import { currentGame } from "./current-game";
@@ -79,14 +82,45 @@ export type ChipState = {
   code: string;
   /** Our name: Strategist, Overdrive, Safety Car, Rebuild, Blank Cheque, Late Call. */
   name: string;
+  effect: ChipEffect;
   sentence: string;
   status: ChipStatus;
   /** The event it was played for, when played or used. */
   playedFor: string | null;
 };
 
-/** The locked team's view: M6 Task 9's. */
-export type LockedView = never;
+/** One scored session of the locked event, as the locked team shows it. */
+export type LockedSession = {
+  id: string;
+  /** "Qualifying", "Sprint" or "Race". */
+  label: string;
+  /** It has points: its results are in and scored. Not a spoiler. */
+  scored: boolean;
+  /** The reader may see it (or asked to with Show it). */
+  revealed: boolean;
+  /** The team's points there; null while hidden or not scored. */
+  points: number | null;
+};
+
+/**
+ * The locked team (wave 2 "Locked, with qualifying scores hidden"): the
+ * lineup that counts, and its points only where the reader may see them. A
+ * hidden figure is left out, never sent (M6 decision 2's rule).
+ */
+export type LockedView = {
+  /** The lineup that counts now: the Late Call one once it is played. */
+  picks: LineupPick[];
+  /** The chip played for the event, by our name. */
+  chip: string | null;
+  sessions: LockedSession[];
+  /** Each pick's points so far, only while `total` is shown. */
+  assetPoints: Record<string, number>;
+  /** The event's points, only when every scored session is revealed. */
+  total: number | null;
+  status: "provisional" | "final" | null;
+  /** Late Call is played for the event. */
+  lateCallPlayed: boolean;
+};
 
 export type BuilderPhase = "open" | "locked" | "between";
 
@@ -275,7 +309,12 @@ async function picksOf(
 export async function builderState(
   db: Db,
   now: Date,
-  input: { teamId: string; reader: NonNullable<Reader> },
+  input: {
+    teamId: string;
+    reader: NonNullable<Reader>;
+    /** Sessions to show this once ("Show it"), not stored. */
+    show?: string[];
+  },
 ): Promise<BuilderState> {
   const { teamId, reader } = input;
   const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
@@ -342,6 +381,7 @@ export async function builderState(
     return {
       code: chip.code,
       name: chip.name,
+      effect: chip.effect,
       sentence: CHIP_SENTENCES[chip.effect],
       status: play
         ? play.eventId === current?.eventId
@@ -478,7 +518,163 @@ export async function builderState(
     x3TargetAssetId:
       chip?.effect === "triple_boost" ? chip.targetAssetId : null,
     lateCallOpen: phase === "locked" && state.late_call === true,
+    locked:
+      phase === "locked"
+        ? await lockedView(db, now, {
+            teamId,
+            eventId,
+            reader,
+            show: input.show,
+          })
+        : null,
   };
+}
+
+const SESSION_LABELS: Record<string, string> = {
+  qualifying: "Qualifying",
+  sprint: "Sprint",
+  race: "Race",
+};
+
+/**
+ * The locked team for one event (M6 Task 9): the lineup that counts, the
+ * chip, and the points of each scored session the reader may see, from
+ * `team_event_totals`. A hidden session has no points here, and the total
+ * and each pick's points are left out while any scored session is hidden.
+ * `show` reveals sessions this once ("Show it"); it is never stored.
+ */
+export async function lockedView(
+  db: Db,
+  now: Date,
+  input: {
+    teamId: string;
+    eventId: string;
+    reader: NonNullable<Reader>;
+    show?: string[];
+  },
+): Promise<LockedView> {
+  const { teamId, eventId, reader } = input;
+
+  // The lineup: the lock record's (the Late Call one once played), else the
+  // one the lock will take, for the minutes before the lock job runs.
+  const [record] = await db
+    .select({
+      lockedVersionId: teamEventStates.lockedVersionId,
+      finalFixVersionId: teamEventStates.finalFixVersionId,
+    })
+    .from(teamEventStates)
+    .where(
+      and(
+        eq(teamEventStates.teamId, teamId),
+        eq(teamEventStates.eventId, eventId),
+      ),
+    );
+  let picks: LineupPick[] = [];
+  if (record) {
+    const id = record.finalFixVersionId ?? record.lockedVersionId;
+    picks = (await picksOf(db, [id])).get(id) ?? [];
+  } else {
+    picks = (await lockedLineup(db, { teamId, eventId }))?.picks ?? [];
+  }
+
+  const chip = (await playedChips(db, { eventId, teamIds: [teamId] })).get(
+    teamId,
+  );
+  const chipName = chip
+    ? await chipNameOf(db, { teamId, eventId, code: chip.code })
+    : null;
+
+  const eventSessions = await db
+    .select({ id: sessions.id, kind: sessions.kind })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.eventId, eventId),
+        inArray(sessions.kind, [...SCORED_KINDS]),
+      ),
+    )
+    .orderBy(asc(sessions.scheduledStart), asc(sessions.sequence));
+  const ids = eventSessions.map((s) => s.id);
+  const revealed = await revealedSessions(db, now, reader, ids);
+  for (const id of input.show ?? []) {
+    if (ids.includes(id)) revealed.add(id);
+  }
+
+  const [totals] = await db
+    .select({
+      points: teamEventTotals.points,
+      bySession: teamEventTotals.pointsBySession,
+      status: teamEventTotals.status,
+    })
+    .from(teamEventTotals)
+    .where(
+      and(
+        eq(teamEventTotals.teamId, teamId),
+        eq(teamEventTotals.eventId, eventId),
+      ),
+    );
+  const bySession = totals?.bySession ?? {};
+  const list: LockedSession[] = eventSessions.map((s) => {
+    const scored = typeof bySession[s.id] === "number";
+    const shown = revealed.has(s.id);
+    return {
+      id: s.id,
+      label: SESSION_LABELS[s.kind] ?? s.kind,
+      scored,
+      revealed: shown,
+      points: scored && shown ? bySession[s.id]! : null,
+    };
+  });
+  const allShown =
+    totals !== undefined &&
+    list.some((s) => s.scored) &&
+    list.every((s) => !s.scored || s.revealed);
+
+  let assetPoints: Record<string, number> = {};
+  if (allShown) {
+    // Each asset's base points in the sessions it counted for, and the
+    // team's adjustments on it (Boost, Overdrive, Safety Car).
+    const { rows } = (await db.execute(sql`
+      select asset_id, sum(points)::int as points from (
+        select asset_id, points from team_base_lines
+        where team_id = ${teamId}::uuid and event_id = ${eventId}::uuid
+        union all
+        select asset_id, points from team_adjustment_lines
+        where team_id = ${teamId}::uuid and event_id = ${eventId}::uuid
+          and asset_id is not null and session_id is not null
+      ) lines group by asset_id
+    `)) as { rows: Array<{ asset_id: string; points: number }> };
+    assetPoints = Object.fromEntries(
+      rows.map((row) => [row.asset_id, Number(row.points)]),
+    );
+  }
+
+  return {
+    picks,
+    chip: chipName,
+    sessions: list,
+    assetPoints,
+    total: allShown ? totals.points : null,
+    status: allShown ? totals.status : null,
+    lateCallPlayed: chip?.effect === "final_fix",
+  };
+}
+
+/** A chip's name in the ruleset of the team's game at the event. */
+async function chipNameOf(
+  db: Db,
+  input: { teamId: string; eventId: string; code: string },
+): Promise<string> {
+  const [row] = await db
+    .select({ versionId: gameEvents.rulesetVersionId })
+    .from(gameEvents)
+    .innerJoin(teams, eq(teams.gameId, gameEvents.gameId))
+    .where(
+      and(eq(teams.id, input.teamId), eq(gameEvents.eventId, input.eventId)),
+    );
+  if (!row) return input.code;
+  const params = await paramsOf(db, row.versionId);
+  return params.chips.find((c) => c.code === input.code)?.name ?? input.code;
 }
 
 /**
@@ -681,6 +877,8 @@ async function poolRows(
 
 export const getBuilderInput = z.object({
   slot: z.number().int().min(1).max(10),
+  /** Sessions to show this once ("Show it", the page's `?show=`). */
+  show: z.array(z.uuid()).max(10).optional(),
 });
 
 /** The builder page: the state, and what the screen needs to show time. */
@@ -722,6 +920,7 @@ export async function builderForSlot(
       userId: v.userId,
       spoilerProtection: v.profile.spoilerProtection,
     },
+    show: data.show,
   });
   return { state, now: now.toISOString(), timeZone: v.profile.timezone };
 }
@@ -797,5 +996,115 @@ export function saveTeamAction(
       }
     }
     return { ok: true as const, ...saved, theirs };
+  });
+}
+
+/** An active team of the viewer's, for a chip: refuses a retired one. */
+async function activeTeam(db: Db, userId: string, teamId: string) {
+  const team = await ownTeam(db, userId, teamId);
+  if (team.status === "retired") {
+    throw new GameError("team_retired", "a retired team can't be changed");
+  }
+  return team;
+}
+
+export const playChipInput = z.object({
+  teamId: z.uuid(),
+  /** The event the page was built for: a chip never lands in another. */
+  eventId: z.uuid(),
+  chipCode: z.string().min(1).max(64),
+  /** Overdrive's driver; no other chip takes one. */
+  targetAssetId: z.uuid().optional(),
+});
+
+/**
+ * Plays a chip for one of the viewer's teams (`playChip`). The page's event
+ * must be the open one (else `chip_window_closed`); Late Call is played with
+ * its swap (`lateCallAction`), so here it is `chip_unavailable`, as is a
+ * code the event's ruleset doesn't have. A target on a chip that takes none
+ * is `composition`. The database decides the rest.
+ */
+export function playChipAction(
+  db: Db,
+  now: Date,
+  viewer: Viewer | null,
+  data: z.infer<typeof playChipInput>,
+): Promise<{ ok: true } | Refusal> {
+  const v = requireWritable(viewer);
+  return refusalOf(async () => {
+    const team = await activeTeam(db, v.userId, data.teamId);
+    const [open] = await db
+      .select({
+        eventId: gameEvents.eventId,
+        rulesetVersionId: gameEvents.rulesetVersionId,
+      })
+      .from(gameEvents)
+      .where(
+        and(eq(gameEvents.gameId, team.gameId), eq(gameEvents.status, "open")),
+      );
+    if (open?.eventId !== data.eventId) {
+      throw new GameError("chip_window_closed", "that event isn't open");
+    }
+    const chip = (await paramsOf(db, open.rulesetVersionId)).chips.find(
+      (c) => c.code === data.chipCode,
+    );
+    if (!chip || chip.effect === "final_fix") {
+      throw new GameError("chip_unavailable", "that chip can't be played here");
+    }
+    if (chip.effect !== "triple_boost" && data.targetAssetId !== undefined) {
+      throw new GameError("composition", `${chip.name} takes no driver`);
+    }
+    await playChip(db, now, {
+      teamId: data.teamId,
+      chipCode: data.chipCode,
+      targetAssetId: data.targetAssetId,
+    });
+    return { ok: true as const };
+  });
+}
+
+export const lateCallInput = z.object({
+  teamId: z.uuid(),
+  /** The locked event the page was built for. */
+  eventId: z.uuid(),
+  outAssetId: z.uuid(),
+  inAssetId: z.uuid(),
+});
+
+/**
+ * Late Call for one of the viewer's teams (`saveFinalFix`): one swap in the
+ * locked lineup, from the race on. The page's event must be the game's
+ * latest locked one (else `chip_window_closed`); the database decides the
+ * window, the budget and the swap.
+ */
+export function lateCallAction(
+  db: Db,
+  now: Date,
+  viewer: Viewer | null,
+  data: z.infer<typeof lateCallInput>,
+): Promise<{ ok: true } | Refusal> {
+  const v = requireWritable(viewer);
+  return refusalOf(async () => {
+    const team = await activeTeam(db, v.userId, data.teamId);
+    const [latest] = await db
+      .select({ eventId: gameEvents.eventId })
+      .from(gameEvents)
+      .where(
+        and(
+          eq(gameEvents.gameId, team.gameId),
+          inArray(gameEvents.status, ["locked", "scored"]),
+        ),
+      )
+      .orderBy(desc(gameEvents.sequence))
+      .limit(1);
+    if (latest?.eventId !== data.eventId) {
+      throw new GameError("chip_window_closed", "that event isn't locked");
+    }
+    await saveFinalFix(db, now, {
+      teamId: data.teamId,
+      outAssetId: data.outAssetId,
+      inAssetId: data.inAssetId,
+    });
+    return { ok: true as const };
   });
 }

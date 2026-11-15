@@ -15,6 +15,10 @@ import type { Viewer } from "@/identity/viewer";
 import {
   builderForSlot,
   getBuilderInput,
+  lateCallAction,
+  lateCallInput,
+  playChipAction,
+  playChipInput,
   saveTeamAction,
   saveTeamInput,
 } from "@/play/builder";
@@ -124,4 +128,18 @@ export const saveTeam = createServerFn({ method: "POST" })
   .validator(saveTeamInput)
   .handler(({ data }) =>
     playAction((db, now, viewer) => saveTeamAction(db, now, viewer, data)),
+  );
+
+/** "Play <chip>" on the chip sheet: no undo (DM 3.9). */
+export const playTeamChip = createServerFn({ method: "POST" })
+  .validator(playChipInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => playChipAction(db, now, viewer, data)),
+  );
+
+/** "Play Late Call": one swap after qualifying, from the race on. */
+export const playLateCall = createServerFn({ method: "POST" })
+  .validator(lateCallInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => lateCallAction(db, now, viewer, data)),
   );

@@ -13,6 +13,7 @@ import { seedUser } from "../../tests/helpers/users";
 import {
   assetPrices,
   games,
+  teamEventTotals,
   lineupPicks,
   poolAssets,
   profiles,
@@ -31,6 +32,9 @@ import { markWatched } from "@/spoilers/reveal";
 import {
   builderState,
   constructorCode,
+  lateCallAction,
+  lockedView,
+  playChipAction,
   poolAvailability,
   saveTeamAction,
   type BuilderState,
@@ -264,6 +268,93 @@ describe("builderState before round 1's lock", () => {
     expect(locked.phase).toBe("locked");
   });
 
+  it("chips: one per race, a Late Call is played with its swap, and a page's event is the open one", async () => {
+    const { userId, teamId } = await newTeam(db, now, gameId);
+    const viewer = await viewerOf(db, userId);
+    const round1 = await round2026(db, 1);
+    const play = (chipCode: string, eventId = round1.id) =>
+      playChipAction(db, now, viewer, { teamId, eventId, chipCode });
+
+    expect(await play("chip_final_fix")).toEqual({
+      ok: false,
+      error: "chip_unavailable",
+    });
+    expect(await play("chip_autopilot", (await round2026(db, 2)).id)).toEqual({
+      ok: false,
+      error: "chip_window_closed",
+    });
+    expect(
+      await playChipAction(db, now, viewer, {
+        teamId,
+        eventId: round1.id,
+        chipCode: "chip_autopilot",
+        targetAssetId: newId(),
+      }),
+    ).toEqual({ ok: false, error: "composition" });
+    expect(await play("chip_autopilot")).toEqual({ ok: true });
+    // One per race.
+    expect(await play("chip_no_negative")).toEqual({
+      ok: false,
+      error: "chip_unavailable",
+    });
+    const state = await builderState(db, now, {
+      teamId,
+      reader: unprotected(userId),
+    });
+    expect(state.chips.find((c) => c.name === "Strategist")).toMatchObject({
+      status: "played",
+      effect: "autopilot",
+    });
+
+    // Late Call is for a locked event.
+    expect(
+      await lateCallAction(db, now, viewer, {
+        teamId,
+        eventId: round1.id,
+        outAssetId: newId(),
+        inAssetId: newId(),
+      }),
+    ).toEqual({ ok: false, error: "chip_window_closed" });
+  });
+
+  it("from the lock the builder carries the locked team, with nothing scored yet", async () => {
+    const { userId, teamId } = await newTeam(db, now, gameId);
+    const open = await builderState(db, now, {
+      teamId,
+      reader: unprotected(userId),
+    });
+    expect(open.locked).toBeNull();
+    const picks = cheapest(open);
+    expect(
+      await saveTeamAction(db, now, await viewerOf(db, userId), {
+        teamId,
+        eventId: open.event!.id,
+        picks,
+        basedOnVersionId: open.basedOnVersionId,
+      }),
+    ).toMatchObject({ ok: true });
+
+    const round1 = await round2026(db, 1);
+    const lockAt = await lockRound(t.db as never, gameId, round1.id);
+    const state = await builderState(db, new Date(lockAt.getTime() + MINUTE), {
+      teamId,
+      reader: { userId, spoilerProtection: true },
+    });
+    expect(state.phase).toBe("locked");
+    expect(byAsset(state.locked!.picks)).toEqual(byAsset(picks));
+    expect(state.locked).toMatchObject({
+      chip: null,
+      total: null,
+      status: null,
+      assetPoints: {},
+      lateCallPlayed: false,
+    });
+    expect(state.locked!.sessions.map((s) => [s.label, s.scored])).toEqual([
+      ["Qualifying", false],
+      ["Race", false],
+    ]);
+  });
+
   it("Hadjar in rounds 12 to 14 is out", async () => {
     const hadjar = await idFor(db, "driver", "hadjar");
     const [asset] = await db
@@ -402,6 +493,138 @@ describe("builderState after round 1 is final", () => {
     expect(state.chips.find((c) => c.name === "Rebuild")?.status).toBe(
       "available",
     );
+  });
+
+  /** Round 1's stored totals for a team, and its sessions by label. */
+  async function round1Scores(teamId: string) {
+    const round1 = await round2026(db, 1);
+    const [totals] = await db
+      .select()
+      .from(teamEventTotals)
+      .where(
+        and(
+          eq(teamEventTotals.teamId, teamId),
+          eq(teamEventTotals.eventId, round1.id),
+        ),
+      );
+    const list = await db
+      .select({ id: sessions.id, kind: sessions.kind })
+      .from(sessions)
+      .where(eq(sessions.eventId, round1.id));
+    const id = (kind: string) => list.find((s) => s.kind === kind)!.id;
+    return {
+      eventId: round1.id,
+      totals: totals!,
+      qualifying: id("qualifying"),
+      race: id("race"),
+    };
+  }
+
+  it("locked view has no points for a hidden session and no total", async () => {
+    const team = await lockedTeam();
+    const scores = await round1Scores(team.teamId);
+    const reader = { userId: team.userId, spoilerProtection: true };
+    const view = await lockedView(db, now, {
+      teamId: team.teamId,
+      eventId: scores.eventId,
+      reader,
+    });
+    expect(byAsset(view.picks)).toEqual(
+      byAsset(await picksOf(db, team.lockedVersionId)),
+    );
+    expect(
+      view.sessions.map((s) => [s.label, s.scored, s.revealed, s.points]),
+    ).toEqual([
+      ["Qualifying", true, false, null],
+      ["Race", true, false, null],
+    ]);
+    expect(view).toMatchObject({ total: null, status: null, assetPoints: {} });
+
+    // Show it: that session, this once, and still no total.
+    const shown = await lockedView(db, now, {
+      teamId: team.teamId,
+      eventId: scores.eventId,
+      reader,
+      show: [scores.qualifying],
+    });
+    expect(shown.sessions[0]).toMatchObject({
+      revealed: true,
+      points: scores.totals.pointsBySession[scores.qualifying],
+    });
+    expect(shown.sessions[1]).toMatchObject({ revealed: false, points: null });
+    expect(shown).toMatchObject({ total: null, assetPoints: {} });
+    // Nothing was stored.
+    expect(
+      (
+        await lockedView(db, now, {
+          teamId: team.teamId,
+          eventId: scores.eventId,
+          reader,
+        })
+      ).sessions[0]!.revealed,
+    ).toBe(false);
+  });
+
+  it("after Mark as watched it has both", async () => {
+    const team = await lockedTeam();
+    const scores = await round1Scores(team.teamId);
+    const reader = { userId: team.userId, spoilerProtection: true };
+    const read = () =>
+      lockedView(db, now, {
+        teamId: team.teamId,
+        eventId: scores.eventId,
+        reader,
+      });
+
+    await markWatched(db, now, {
+      userId: team.userId,
+      sessionIds: [scores.qualifying],
+    });
+    const half = await read();
+    expect(half.sessions.map((s) => s.points)).toEqual([
+      scores.totals.pointsBySession[scores.qualifying],
+      null,
+    ]);
+    expect(half.total).toBeNull();
+
+    await markWatched(db, now, {
+      userId: team.userId,
+      sessionIds: [scores.race],
+    });
+    const both = await read();
+    expect(both.sessions.map((s) => s.points)).toEqual([
+      scores.totals.pointsBySession[scores.qualifying],
+      scores.totals.pointsBySession[scores.race],
+    ]);
+    expect(both).toMatchObject({
+      total: scores.totals.points,
+      status: "final",
+    });
+    // Each pick's points add up to the sessions' (no event-level lines in
+    // a team's first race).
+    const sum = Object.values(both.assetPoints).reduce((a, b) => a + b, 0);
+    expect(sum).toBe(
+      Object.values(scores.totals.pointsBySession).reduce((a, b) => a + b, 0),
+    );
+    expect(
+      Object.keys(both.assetPoints).every((id) =>
+        both.picks.some((p) => p.assetId === id),
+      ),
+    ).toBe(true);
+  });
+
+  it("with spoiler protection off, everything shows", async () => {
+    const team = await lockedTeam();
+    const scores = await round1Scores(team.teamId);
+    const view = await lockedView(db, now, {
+      teamId: team.teamId,
+      eventId: scores.eventId,
+      reader: unprotected(team.userId),
+    });
+    expect(view.sessions.every((s) => s.revealed && s.points !== null)).toBe(
+      true,
+    );
+    expect(view.total).toBe(scores.totals.points);
   });
 
   it("a page built for round 1 can't save into round 2", async () => {

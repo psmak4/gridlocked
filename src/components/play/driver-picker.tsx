@@ -70,8 +70,9 @@ type DriverPickerProps = {
   transferLine: string | null;
   onPick: (assetId: string) => void;
   /** Puts the 2× Boost on the driver being replaced, or takes it off. */
-  onBoost: (on: boolean) => void;
-  onRemove: () => void;
+  onBoost?: (on: boolean) => void;
+  /** Takes the pick out; left out for a swap that must fill the slot. */
+  onRemove?: () => void;
 };
 
 /**
@@ -127,9 +128,9 @@ export function DriverPicker({
         ) : null}
       </div>
 
-      {replacing ? (
+      {replacing && (onBoost || onRemove) ? (
         <div className="flex flex-col gap-space-2">
-          {kind === "driver" ? (
+          {kind === "driver" && onBoost ? (
             <Switch
               id="boost-switch"
               label="2× Boost"
@@ -138,9 +139,11 @@ export function DriverPicker({
               onChange={onBoost}
             />
           ) : null}
-          <Button variant="quiet" block onClick={onRemove}>
-            Remove {replacing.row.title}
-          </Button>
+          {onRemove ? (
+            <Button variant="quiet" block onClick={onRemove}>
+              Remove {replacing.row.title}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

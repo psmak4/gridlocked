@@ -193,6 +193,13 @@ The screens are on the canvas [Gridlocked wave 2](https://claude.ai/artifact/6ff
 - **Chips** stays out of the bar until the chip sheet (Task 9). The chip sentences are the board's.
 - **A save names the round it was built for.** A page left open across a lock says "Your team locked at 14:00." and turns to the locked team, even if the next round has opened since. The draft stays in the browser.
 
+**As built (M6 Task 9, chips, Late Call and the locked team):**
+- **"Chips · 6" sits beside Save team**, counting the chips left this season. Each row says why it can't be played: "Played", "Used in <race>", "From your second race", "One per race", or "Save your team first" for Overdrive, which goes on the team as saved.
+- **Every chip has a confirm step** that ends with "You can't undo this." Overdrive asks for its driver first, and the 2× Boost driver is shown but can't be picked ("Has your 2× Boost").
+- **Late Call isn't played from the sheet.** There it says "Opens after qualifying" (or "From your second race"). The locked team's bar has "Play Late Call", disabled with "Opens after qualifying" until qualifying's results are in, then "Play Late Call · swap one driver". That leads to who goes out, who comes in (the driver picker within the race's budget), and the confirm step.
+- **The locked team shows one row per scored session**, each in a SpoilerCover ("Qualifying — scores are in"). Each row's points and "This weekend" show only once every scored session is revealed. Before anything is scored the screen says "Your points show here after each session."
+- **"Show it" puts the session in the page's address (`?show=`)**, and the server sends its figure for that page only. Nothing is stored, and a hidden figure never reaches the browser. "Mark as watched" is stored, so every page and device shows it.
+
 ## Wave 3: weekend and game (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF1XbqGJnSS9SwGRh1pHD) (private to you). It uses the same design system and rules as wave 2. The sample week is before round 19, the Mexico City Grand Prix, with points from round 18. Numbers, usernames and results are illustrative.
 
