@@ -5,7 +5,7 @@
  */
 import type { GameErrorCode } from "@/game/errors";
 import { formatMoney, type MoneyUnits } from "@/lib/money";
-import type { PoolRow } from "@/play/builder";
+import type { ChipState, PoolRow } from "@/play/builder";
 import type { TeamPreview, TeamProblem } from "@/play/preview";
 
 const MINUTE_MS = 60_000;
@@ -198,4 +198,88 @@ export function inactiveWords(picked: PoolRow[]): string | null {
     return `${names(doubtful)} ${doubtful.length === 1 ? "is" : "are"} doubtful for this race.`;
   }
   return null;
+}
+
+/**
+ * What a chip's row on the chip sheet says on its right, and whether it can
+ * be played from there. Late Call is played from the locked team, so on the
+ * sheet it only says when it opens.
+ */
+export function chipRow(
+  chip: ChipState,
+  ctx: {
+    /** Another chip is played for this race already. */
+    anotherPlayed: boolean;
+    /** Overdrive has a saved team to pick its driver from. */
+    overdriveReady: boolean;
+  },
+): { label: string; playable: boolean } {
+  switch (chip.status) {
+    case "played":
+      return { label: "Played", playable: false };
+    case "used":
+      return {
+        label: chip.playedFor ? `Used in ${chip.playedFor}` : "Used",
+        playable: false,
+      };
+    case "locked_until_first_race":
+      return { label: "From your second race", playable: false };
+    case "available":
+      break;
+  }
+  if (chip.effect === "final_fix") {
+    return { label: "Opens after qualifying", playable: false };
+  }
+  if (ctx.anotherPlayed) return { label: "One per race", playable: false };
+  if (chip.effect === "triple_boost" && !ctx.overdriveReady) {
+    return { label: "Save your team first", playable: false };
+  }
+  return { label: "Play", playable: true };
+}
+
+/** How many chips are left to play this season: "Chips · 6". */
+export function chipsLeft(chips: ChipState[]): number {
+  return chips.filter(
+    (c) => c.status === "available" || c.status === "locked_until_first_race",
+  ).length;
+}
+
+/** A chip the database refused, in plain words. */
+export function chipWords(
+  error: GameErrorCode | "server_error",
+  ctx: { lockAt: string | null; timeZone: string },
+): string {
+  switch (error) {
+    case "chip_unavailable":
+      return "That chip can't be played. Each chip works once a season, one per race.";
+    case "chip_window_closed":
+      return ctx.lockAt
+        ? `Your team locked at ${clockTime(ctx.lockAt, ctx.timeZone)}, so chips are closed.`
+        : "Chips are closed for now.";
+    case "composition":
+      return "Pick a driver from your saved team, without the 2× Boost.";
+    case "server_error":
+      return "The chip wasn't played. Try again.";
+    default:
+      return teamWords(error, ctx);
+  }
+}
+
+/** A Late Call the database refused, in plain words. */
+export function lateCallWords(error: GameErrorCode | "server_error"): string {
+  switch (error) {
+    case "chip_window_closed":
+      return "Late Call is closed: it ends when the race starts.";
+    case "chip_unavailable":
+      return "Late Call can't be played. It works once a season, and not in a race you played another chip for.";
+    case "composition":
+      return "That swap isn't allowed. Pick someone who isn't in your team.";
+    case "over_budget":
+      return "That swap is over the cap at this race's prices.";
+    case "team_retired":
+    case "team_not_owned":
+      return teamWords(error, { lockAt: null, timeZone: "UTC" });
+    default:
+      return "Late Call wasn't played. Try again.";
+  }
 }

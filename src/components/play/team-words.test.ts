@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { PoolRow } from "@/play/builder";
+import type { ChipState, PoolRow } from "@/play/builder";
 import type { TeamPreview } from "@/play/preview";
 import {
+  chipRow,
+  chipsLeft,
+  chipWords,
   clockTime,
+  lateCallWords,
   countdownTick,
   inactiveWords,
   lockCountdown,
@@ -209,5 +213,97 @@ describe("inactiveWords", () => {
       "Oliver Bearman is doubtful for this race.",
     );
     expect(inactiveWords([row("A", "available")])).toBeNull();
+  });
+});
+
+const chip = (over: Partial<ChipState>): ChipState => ({
+  code: "chip_autopilot",
+  name: "Strategist",
+  effect: "autopilot",
+  sentence: "After the weekend, your Boost moves to your top scorer.",
+  status: "available",
+  playedFor: null,
+  ...over,
+});
+const READY = { anotherPlayed: false, overdriveReady: true };
+
+describe("chipRow", () => {
+  it("an available chip can be played", () => {
+    expect(chipRow(chip({}), READY)).toEqual({ label: "Play", playable: true });
+  });
+
+  it("played, used, and waiting for the second race can't", () => {
+    expect(chipRow(chip({ status: "played" }), READY)).toEqual({
+      label: "Played",
+      playable: false,
+    });
+    expect(
+      chipRow(
+        chip({ status: "used", playedFor: "Australian Grand Prix" }),
+        READY,
+      ),
+    ).toEqual({ label: "Used in Australian Grand Prix", playable: false });
+    expect(
+      chipRow(chip({ status: "locked_until_first_race" }), READY).label,
+    ).toBe("From your second race");
+  });
+
+  it("Late Call says when it opens; another chip this race blocks the rest", () => {
+    expect(
+      chipRow(chip({ effect: "final_fix", name: "Late Call" }), READY),
+    ).toEqual({ label: "Opens after qualifying", playable: false });
+    expect(chipRow(chip({}), { ...READY, anotherPlayed: true })).toEqual({
+      label: "One per race",
+      playable: false,
+    });
+  });
+
+  it("Overdrive waits for a saved team", () => {
+    expect(
+      chipRow(chip({ effect: "triple_boost" }), {
+        ...READY,
+        overdriveReady: false,
+      }),
+    ).toEqual({ label: "Save your team first", playable: false });
+  });
+
+  it("chips left counts what can still be played this season", () => {
+    expect(
+      chipsLeft([
+        chip({}),
+        chip({ status: "locked_until_first_race" }),
+        chip({ status: "played" }),
+        chip({ status: "used" }),
+      ]),
+    ).toBe(2);
+  });
+});
+
+describe("chipWords and lateCallWords", () => {
+  it("say why a chip was refused", () => {
+    expect(chipWords("chip_unavailable", LONDON)).toBe(
+      "That chip can't be played. Each chip works once a season, one per race.",
+    );
+    expect(chipWords("chip_window_closed", LONDON)).toBe(
+      "Your team locked at 14:00, so chips are closed.",
+    );
+    expect(chipWords("team_retired", LONDON)).toBe(
+      "This team is retired, so it can't be changed.",
+    );
+    expect(chipWords("server_error", LONDON)).toBe(
+      "The chip wasn't played. Try again.",
+    );
+  });
+
+  it("say why a Late Call was refused", () => {
+    expect(lateCallWords("chip_window_closed")).toBe(
+      "Late Call is closed: it ends when the race starts.",
+    );
+    expect(lateCallWords("over_budget")).toBe(
+      "That swap is over the cap at this race's prices.",
+    );
+    expect(lateCallWords("server_error")).toBe(
+      "Late Call wasn't played. Try again.",
+    );
   });
 });

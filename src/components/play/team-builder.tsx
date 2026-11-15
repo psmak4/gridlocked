@@ -11,10 +11,15 @@ import { formatMoney } from "@/lib/money";
 import { useHydrated } from "@/lib/use-hydrated";
 import type { BuilderPage, PoolRow, SaveTeamResult } from "@/play/builder";
 import { previewTeam } from "@/play/preview";
+import { ChipSheet } from "./chip-sheet";
 import { availabilityBadge, DriverPicker, rowFigures } from "./driver-picker";
+import { LateCallFlow, LockedScores } from "./locked-team";
 import {
+  chipsLeft,
+  chipWords,
   countdownTick,
   inactiveWords,
+  lateCallWords,
   lockCountdown,
   overCapWords,
   penaltyWords,
@@ -32,9 +37,27 @@ type SaveInput = {
   basedOnVersionId: string | null;
 };
 
+type ActionResult = { ok: true } | { ok: false; error: GameErrorCode };
+
 type TeamBuilderProps = {
   page: BuilderPage;
   save: (input: SaveInput) => Promise<SaveTeamResult>;
+  playChip: (input: {
+    teamId: string;
+    eventId: string;
+    chipCode: string;
+    targetAssetId?: string;
+  }) => Promise<ActionResult>;
+  lateCall: (input: {
+    teamId: string;
+    eventId: string;
+    outAssetId: string;
+    inAssetId: string;
+  }) => Promise<ActionResult>;
+  /** "Mark as watched": stored for the viewer. */
+  markWatched: (sessionIds: string[]) => Promise<unknown>;
+  /** "Show it": reveals a session on this page only (the URL's `?show=`). */
+  show: (sessionId: string) => void;
   /** Reads the page again (the route loader). */
   reload: () => Promise<void>;
 };
@@ -68,6 +91,11 @@ const sectionTitle =
 
 type Slot = { kind: "driver" | "constructor"; pick: LineupPick | null };
 
+/** A locked pick's figure: its points so far once shown, else nothing. */
+function lockedFigure(points: number | undefined) {
+  return { figure: points === undefined ? undefined : `${points} pts` };
+}
+
 /** An empty slot: a dashed row that opens the picker. */
 function EmptySlot({
   kind,
@@ -98,16 +126,26 @@ function EmptySlot({
  * browser until saved. The preview is the friendlier early answer; the
  * save's refusal, in words, is the final one.
  */
-export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
+export function TeamBuilder({
+  page,
+  save,
+  playChip,
+  lateCall,
+  markWatched,
+  show,
+  reload,
+}: TeamBuilderProps) {
   const { state, timeZone } = page;
   const { team, event } = state;
   const open = state.phase === "open" && event !== null;
   const saved = state.latest?.picks ?? state.base ?? null;
   const draft = useDraft(team.id, event?.id ?? "none", saved);
-  // Locked or between: the team as saved, never the draft (which stays).
+  // Locked: the lineup that counts. Between: the team as saved. Never the
+  // draft, which stays in the browser.
   const picks = useMemo(
-    () => (open ? draft.picks : (state.latest?.picks ?? [])),
-    [open, draft.picks, state.latest],
+    () =>
+      open ? draft.picks : (state.locked?.picks ?? state.latest?.picks ?? []),
+    [open, draft.picks, state.locked, state.latest],
   );
 
   const preview = useMemo(() => previewTeam(state, picks), [state, picks]);
@@ -123,6 +161,8 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
     theirs: LineupPick[] | null;
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [chipsShown, setChipsShown] = useState(false);
+  const [lateCallShown, setLateCallShown] = useState(false);
   const [picker, setPicker] = useState<{
     kind: "driver" | "constructor";
     replacing: string | null;
@@ -200,6 +240,83 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
     }
   }
 
+  // --- Chips -------------------------------------------------------------------
+  const playedChip = state.chips.find((c) => c.status === "played") ?? null;
+  const savedPicks = state.latest?.picks ?? state.base ?? [];
+  // Overdrive goes on the team as saved, so not while there are changes.
+  const overdriveDrivers =
+    open && !changed
+      ? savedPicks
+          .map((pick) => ({
+            row: rows.get(pick.assetId),
+            isBoost: pick.isBoost,
+          }))
+          .filter(
+            (p): p is { row: PoolRow; isBoost: boolean } =>
+              p.row?.kind === "driver",
+          )
+      : [];
+
+  async function onPlayChip(
+    code: string,
+    targetAssetId: string | null,
+  ): Promise<string | null> {
+    if (!event) return null;
+    const ctx = { lockAt: event.lockAt, timeZone };
+    try {
+      const result = await playChip({
+        teamId: team.id,
+        eventId: event.id,
+        chipCode: code,
+        ...(targetAssetId ? { targetAssetId } : {}),
+      });
+      await reload();
+      if (!result.ok) return chipWords(result.error, ctx);
+      const name = state.chips.find((c) => c.code === code)?.name ?? "Chip";
+      setToast({ text: `${name} played`, theirs: null });
+      return null;
+    } catch {
+      return chipWords("server_error", ctx);
+    }
+  }
+
+  const lateCallChip = state.chips.find((c) => c.effect === "final_fix");
+  const lateCallOffered =
+    state.phase === "locked" &&
+    lateCallChip?.status === "available" &&
+    playedChip === null;
+
+  async function onLateCall(outAssetId: string, inAssetId: string) {
+    if (!event) return;
+    setMessage(null);
+    try {
+      const result = await lateCall({
+        teamId: team.id,
+        eventId: event.id,
+        outAssetId,
+        inAssetId,
+      });
+      await reload();
+      if (!result.ok) {
+        setMessage(lateCallWords(result.error));
+        return;
+      }
+      setToast({ text: "Late Call played", theirs: null });
+    } catch {
+      setMessage(lateCallWords("server_error"));
+    }
+  }
+
+  async function onMarkWatched(sessionId: string) {
+    setMessage(null);
+    try {
+      await markWatched([sessionId]);
+      await reload();
+    } catch {
+      setMessage("That wasn't marked as watched. Try again.");
+    }
+  }
+
   // --- The picker --------------------------------------------------------------
   const replacing = picker?.replacing
     ? picks.find((p) => p.assetId === picker.replacing)
@@ -265,6 +382,9 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
     const badges: { tone: "boost" | "caution" | "neutral"; label: string }[] =
       [];
     if (pick.isBoost) badges.push({ tone: "boost", label: "2×" });
+    if (state.x3TargetAssetId === pick.assetId) {
+      badges.push({ tone: "boost", label: "3×" });
+    }
     const inactive = availabilityBadge(row);
     if (inactive) badges.push(inactive);
     if (open && state.base !== null && !row.inBase) {
@@ -277,7 +397,9 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
           teamColor={row.color}
           title={row.title}
           subtitle={row.subtitle}
-          {...rowFigures(row)}
+          {...(state.locked
+            ? lockedFigure(state.locked.assetPoints[pick.assetId])
+            : rowFigures(row))}
           badges={badges}
           onClick={
             open
@@ -333,6 +455,14 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
         />
       )}
 
+      {state.locked ? (
+        <LockedScores
+          view={state.locked}
+          onShow={show}
+          onMarkWatched={(id) => void onMarkWatched(id)}
+        />
+      ) : null}
+
       {message ? (
         <p
           role="alert"
@@ -377,6 +507,15 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
           {inactive}
         </p>
       ) : null}
+      {state.locked?.lateCallPlayed ? (
+        <p className="m-0 text-[16px] leading-[22px] font-semibold">
+          Late Call played.
+        </p>
+      ) : playedChip && !state.limitless ? (
+        <p className="m-0 text-[16px] leading-[22px] font-semibold">
+          {playedChip.name} is played for this race.
+        </p>
+      ) : null}
       {state.phase === "between" ? (
         <p className="m-0 text-[16px] leading-[22px]">
           The next race opens for picks once this one is final.
@@ -412,7 +551,7 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
         </ul>
       </section>
 
-      {open ? (
+      {open || lateCallOffered || toast ? (
         <div className="fixed inset-x-0 bottom-[calc(60px+env(safe-area-inset-bottom))] z-10 flex flex-col gap-space-2 border-t border-line bg-surface px-space-4 py-[10px] lg:bottom-0 lg:left-[240px]">
           {toast ? (
             <Toast
@@ -427,18 +566,67 @@ export function TeamBuilder({ page, save, reload }: TeamBuilderProps) {
               {toast.text}
             </Toast>
           ) : null}
-          <div className="mx-auto flex w-full max-w-[1200px] gap-[10px]">
-            <Button
-              size="l"
-              block
-              disabled={!canSave}
-              onClick={() => void onSave()}
-            >
-              {saving ? "Saving…" : "Save team"}
-            </Button>
-          </div>
+          {open ? (
+            <div className="mx-auto flex w-full max-w-[1200px] gap-[10px]">
+              <Button
+                variant="secondary"
+                size="l"
+                onClick={() => setChipsShown(true)}
+              >
+                Chips · {chipsLeft(state.chips)}
+              </Button>
+              <div className="flex-1">
+                <Button
+                  size="l"
+                  block
+                  disabled={!canSave}
+                  onClick={() => void onSave()}
+                >
+                  {saving ? "Saving…" : "Save team"}
+                </Button>
+              </div>
+            </div>
+          ) : lateCallOffered ? (
+            <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-space-1">
+              <Button
+                variant="secondary"
+                size="l"
+                block
+                disabled={!state.lateCallOpen}
+                onClick={() => setLateCallShown(true)}
+              >
+                {state.lateCallOpen
+                  ? "Play Late Call · swap one driver"
+                  : "Play Late Call"}
+              </Button>
+              {state.lateCallOpen ? null : (
+                <p className="m-0 text-center text-[14px] text-ink-muted">
+                  Opens after qualifying
+                </p>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
+
+      {chipsShown ? (
+        <ChipSheet
+          open
+          onClose={() => setChipsShown(false)}
+          chips={state.chips}
+          drivers={overdriveDrivers}
+          onPlay={onPlayChip}
+        />
+      ) : null}
+
+      <LateCallFlow
+        open={lateCallShown}
+        onClose={() => setLateCallShown(false)}
+        picks={picks}
+        pool={state.pool}
+        purchasingPower={state.purchasingPower}
+        onPlay={onLateCall}
+      />
 
       {picker ? (
         <DriverPicker

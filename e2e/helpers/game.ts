@@ -62,6 +62,9 @@ function roundTimes(round: number) {
 }
 
 export const ROUND_1 = roundTimes(1);
+/** Round 2, a sprint weekend: its lock is sprint qualifying's start. */
+export const ROUND_2 = roundTimes(2);
+export const ROUND_3 = roundTimes(3);
 
 /** What `GET /api/test/game` reports of the seeded game. */
 export type GameState = {
