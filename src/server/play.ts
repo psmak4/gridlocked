@@ -23,7 +23,6 @@ import {
   saveTeamInput,
 } from "@/play/builder";
 import { breakdownForSlot, getBreakdownInput } from "@/play/breakdown";
-import { currentGame, type CurrentGame } from "@/play/current-game";
 import { getHomeInput, homeState } from "@/play/home";
 import {
   createLeagueAction,
@@ -51,8 +50,8 @@ import {
   teamsPage,
 } from "@/play/teams";
 import { weekendPage, type WeekendPage } from "@/play/weekend";
-import { PUBLIC_CACHE } from "@/lib/public-headers";
-import { withDb, type ServerDb } from "./db";
+import { PUBLIC_CACHE, PUBLIC_VARY } from "@/lib/public-headers";
+import type { ServerDb } from "./db";
 import {
   markSessionsWatchedAction,
   markSessionsWatchedInput,
@@ -87,28 +86,6 @@ export const markSessionsWatched = createServerFn({ method: "POST" })
       markSessionsWatchedAction(db, now, viewer, data),
     ),
   );
-
-/** Each request's answer, so the loaders of one page read it once. */
-const currentGameByRequest = new WeakMap<
-  Request,
-  Promise<CurrentGame | null>
->();
-
-/**
- * The season's game, or null before it opens (`<NoGame />`). The same for
- * everyone, so it is read without the viewer, once per request.
- */
-export const getCurrentGame = createServerFn({ method: "GET" }).handler(
-  (): Promise<CurrentGame | null> => {
-    const request = getRequest();
-    let found = currentGameByRequest.get(request);
-    if (!found) {
-      found = withDb((db) => currentGame(db));
-      currentGameByRequest.set(request, found);
-    }
-    return found;
-  },
-);
 
 /** `/team` and the builder's header: the current game and the viewer's teams. */
 export const getTeams = createServerFn({ method: "GET" }).handler(() =>
@@ -172,13 +149,24 @@ export const playLateCall = createServerFn({ method: "POST" })
 export const getWeekend = createServerFn({ method: "GET" }).handler(
   async (): Promise<WeekendPage> => {
     const viewer = await getViewer(getRequest());
-    setResponseHeader(
-      "Cache-Control",
-      viewer ? "private, no-store" : PUBLIC_CACHE,
-    );
+    cacheFor(viewer);
     return withRequestNow((db, now) => weekendPage(db, now, viewer));
   },
 );
+
+/**
+ * A public answer's headers: private for a signed-in viewer, else cacheable
+ * and keyed on the cookie, so the CDN never answers a signed-in request from
+ * a logged-out visitor's copy (the server-function URL is the same for both).
+ */
+function cacheFor(viewer: unknown) {
+  if (viewer) {
+    setResponseHeader("Cache-Control", "private, no-store");
+    return;
+  }
+  setResponseHeader("Cache-Control", PUBLIC_CACHE);
+  setResponseHeader("Vary", PUBLIC_VARY);
+}
 
 /**
  * `/prices`, the price board. Public (decisions 3 and 4): a logged-out
@@ -191,19 +179,22 @@ export const getPrices = createServerFn({ method: "GET" })
   .handler(
     async ({ data }): Promise<{ hasGame: boolean; board: PriceBoard }> => {
       const viewer = await getViewer(getRequest());
-      setResponseHeader(
-        "Cache-Control",
-        viewer ? "private, no-store" : PUBLIC_CACHE,
-      );
+      cacheFor(viewer);
       return withRequestNow((db, now) => pricesPage(db, now, viewer, data));
     },
   );
 
-/** `/prices/how`: the formula in words. The same for everyone, so public. */
-export const getHowPrices = createServerFn({ method: "GET" }).handler(() => {
-  setResponseHeader("Cache-Control", PUBLIC_CACHE);
-  return withRequestNow((db) => howPricesPage(db));
-});
+/**
+ * `/prices/how`: the formula in words. The answer is the same for everyone,
+ * but a signed-in viewer's page carries their account, so only a logged-out
+ * visitor's is public.
+ */
+export const getHowPrices = createServerFn({ method: "GET" }).handler(
+  async () => {
+    cacheFor(await getViewer(getRequest()));
+    return withRequestNow((db) => howPricesPage(db));
+  },
+);
 
 /** Home for someone signed in: the weekend, the countdown and your season. */
 export const getHome = createServerFn({ method: "GET" })

@@ -104,10 +104,14 @@ export function createTeamAction(
           userId: v.userId,
           name: data.name,
         });
+        // Locked as `updateProfile` locks it (user, then profile: the team's
+        // foreign key took the user row first), so a favorites change in
+        // flight finishes before this reads which auto leagues to join.
         const [profile] = await t
           .select()
           .from(profiles)
-          .where(eq(profiles.userId, v.userId));
+          .where(eq(profiles.userId, v.userId))
+          .for("no key update");
         if (!profile) throw new Error(`createTeamAction: no profile`);
         await syncProfileAutoLeagues(t, now, { gameId: game.id, profile });
         const [team] = await t

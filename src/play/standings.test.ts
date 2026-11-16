@@ -167,6 +167,19 @@ describe("league standings on the fantasy screens", () => {
     expect(rest.rows[0]!.last).toBe(20);
   });
 
+  it("a tie that runs to the end of the table offers no See more", async () => {
+    const a = await team("Apex Predators");
+    const b = await team("Late Brakers");
+    const c = await team("Box Box Bunch");
+    await score(a, [50]);
+    await score(b, [40]);
+    await score(c, [40]);
+    const { slug } = await league([a, b, c], 1);
+    const p = await page(slug, { limit: 2 });
+    expect(p.rows.map((r) => r.rank)).toEqual([1, 2, 2]);
+    expect(p.next).toBeNull();
+  });
+
   it("the move is previous minus current", async () => {
     const a = await team("Apex Predators");
     const b = await team("Late Brakers");

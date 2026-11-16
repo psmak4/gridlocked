@@ -9,11 +9,14 @@ import {
   leagueMemberships,
   leagues,
   profiles,
+  sessions,
+  teamEventTotals,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { Viewer } from "@/identity/viewer";
 import { newId } from "@/lib/ids";
 import { createLeague, joinLeague } from "@/leagues/leagues";
+import { recomputeStandings } from "@/leagues/standings";
 import {
   createLeagueAction,
   joinLeagueAction,
@@ -53,11 +56,15 @@ describe("leagues on the fantasy screens", () => {
   let gameId: string;
   let otherGameId: string;
   let driverIds: string[];
+  let eventIds: string[];
 
   beforeEach(async () => {
     t = await createTestDb();
     db = t.db as unknown as Db;
-    ({ gameId, otherGameId, driverIds } = await seedLeagueGames(db, NOW));
+    ({ gameId, otherGameId, driverIds, eventIds } = await seedLeagueGames(
+      db,
+      NOW,
+    ));
   });
 
   afterEach(async () => {
@@ -320,6 +327,55 @@ describe("leagues on the fantasy screens", () => {
         teamId,
       }),
     ).toEqual({ ok: false, error: "league_not_found" });
+  });
+
+  it("Review Focus 3: while the race is hidden, a league row has no rank or move", async () => {
+    const { userId, viewer, teamId } = await player();
+    const made = await createLeagueAction(db, NOW, viewer, {
+      teamId,
+      name: "Monday Night League",
+      kind: "private",
+    });
+    if (!made.ok) throw new Error("not made");
+    await db.insert(teamEventTotals).values({
+      gameId,
+      teamId,
+      eventId: eventIds[0]!,
+      eventSequence: 1,
+      points: 50,
+      pointsBySession: {},
+      cumulativePoints: 50,
+      firstReachedSequence: 1,
+      globalRank: 1,
+      status: "provisional",
+      computedAt: NOW,
+    });
+    await recomputeStandings(db, NOW, { gameId, eventId: eventIds[0]! });
+    const [race] = await db
+      .select({ start: sessions.scheduledStart })
+      .from(sessions)
+      .where(
+        and(eq(sessions.eventId, eventIds[0]!), eq(sessions.kind, "race")),
+      );
+    const during = new Date(race!.start.getTime() + 2 * 60 * 60 * 1000);
+
+    const hidden = await myLeagues(db, during, {
+      gameId,
+      userId,
+      reader: { userId, spoilerProtection: true },
+    });
+    const rows = [...hidden.yours, ...hidden.automatic];
+    expect(rows.length).toBeGreaterThan(1);
+    for (const row of rows) {
+      expect(row).toMatchObject({ rank: null, move: null });
+    }
+
+    const open = await myLeagues(db, during, {
+      gameId,
+      userId,
+      reader: { userId, spoilerProtection: false },
+    });
+    expect(open.yours[0]).toMatchObject({ rank: 1 });
   });
 
   it("someone else's team can't join or leave", async () => {
