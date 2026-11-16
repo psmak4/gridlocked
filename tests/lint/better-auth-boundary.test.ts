@@ -26,7 +26,8 @@ describe("Better Auth import boundary", () => {
     const code =
       'import { betterAuth } from "better-auth";\nexport const a = betterAuth;\n';
     for (const filePath of [
-      "src/identity/auth.ts",
+      "src/identity/auth/index.ts",
+      "src/identity/auth/request-hooks.ts",
       "src/identity/auth-client.ts",
       "src/server/session.ts",
     ]) {

@@ -339,6 +339,36 @@ describe("data export (DM 6.7)", () => {
     expect(await expireExports(t.db, week, files.store)).toBe(0);
   });
 
+  it("a file the store can't delete keeps its key, the others go, and the run fails", async () => {
+    const first = await requestExport(t.db, NOW, {
+      userId: await seedUser(t.db),
+    });
+    const second = await requestExport(t.db, NOW, {
+      userId: await seedUser(t.db),
+    });
+    await runJobs(NOW);
+    const stuck = `exports/${first.requestId}.json`;
+    const store = {
+      ...files.store,
+      delete: async (key: string) => {
+        if (key === stuck) throw new Error("storage is down");
+        return files.store.delete(key);
+      },
+    };
+
+    const week = new Date(NOW.getTime() + 7 * DAY);
+    await expect(expireExports(t.db, week, store)).rejects.toThrow(
+      "expireExports: 1 of 2 failed",
+    );
+    expect(files.objects.has(stuck)).toBe(true);
+    expect((await request(first.requestId)).exportObjectKey).toBe(stuck);
+    expect(files.objects.has(`exports/${second.requestId}.json`)).toBe(false);
+    expect((await request(second.requestId)).exportObjectKey).toBeNull();
+    // The next run, with the store back, finishes the job.
+    expect(await expireExports(t.db, week, files.store)).toBe(1);
+    expect(files.objects.has(stuck)).toBe(false);
+  });
+
   it("an export job for a deleted user stops, and any file goes at the next daily run", async () => {
     const actorOf = (userId: string) => ({
       kind: "user" as const,
