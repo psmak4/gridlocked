@@ -340,7 +340,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Logging, with Sentry:** a value-free config-error class, and logging codes instead of "better-auth error: event".
   - **Rate limits:** tune the per-IP and per-path limits with beta traffic.
   - **Job hardening:**
-    - queue `identity_daily` even when `sync_calendar` fails;
+    - ~~queue `identity_daily` even when `sync_calendar` fails~~: done early (2026-11-16). The sync queues it before fetching anything;
     - re-check a stale open export under a lock;
     - pass the Neon plan step only the env it needs.
   - **Legal review:**
