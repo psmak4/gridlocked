@@ -19,6 +19,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as WeekendRouteImport } from './routes/weekend'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
 import { Route as LeaguesIndexRouteImport } from './routes/leagues.index'
+import { Route as LeaguesNewRouteImport } from './routes/leagues.new'
 import { Route as LegalKindRouteImport } from './routes/legal.$kind'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsDataRouteImport } from './routes/settings.data'
@@ -94,6 +95,11 @@ const DevComponentsRoute = DevComponentsRouteImport.update({
 const LeaguesIndexRoute = LeaguesIndexRouteImport.update({
   id: '/leagues/',
   path: '/leagues/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaguesNewRoute = LeaguesNewRouteImport.update({
+  id: '/leagues/new',
+  path: '/leagues/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LegalKindRoute = LegalKindRouteImport.update({
@@ -237,6 +243,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
+  '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/delete': typeof SettingsDeleteRoute
@@ -275,6 +282,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
+  '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/delete': typeof SettingsDeleteRoute
@@ -314,6 +322,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/weekend': typeof WeekendRoute
   '/_dev/components': typeof DevComponentsRoute
+  '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/delete': typeof SettingsDeleteRoute
@@ -354,6 +363,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/weekend'
     | '/components'
+    | '/leagues/new'
     | '/legal/$kind'
     | '/settings/data'
     | '/settings/delete'
@@ -392,6 +402,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/weekend'
     | '/components'
+    | '/leagues/new'
     | '/legal/$kind'
     | '/settings/data'
     | '/settings/delete'
@@ -430,6 +441,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/weekend'
     | '/_dev/components'
+    | '/leagues/new'
     | '/legal/$kind'
     | '/settings/data'
     | '/settings/delete'
@@ -469,6 +481,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   WeekendRoute: typeof WeekendRoute
   DevComponentsRoute: typeof DevComponentsRoute
+  LeaguesNewRoute: typeof LeaguesNewRoute
   LegalKindRoute: typeof LegalKindRoute
   SettingsDataRoute: typeof SettingsDataRoute
   SettingsDeleteRoute: typeof SettingsDeleteRoute
@@ -568,6 +581,13 @@ declare module '@tanstack/react-router' {
       path: '/leagues'
       fullPath: '/leagues/'
       preLoaderRoute: typeof LeaguesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leagues/new': {
+      id: '/leagues/new'
+      path: '/leagues/new'
+      fullPath: '/leagues/new'
+      preLoaderRoute: typeof LeaguesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/legal/$kind': {
@@ -765,6 +785,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   WeekendRoute: WeekendRoute,
   DevComponentsRoute: DevComponentsRoute,
+  LeaguesNewRoute: LeaguesNewRoute,
   LegalKindRoute: LegalKindRoute,
   SettingsDataRoute: SettingsDataRoute,
   SettingsDeleteRoute: SettingsDeleteRoute,

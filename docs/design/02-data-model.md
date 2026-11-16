@@ -1138,7 +1138,7 @@ The HLD fixed the principle: a two-tier ledger, with asset score lines computed 
 | kind | text: `global`, `public`, `private`, `auto_constructor`, `auto_driver`, `auto_country` | Decided 2026-10-27 |
 | name, slug | text | User-named for public and private leagues. Those names are user content (Part 5) |
 | owner_user_id | uuid FK, nullable | Public and private only. If the owner deletes their account, a league admin can reassign it (Part 6) |
-| join_code | text, unique, nullable | Private and public. Random, at least 8 characters, and rate-limited when entered |
+| join_code | text, unique, nullable | Private and public. Random, at least 8 characters, and rate-limited when entered: the `league_join_limit` setting, 10 tries per user in 10 minutes, a right code included (M6) |
 | constructor_id / driver_id / country_code | nullable | Exactly one, matching the `auto_*` kind (`CHECK`) |
 | start_sequence | integer, default 1 | **Mini-leagues:** counts events from here… |
 | end_sequence | integer, nullable | …to here. Null means to the end of the season |

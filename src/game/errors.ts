@@ -20,7 +20,11 @@ export type GameErrorCode =
   | "team_retired"
   | "already_member"
   | "dry_run_required"
-  | "game_not_running";
+  | "game_not_running"
+  /** Too many tries at a join code in the window (M6 Task 12). */
+  | "rate_limited"
+  /** A mini-league's rounds: one isn't in the game, or they're out of order. */
+  | "bad_range";
 
 export class GameError extends Error {
   readonly code: GameErrorCode;
