@@ -2,27 +2,17 @@ import { useId, useState } from "react";
 import { AssetRow } from "@/components/ui/asset-row";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Sheet } from "@/components/ui/sheet";
 import { Toast } from "@/components/ui/toast";
-import type { GameErrorCode } from "@/game/errors";
 import type { LeagueRow, LeaguesPage } from "@/play/leagues";
 import { JoinSheet, type JoinResult } from "./join-sheet";
-import {
-  leagueRefusalWords,
-  leagueSubtitle,
-  moveWords,
-  rankFigure,
-} from "./league-words";
+import { leagueSubtitle, moveWords, rankFigure } from "./league-words";
 
 const sectionTitle =
   "m-0 font-display text-[18px] leading-[22px] font-normal tracking-[0.02em] uppercase";
 
-type Result = { ok: true } | { ok: false; error: GameErrorCode };
-
 type LeaguesScreenProps = {
   page: LeaguesPage;
   join: (data: { code: string; teamId: string }) => Promise<JoinResult>;
-  leave: (data: { leagueId: string; teamId: string }) => Promise<Result>;
   /** Reads the page again (the route loader). */
   reload: () => Promise<void>;
 };
@@ -66,105 +56,13 @@ export function InviteCode({ code }: { code: string }) {
   );
 }
 
-/** One of your leagues: its code to invite with, and Leave. */
-function LeagueSheet({
-  row,
-  onClose,
-  leave,
-  onLeft,
-}: {
-  row: LeagueRow | null;
-  onClose: () => void;
-  leave: LeaguesScreenProps["leave"];
-  onLeft: () => Promise<void>;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const [working, setWorking] = useState(false);
-  const [message, setMessage] = useState<string>();
-  if (!row) return null;
-  const close = () => {
-    setConfirming(false);
-    setMessage(undefined);
-    onClose();
-  };
-  const onLeave = async () => {
-    setWorking(true);
-    setMessage(undefined);
-    try {
-      const result = await leave({
-        leagueId: row.leagueId,
-        teamId: row.teamId,
-      });
-      if (result.ok) {
-        setConfirming(false);
-        await onLeft();
-      } else {
-        setMessage(leagueRefusalWords(result.error));
-      }
-    } catch {
-      setMessage(leagueRefusalWords("server_error"));
-    } finally {
-      setWorking(false);
-    }
-  };
-  return (
-    <Sheet
-      open
-      onClose={close}
-      title={row.name}
-      actions={
-        confirming ? (
-          <Button
-            size="l"
-            block
-            disabled={working}
-            onClick={() => void onLeave()}
-          >
-            {working ? "Leaving…" : "Leave league"}
-          </Button>
-        ) : (
-          <Button
-            variant="quiet"
-            size="l"
-            block
-            onClick={() => setConfirming(true)}
-          >
-            Leave league
-          </Button>
-        )
-      }
-    >
-      <p className="m-0 text-[16px] leading-[22px] text-ink-muted">
-        {leagueSubtitle(row, true)}
-      </p>
-      {row.joinCode ? <InviteCode code={row.joinCode} /> : null}
-      {confirming ? (
-        <p className="m-0 text-[16px] leading-[22px] font-bold">
-          {`${row.teamName} leaves ${row.name}. You can join again with its code.`}
-        </p>
-      ) : null}
-      {message ? (
-        <p role="alert" className="m-0 text-[16px] font-semibold text-fall">
-          {message}
-        </p>
-      ) : null}
-    </Sheet>
-  );
-}
-
 /**
  * My leagues (wave 3): Join with a code and Create a league, then yours and
- * the automatic ones. A rank is covered while its table's latest event is
- * hidden from you (M6 decision 2).
+ * the automatic ones, each a link to its standings. A rank is covered while
+ * its table's latest event is hidden from you (M6 decision 2).
  */
-export function LeaguesScreen({
-  page,
-  join,
-  leave,
-  reload,
-}: LeaguesScreenProps) {
+export function LeaguesScreen({ page, join, reload }: LeaguesScreenProps) {
   const [joining, setJoining] = useState(false);
-  const [open, setOpen] = useState<LeagueRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const { yours, automatic } = page.leagues;
   const many = page.teams.length > 1;
@@ -186,7 +84,7 @@ export function LeaguesScreen({
     );
   }
 
-  const row = (league: LeagueRow, onClick?: () => void) => (
+  const row = (league: LeagueRow) => (
     <li key={`${league.leagueId}:${league.teamId}`}>
       <AssetRow
         title={league.name}
@@ -194,7 +92,7 @@ export function LeaguesScreen({
         figure={rankFigure(league)}
         secondary={moveWords(league.move)}
         tinted={false}
-        onClick={onClick}
+        href={`/leagues/${league.slug}`}
       />
     </li>
   );
@@ -233,7 +131,7 @@ export function LeaguesScreen({
           aria-label="Your leagues"
           className="m-0 flex list-none flex-col gap-space-2 p-0"
         >
-          {yours.map((league) => row(league, () => setOpen(league)))}
+          {yours.map((league) => row(league))}
         </ul>
       )}
 
@@ -261,17 +159,6 @@ export function LeaguesScreen({
           setJoining(false);
           await reload();
           setToast(`You joined ${name}.`);
-        }}
-      />
-      <LeagueSheet
-        row={open}
-        onClose={() => setOpen(null)}
-        leave={leave}
-        onLeft={async () => {
-          const name = open?.name ?? "the league";
-          setOpen(null);
-          await reload();
-          setToast(`You left ${name}.`);
         }}
       />
       {toast ? (

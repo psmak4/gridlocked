@@ -235,7 +235,7 @@ export function HomeScreen({
                   figure={rankFigure(league)}
                   secondary={moveWords(league.move)}
                   tinted={false}
-                  href="/leagues"
+                  href={`/leagues/${league.slug}`}
                 />
               </li>
             ))}

@@ -34,6 +34,7 @@ import {
   leaveLeagueAction,
   leaveLeagueInput,
 } from "@/play/leagues";
+import { getStandingsInput, standingsForViewer } from "@/play/standings";
 import {
   createTeamAction,
   createTeamInput,
@@ -204,6 +205,13 @@ export const joinMyLeague = createServerFn({ method: "POST" })
   .validator(joinLeagueInput)
   .handler(({ data }) =>
     playAction((db, now, viewer) => joinLeagueAction(db, now, viewer, data)),
+  );
+
+/** `/leagues/$slug`: one league's standings, 50 at a time (M6 Task 13). */
+export const getStandings = createServerFn({ method: "GET" })
+  .validator(getStandingsInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => standingsForViewer(db, now, viewer, data)),
   );
 
 /** "Leave league". */

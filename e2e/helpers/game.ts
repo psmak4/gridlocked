@@ -160,3 +160,20 @@ export async function withdrawDriver(
   });
   expect(response.status(), await response.text()).toBe(200);
 }
+
+/**
+ * Adds `count` accounts with saved teams copied from the latest saved one
+ * (the Boost moved round its drivers, so totals differ), in the league with `joinCode`
+ * when given: a table long enough to page.
+ */
+export async function addCrowd(
+  request: APIRequestContext,
+  count: number,
+  joinCode?: string,
+): Promise<void> {
+  const response = await request.patch("/api/test/game", {
+    data: { crowd: count, ...(joinCode ? { joinCode } : {}) },
+    ...SLOW,
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}

@@ -10,6 +10,8 @@ import { withNoStore } from "@/server/no-store";
 // - GET reports the seeded game and its rounds, for the harness's own spec.
 // - PATCH `{ withdraw: "VER" }` withdraws that driver from the open event, as
 //   staff would: the pool changing under an open builder.
+// - PATCH `{ crowd: 60, joinCode? }` adds 60 accounts with saved teams (and
+//   puts them in that league): a table long enough to page.
 // The flag is replaced at build time, so a normal build keeps the 404 and
 // drops the rest. `test-hook-game` marks this handler for the CI build check.
 const notFound = () => withNoStore(new Response("Not found", { status: 404 }));
@@ -63,7 +65,38 @@ async function change(request: Request): Promise<Response> {
   if (import.meta.env.VITE_LOCAL_DB !== "1") return notFound();
   const body = (await request.json().catch(() => ({}))) as {
     withdraw?: unknown;
+    crowd?: unknown;
+    joinCode?: unknown;
   };
+  if (typeof body.crowd === "number") {
+    if (
+      !Number.isInteger(body.crowd) ||
+      body.crowd < 1 ||
+      body.crowd > 200 ||
+      (body.joinCode !== undefined && typeof body.joinCode !== "string")
+    ) {
+      return withNoStore(
+        new Response("`crowd` must be 1 to 200, `joinCode` a string", {
+          status: 400,
+        }),
+      );
+    }
+    const { addTestCrowd, HarnessError } = await import("@/server/test-game");
+    try {
+      const done = await addTestCrowd({
+        count: body.crowd,
+        joinCode: body.joinCode as string | undefined,
+      });
+      return withNoStore(Response.json({ ...done, hook: "test-hook-game" }));
+    } catch (error) {
+      if (error instanceof HarnessError) {
+        return withNoStore(
+          new Response(error.message, { status: error.status }),
+        );
+      }
+      throw error;
+    }
+  }
   if (typeof body.withdraw !== "string") {
     return withNoStore(
       new Response("`withdraw` must be a driver code", { status: 400 }),
