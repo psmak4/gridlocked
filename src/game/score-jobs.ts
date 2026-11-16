@@ -214,13 +214,18 @@ export async function enqueueGameFinalize(
   }
 }
 
-/** Runs a started run's steps through to its finish, in this call. */
+/**
+ * Runs a started run's steps through to its finish, in this call. Finishing
+ * publishes the event's totals, so the next session's run measures its teams'
+ * change from this one's, not from before both.
+ */
 async function runInline(
   db: Db,
   now: Date,
-  runId: string,
+  run: { runId: string; gameId: string; eventId: string },
   batchSize: number | undefined,
 ): Promise<void> {
+  const { runId, gameId, eventId } = run;
   if ((await writeAssetLines(db, now, runId)) === "superseded") return;
   let afterTeamId: string | null = null;
   for (;;) {
@@ -230,7 +235,11 @@ async function runInline(
     if (batch.done) break;
     afterTeamId = batch.lastTeamId;
   }
-  await finishRun(db, now, runId);
+  await finishRun(db, now, runId, {
+    publish: async (tx) => {
+      await recomputeTotals(tx, now, { gameId, fromEventId: eventId });
+    },
+  });
 }
 
 /**
@@ -311,7 +320,12 @@ export async function finalizeGameEvent(
       mode: "live",
     });
     if ("runId" in started) {
-      await runInline(db, now, started.runId, batchSize);
+      await runInline(
+        db,
+        now,
+        { runId: started.runId, gameId, eventId },
+        batchSize,
+      );
     }
   }
 
@@ -413,9 +427,9 @@ async function isRunning(db: Db, runId: string): Promise<boolean> {
  * - **`teams`** writes one batch, then queues the next batch or `standings`.
  *   Totals wait for `standings`: the ledger lock doesn't span a run, so they
  *   are only right after the last batch.
- * - **`standings`** rebuilds the totals from the event, then the standings,
- *   then in one transaction finishes the run and moves a `locked` game event to
- *   `scored`. A superseded run doesn't move it.
+ * - **`standings`** finishes the run and, in the same transaction, rebuilds
+ *   the totals from the event, then the standings, and moves a `locked` game
+ *   event to `scored`. A superseded run publishes nothing and doesn't move it.
  *
  * Any step stops quietly when the game event is cancelled or hasn't locked.
  * `assets` also stops for a session that is cancelled or no longer has
@@ -511,21 +525,23 @@ export function createScoreHandlers(
       }
 
       const { eventId } = context;
-      await recomputeTotals(db, now, { gameId, fromEventId: eventId });
-      await recomputeStandings(db, now, { gameId, eventId });
-      const finishing = runId;
-      await db.transaction(async (tx) => {
-        if ((await finishRun(tx, now, finishing)) === "superseded") return;
-        await tx
-          .update(gameEvents)
-          .set({ status: "scored", updatedAt: now })
-          .where(
-            and(
-              eq(gameEvents.gameId, gameId),
-              eq(gameEvents.eventId, eventId),
-              eq(gameEvents.status, "locked"),
-            ),
-          );
+      // One transaction: a crash can't leave totals moved by a run that
+      // never finished (see `finishRun`).
+      await finishRun(db, now, runId, {
+        publish: async (tx) => {
+          await recomputeTotals(tx, now, { gameId, fromEventId: eventId });
+          await recomputeStandings(tx, now, { gameId, eventId });
+          await tx
+            .update(gameEvents)
+            .set({ status: "scored", updatedAt: now })
+            .where(
+              and(
+                eq(gameEvents.gameId, gameId),
+                eq(gameEvents.eventId, eventId),
+                eq(gameEvents.status, "locked"),
+              ),
+            );
+        },
       });
     } catch (error) {
       if (runId !== undefined && job.attempts >= job.maxAttempts) {
