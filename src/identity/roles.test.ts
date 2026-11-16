@@ -116,7 +116,7 @@ describe("roles and bans (DM 6.4)", () => {
         reason: "   ",
         actor,
       }),
-    ).rejects.toThrow("a staff action needs a reason");
+    ).rejects.toMatchObject({ code: "reason_required" });
     expect(await roleOf(ada)).toBe("user");
     expect(await audits("user.role.update")).toHaveLength(0);
   });

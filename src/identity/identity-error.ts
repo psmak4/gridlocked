@@ -44,7 +44,9 @@ export type IdentityErrorCode =
   | "sign_in_again"
   | "invalid_link"
   // Two staff changes deadlocked, and the retries did too.
-  | "try_again";
+  | "try_again"
+  // A staff write with no reason (every staff write is audited with one).
+  | "reason_required";
 
 /** Carries a code and nothing personal: it can be logged and shown. */
 export class IdentityError extends Error {
@@ -52,4 +54,14 @@ export class IdentityError extends Error {
     super(code);
     this.name = "IdentityError";
   }
+}
+
+/**
+ * A staff write's reason, trimmed. An empty one refuses with an
+ * `IdentityError`, so a staff screen can show it (M8 carry-over from M5).
+ */
+export function requireStaffReason(reason: string | null | undefined): string {
+  const trimmed = (reason ?? "").trim();
+  if (!trimmed) throw new IdentityError("reason_required");
+  return trimmed;
 }

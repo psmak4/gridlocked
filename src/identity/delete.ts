@@ -19,9 +19,9 @@ import { newId } from "@/lib/ids";
 import { queueEmail } from "./email/outbox";
 import type { EmailSender } from "./email/sender";
 import { PERSONAL_DATA, type ScrubContext } from "./personal-data";
-import { requireReason } from "@/staff/roster";
 import { lockAdmins, requireAnotherAdmin, staffTransaction } from "./roles";
 import { IdentityError, requireViewer, type Viewer } from "./viewer";
+import { requireStaffReason } from "./identity-error";
 
 export { tombstoneEmail } from "./personal-data";
 
@@ -135,7 +135,7 @@ export async function scrubAccount(
   const reason =
     input.actor.kind === "user"
       ? input.reason
-      : requireReason(input.reason ?? "");
+      : requireStaffReason(input.reason);
   await staffTransaction(db, (tx) =>
     scrubInTransaction(tx, now, { ...input, reason }),
   );
