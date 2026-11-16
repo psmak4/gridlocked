@@ -4,7 +4,7 @@ import { AppShell, NoGame } from "@/components/app-shell";
 import { PointsBreakdown } from "@/components/play/points-breakdown";
 import { privateHeaders } from "@/lib/private-headers";
 import { getBreakdown, markSessionsWatched } from "@/server/play";
-import { isRefusal } from "@/server/play-actions";
+import { isRefusal } from "@/play/refusal";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

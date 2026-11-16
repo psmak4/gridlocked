@@ -16,7 +16,7 @@ import {
   requireWritable,
   type Viewer,
 } from "@/identity/viewer";
-import { refusalOf, type Refusal } from "@/server/play-actions";
+import { refusalOf, type Refusal } from "@/play/refusal";
 import { currentGame, type CurrentGame } from "./current-game";
 
 export type TeamSummary = {

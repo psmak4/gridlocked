@@ -52,11 +52,10 @@ import {
 import { weekendPage, type WeekendPage } from "@/play/weekend";
 import { PUBLIC_CACHE, PUBLIC_VARY } from "@/lib/public-headers";
 import type { ServerDb } from "./db";
+import { refusalOf, type Refusal } from "@/play/refusal";
 import {
   markSessionsWatchedAction,
   markSessionsWatchedInput,
-  refusalOf,
-  type Refusal,
 } from "./play-actions";
 import { getViewer, withRequestNow } from "./session";
 

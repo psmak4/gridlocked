@@ -27,7 +27,7 @@ import {
 } from "@/identity/viewer";
 import { createLeague, joinLeague, leaveLeague } from "@/leagues/leagues";
 import { SCORED_KINDS } from "@/results/validate";
-import { refusalOf, type Refusal } from "@/server/play-actions";
+import { refusalOf, type Refusal } from "@/play/refusal";
 import { getSetting } from "@/settings";
 import { revealedSessions, type Reader } from "@/spoilers/reveal";
 import { currentGame, type CurrentGame } from "./current-game";

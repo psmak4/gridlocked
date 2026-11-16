@@ -13,8 +13,8 @@ import {
   MAX_WATCH_MARKS,
   markSessionsWatchedAction,
   markSessionsWatchedInput,
-  refusalOf,
 } from "./play-actions";
+import { refusalOf } from "@/play/refusal";
 
 const NOW = new Date("2026-03-09T09:00:00.000Z");
 
