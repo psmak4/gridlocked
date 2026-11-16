@@ -6,7 +6,6 @@ import { CountdownBlock } from "@/components/ui/countdown-block";
 import { Toast } from "@/components/ui/toast";
 import type { GameErrorCode } from "@/game/errors";
 import type { LineupPick } from "@/game/lineups";
-import { systemTimer } from "@/lib/clock";
 import { formatMoney } from "@/lib/money";
 import { useHydrated } from "@/lib/use-hydrated";
 import type { BuilderPage, PoolRow, SaveTeamResult } from "@/play/builder";
@@ -17,7 +16,6 @@ import { LateCallFlow, LockedScores } from "./locked-team";
 import {
   chipsLeft,
   chipWords,
-  countdownTick,
   inactiveWords,
   lateCallWords,
   lockCountdown,
@@ -29,6 +27,7 @@ import {
   transferStat,
 } from "./team-words";
 import { samePicks, useDraft } from "./use-draft";
+import { useTimeLeft } from "./use-time-left";
 
 type SaveInput = {
   teamId: string;
@@ -61,30 +60,6 @@ type TeamBuilderProps = {
   /** Reads the page again (the route loader). */
   reload: () => Promise<void>;
 };
-
-/**
- * The milliseconds left to `lockAt` on the server's clock: the page's `now`
- * at first (so the server and the first client render agree), then ticking
- * in the browser by the same offset: real time passing (`systemTimer`) on
- * the server's "now", which a replay sets.
- */
-function useTimeLeft(lockAt: string | null, serverNow: string): number | null {
-  const [now, setNow] = useState(() => Date.parse(serverNow));
-  useEffect(() => {
-    if (!lockAt) return;
-    const offset = Date.parse(serverNow) - systemTimer.now();
-    const lock = Date.parse(lockAt);
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      const at = systemTimer.now() + offset;
-      setNow(at);
-      timer = setTimeout(tick, countdownTick(lock - at));
-    };
-    timer = setTimeout(tick, 0);
-    return () => clearTimeout(timer);
-  }, [lockAt, serverNow]);
-  return lockAt ? Date.parse(lockAt) - now : null;
-}
 
 const sectionTitle =
   "m-0 font-display text-[18px] leading-[22px] font-normal tracking-[0.02em]";

@@ -23,6 +23,7 @@ import {
   saveTeamInput,
 } from "@/play/builder";
 import { currentGame, type CurrentGame } from "@/play/current-game";
+import { getHomeInput, homeState } from "@/play/home";
 import {
   createTeamAction,
   createTeamInput,
@@ -32,6 +33,8 @@ import {
   renameTeamInput,
   teamsPage,
 } from "@/play/teams";
+import { weekendPage, type WeekendPage } from "@/play/weekend";
+import { PUBLIC_CACHE } from "@/lib/public-headers";
 import { withDb, type ServerDb } from "./db";
 import {
   markSessionsWatchedAction,
@@ -142,4 +145,27 @@ export const playLateCall = createServerFn({ method: "POST" })
   .validator(lateCallInput)
   .handler(({ data }) =>
     playAction((db, now, viewer) => lateCallAction(db, now, viewer, data)),
+  );
+
+/**
+ * `/weekend`, the hub. Public (decision 3): a logged-out visitor's answer is
+ * the same for everyone and cacheable; a signed-in one's carries their
+ * watched state, so it is private.
+ */
+export const getWeekend = createServerFn({ method: "GET" }).handler(
+  async (): Promise<WeekendPage> => {
+    const viewer = await getViewer(getRequest());
+    setResponseHeader(
+      "Cache-Control",
+      viewer ? "private, no-store" : PUBLIC_CACHE,
+    );
+    return withRequestNow((db, now) => weekendPage(db, now, viewer));
+  },
+);
+
+/** Home for someone signed in: the weekend, the countdown and your season. */
+export const getHome = createServerFn({ method: "GET" })
+  .validator(getHomeInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => homeState(db, now, viewer, data)),
   );
