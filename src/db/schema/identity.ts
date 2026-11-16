@@ -101,9 +101,11 @@ export const authSessions = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // Admin plugin: the admin acting as this session's user (DM 6.4).
+    // Admin plugin: the admin acting as this session's user (DM 6.4). CASCADE,
+    // not SET NULL: a nulled column would leave the user's own session,
+    // writable and with no hour limit.
     impersonatedBy: uuid("impersonated_by").references(() => users.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** Ours: when this session last passed a staff re-check (DM 6.4). */
     staffVerifiedAt: timestamp("staff_verified_at", { withTimezone: true }),

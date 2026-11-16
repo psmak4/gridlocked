@@ -308,7 +308,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a lock never moving into the past;
   - optimistic concurrency, so two staff can't resolve the same item.
 - **Carried from M5:**
-  - `auth_sessions.impersonated_by` becomes `ON DELETE CASCADE`;
+  - ~~`auth_sessions.impersonated_by` becomes `ON DELETE CASCADE`~~: done early (2026-11-16), migration 0041;
   - `requireStaff` runs before `setRole` and `banUser` on every staff screen;
   - TOTP codes can't be replayed within their window;
   - alerts and audit records for failed two-step codes;
