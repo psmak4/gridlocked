@@ -49,7 +49,7 @@ function SideMenu({ active }: { active: ShellItem }) {
                   "flex min-h-[44px] items-center gap-space-3 rounded-radius-m px-space-2 font-sans text-[16px] no-underline",
                   focusRing,
                   current
-                    ? "bg-surface-sunken font-bold text-heat-text"
+                    ? "bg-surface font-bold text-heat-text"
                     : "font-semibold text-ink-muted hover:text-ink",
                 )}
               >

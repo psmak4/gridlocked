@@ -140,8 +140,13 @@ describe("homeState", () => {
     expect([...hidden.season!.hidden!.sessionIds].sort()).toEqual(
       scored.map((s) => s.id).sort(),
     );
-    // Nothing hidden reaches the answer.
-    expect(JSON.stringify(hidden)).not.toContain("114");
+    // Nothing hidden reaches the answer. Strings are left out: an id, a slug
+    // or a join code may contain "114" by chance.
+    expect(
+      JSON.stringify(hidden, (_key, value: unknown) =>
+        typeof value === "string" ? "" : value,
+      ),
+    ).not.toContain("114");
 
     // Show it: this once, for one session, and the race is still hidden.
     const quali = scored.find((s) => s.kind === "qualifying")!;

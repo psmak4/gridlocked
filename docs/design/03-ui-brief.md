@@ -246,7 +246,7 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **The hub is public:** a logged-out visitor gets a cached page with no watched state and a "Build a team" button.
 - **Home** has three of the board's blocks for now: the weekend (which opens the hub), "Locks in", and your season (which opens your first team). Leagues joined with Task 12; hot threads come in M7. "Signed in as", Settings and Sign out stay at the bottom until Profile has them.
 - **While the latest scored event is hidden,** your season is a SpoilerCover ("Australian — standings are in"), with Show it and Mark as watched. The total, the global rank ("Global 212th of 1,048") and "Last race" each include that event. Before anything is scored it says "Your points show here after your first race."
-- **The rank's arrow ("▲ up 14") waits for Standings** (Task 13).
+- **The rank's arrow ("▲ up 14")** shows on My leagues and Home's league rows (Tasks 12 and 13).
 
 **As built (M6 Task 11, the points breakdown and the driver sheet):**
 - **`/team/<slot>/points`** opens from "Points breakdown" on the team page and from Home's season once there are points. It shows the team's latest round with points, and "Other rounds" links to the rest (`?round=`).
@@ -262,6 +262,15 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **Join with a code** is a sheet: the code (any case, spaces and dashes are ignored), and "Which of your teams joins" when you have more than one. A wrong code and another game's code both say "No league has that code." The 11th try in 10 minutes says "Too many tries. Wait a few minutes." (the `league_join_limit` setting), even with a right code. There's no "found" preview before joining: it would need a lookup that also counts against the limit.
 - **Create a league** is its own page (`/leagues/new`): League name, "Who can join" (With a code / Anyone), "Which races count" (Whole season / Some races, with From and To rounds still to come), and "Your team in this league" when you have more than one. Then the code with Copy. There's no public list in M6, so "Anyone" says "Anyone with the code can join. Public lists come later."
 - **Home** now shows up to 3 leagues for your first team (yours first, then automatic), with "All your leagues".
+
+**As built (M6 Task 13, standings):**
+- **`/leagues/<slug>`** opens from every row in My leagues and on Home. The heading block reads "Private · 12 teams · after round 18", then the league's name and, for a member of a public or private league, "Invite with code" with Copy. "Leave league" moved here from Task 12's row sheet: it asks once more, and with two of your teams in the league it asks which one leaves.
+- **The table** shows 50 teams, then "See more" for the next 50. A shared rank never splits across pages, so a page can run a little past 50. Each row has the rank, the move ("▲3", "▼1" or "–"), the team, its manager and the total. Your rows are outlined, with a "You" badge. A deleted account's team reads "Deleted team", with no manager.
+- **Under the table**, the note "Teams on the same points are split by who got there first." A mini-league adds its rounds ("Counts rounds 5 to 9 only."). While the through event isn't final it also says "Provisional until round 1's results are final."
+- **From 1024 px** the table is a real table (Rank, Team, Manager, Last race, Total), with your place beside it ("2nd", "27 points behind Apex Predators.", "▲ Up 1 place after round 18").
+- **While the table's latest event is hidden** (decision 2), a SpoilerCover ("Round 1 — standings are in") replaces the table and your place, with Show it (`?show=`, never stored) and Mark as watched. The server sends no rank, points or move.
+- **Not built:** the board's Season / Last race tabs. Last race is a column in the desktop table; a table ranked on one race waits for a later milestone. The board's tie note names the tied teams; ours is the general rule.
+- **A private league's standings** are for its members and its owner. Anyone else gets "No league here".
 
 ## Wave 4: community and account (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.

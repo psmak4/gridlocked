@@ -2,7 +2,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppShell, NoGame } from "@/components/app-shell";
 import { LeaguesScreen } from "@/components/play/leagues-screen";
 import { privateHeaders } from "@/lib/private-headers";
-import { getLeagues, joinMyLeague, leaveMyLeague } from "@/server/play";
+import { getLeagues, joinMyLeague } from "@/server/play";
 import { isRefusal } from "@/server/play-actions";
 
 // For someone signed in: the root gate sends a logged-out visitor to sign in
@@ -28,7 +28,6 @@ function LeaguesRoute() {
         <LeaguesScreen
           page={page}
           join={(data) => joinMyLeague({ data })}
-          leave={(data) => leaveMyLeague({ data })}
           reload={() => router.invalidate()}
         />
       ) : (

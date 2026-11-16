@@ -6,6 +6,7 @@ import {
   hydrated,
 } from "../helpers/accounts";
 import { FANTASY_ORIGIN, ROUND_1, seedGame } from "../helpers/game";
+import { createLeague } from "../helpers/leagues";
 import { createTeam } from "../helpers/team";
 
 // Leagues (M6 Task 12): create, join with a code, and leave, in an open game
@@ -28,22 +29,6 @@ async function someoneElse(browser: Browser) {
     viewport: { width: 390, height: 844 },
   });
   return context.newPage();
-}
-
-/** Creates a league from /leagues/new and answers its code. */
-async function createLeague(page: Page, name: string) {
-  await page.goto("/leagues/new");
-  const create = page.getByRole("button", { name: "Create league" });
-  await hydrated(create);
-  await page.getByLabel("League name").fill(name);
-  await create.click();
-  await expect(heading(page)).toHaveText(name);
-  const code = await page
-    .getByRole("group", { name: "Invite with code" })
-    .locator("[data-join-code]")
-    .textContent();
-  expect(code).toMatch(/^[A-Z2-9]{10}$/);
-  return code!;
 }
 
 /** Opens Join with a code on /leagues. */
@@ -129,22 +114,34 @@ test("leave a league", async ({ page }) => {
   await player(page);
   await createLeague(page, "Short Stay");
   await page.goto("/leagues");
-  const row = yours(page).getByRole("button", { name: /Short Stay/ });
-  await hydrated(row);
-  await row.click();
-  const sheet = page.getByRole("dialog", { name: "Short Stay" });
-  await expect(sheet).toContainText("Invite with code");
-  await sheet.getByRole("button", { name: "Leave league" }).click();
+  // A row opens the league's standings, with its code and Leave.
+  await yours(page)
+    .getByRole("link", { name: /Short Stay/ })
+    .click();
+  await expect(heading(page)).toHaveText("Short Stay");
+  await expect(
+    page.getByRole("group", { name: "Invite with code" }),
+  ).toBeVisible();
+  const leave = page.getByRole("button", { name: "Leave league" });
+  await hydrated(leave);
+  await leave.click();
+  const sheet = page.getByRole("dialog", { name: "Leave Short Stay?" });
   await expect(sheet).toContainText("Box Box leaves Short Stay.");
   await sheet.getByRole("button", { name: "Leave league" }).click();
-  await expect(sheet).toBeHidden();
-  await expect(page.getByText("You left Short Stay.")).toBeVisible();
+  await expect(page).toHaveURL("/leagues");
   await expect(yours(page)).toHaveCount(0);
   await expect(page.getByText("You're not in any leagues yet.")).toBeVisible();
   // The automatic ones stay.
   await expect(
     page.getByRole("list", { name: "Automatic leagues" }),
   ).toContainText("Everyone");
+  // Its owner still sees it, with no Leave: their team is out.
+  await page.goBack();
+  await page.reload();
+  await expect(heading(page)).toHaveText("Short Stay");
+  await expect(page.getByRole("button", { name: "Leave league" })).toHaveCount(
+    0,
+  );
 });
 
 for (const scheme of ["light", "dark"] as const) {

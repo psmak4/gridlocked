@@ -17,19 +17,28 @@
  * file in src/server that may import src/providers (eslint.config.mjs).
  */
 import path from "node:path";
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import {
   assetPrices,
   drivers,
   events,
   gameEvents,
   games,
+  lineupPicks,
+  lineupVersions,
   poolAssets,
   priceUpdateRuns,
   scoringRuns,
+  profiles,
   sessions,
+  teams,
+  users,
 } from "@/db/schema";
+import { saveLineup } from "@/game/lineups";
 import { withdrawPoolAsset } from "@/game/pool";
+import { createTeam } from "@/game/teams";
+import { joinLeague } from "@/leagues/leagues";
+import { newId } from "@/lib/ids";
 import { resolveClock } from "@/lib/resolve-clock";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { startLiveReplay, type LiveReplay } from "@/providers/replay/live-game";
@@ -136,6 +145,83 @@ export function withdrawTestDriver(code: string): Promise<{ assetId: string }> {
         actor: { kind: "admin", label: "e2e" },
       });
       return { assetId: asset.id };
+    }),
+  );
+}
+
+/**
+ * Adds `count` accounts, each with a team saved for the open event, for a
+ * table long enough to page (M6 Task 13). Each team copies the latest saved
+ * lineup in the game, with the Boost moved round its drivers so the totals
+ * differ, and joins the league with `joinCode` when given.
+ */
+export function addTestCrowd(input: {
+  count: number;
+  joinCode?: string;
+}): Promise<{ teams: number }> {
+  return oneAtATime(() =>
+    withDb(async (db) => {
+      if (!live) throw new HarnessError(409, "Seed the game first");
+      const { gameId } = live;
+      const now = (await resolveClock({ mode: "replay", db })).now();
+      const [template] = await db
+        .select({ id: lineupVersions.id })
+        .from(lineupVersions)
+        .innerJoin(teams, eq(teams.id, lineupVersions.teamId))
+        .where(eq(teams.gameId, gameId))
+        .orderBy(desc(lineupVersions.savedAt))
+        .limit(1);
+      if (!template) throw new HarnessError(409, "Save a team first");
+      const picks = await db
+        .select({ assetId: lineupPicks.assetId, driverId: poolAssets.driverId })
+        .from(lineupPicks)
+        .innerJoin(poolAssets, eq(poolAssets.id, lineupPicks.assetId))
+        .where(eq(lineupPicks.lineupVersionId, template.id));
+      // The Boost is a driver's.
+      const boostable = picks.filter((p) => p.driverId !== null);
+      for (let i = 0; i < input.count; i++) {
+        const userId = newId();
+        const username = `crowd_${userId.replaceAll("-", "").slice(-12)}`;
+        await db.insert(users).values({
+          id: userId,
+          name: username,
+          email: `${username}@example.test`,
+          emailVerified: true,
+          role: "user",
+          username,
+          displayUsername: username,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await db.insert(profiles).values({
+          userId,
+          status: "active",
+          avatarSeed: userId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const teamId = await createTeam(db, now, {
+          gameId,
+          userId,
+          name: `Crowd ${i + 1}`,
+        });
+        await saveLineup(db, now, {
+          teamId,
+          picks: picks.map((p) => ({
+            assetId: p.assetId,
+            isBoost: p.assetId === boostable[i % boostable.length]!.assetId,
+          })),
+          basedOnVersionId: null,
+        });
+        if (input.joinCode) {
+          await joinLeague(db, now, {
+            joinCode: input.joinCode,
+            teamId,
+            userId,
+          });
+        }
+      }
+      return { teams: input.count };
     }),
   );
 }
