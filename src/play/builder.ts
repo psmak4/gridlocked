@@ -43,7 +43,7 @@ import {
 } from "@/identity/viewer";
 import type { MoneyUnits } from "@/lib/money";
 import { SCORED_KINDS } from "@/results/validate";
-import { refusalOf, type Refusal } from "@/server/play-actions";
+import { refusalOf, type Refusal } from "@/play/refusal";
 import { revealedSessions, type Reader } from "@/spoilers/reveal";
 import { currentGame } from "./current-game";
 import { ownTeam } from "./teams";

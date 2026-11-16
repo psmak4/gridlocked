@@ -17,7 +17,7 @@ import {
   removeMyTeam,
   renameMyTeam,
 } from "@/server/play";
-import { isRefusal } from "@/server/play-actions";
+import { isRefusal } from "@/play/refusal";
 
 /** `list`: show the list even with one team (the builder's "Your teams"). */
 type TeamSearch = { list?: 1 };

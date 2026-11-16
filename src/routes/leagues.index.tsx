@@ -3,7 +3,7 @@ import { AppShell, NoGame } from "@/components/app-shell";
 import { LeaguesScreen } from "@/components/play/leagues-screen";
 import { privateHeaders } from "@/lib/private-headers";
 import { getLeagues, joinMyLeague } from "@/server/play";
-import { isRefusal } from "@/server/play-actions";
+import { isRefusal } from "@/play/refusal";
 
 // For someone signed in: the root gate sends a logged-out visitor to sign in
 // and back (`signInFirst`).

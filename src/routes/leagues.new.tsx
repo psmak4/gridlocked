@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { privateHeaders } from "@/lib/private-headers";
 import { createMyLeague, getLeagues } from "@/server/play";
-import { isRefusal } from "@/server/play-actions";
+import { isRefusal } from "@/play/refusal";
 
 export const Route = createFileRoute("/leagues/new")({
   head: () => ({ meta: [{ title: "Create a league · Gridlocked" }] }),

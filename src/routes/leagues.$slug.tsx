@@ -8,7 +8,7 @@ import {
   leaveMyLeague,
   markSessionsWatched,
 } from "@/server/play";
-import { isRefusal } from "@/server/play-actions";
+import { isRefusal } from "@/play/refusal";
 
 /** `show`: sessions revealed on this page only ("Show it"); never stored. */
 type StandingsSearch = { show?: string };

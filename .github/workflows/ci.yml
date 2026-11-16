@@ -91,6 +91,13 @@ jobs:
               exit 1
             fi
           done
+          # The browser bundle must carry no database code. A route that
+          # imports a module reaching the schema ships Drizzle and the whole
+          # schema to every visitor (M6's staging check found one).
+          if grep -rq "drizzle:entityKind" .output/public; then
+            echo "::error::.output/public contains Drizzle (a client import reaches the database code)"
+            exit 1
+          fi
 
       # The e2e tests need the flagged build, so make it again.
       - name: Build for end-to-end tests
