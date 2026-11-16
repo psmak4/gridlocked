@@ -341,7 +341,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Rate limits:** tune the per-IP and per-path limits with beta traffic.
   - **Job hardening:**
     - queue `identity_daily` even when `sync_calendar` fails;
-    - re-check a stale open export under a lock;
+    - ~~re-check a stale open export under a lock~~: done early (2026-11-16). The sweep re-checks each request under its row lock and fails a stale open one;
     - pass the Neon plan step only the env it needs.
   - **Legal review:**
     - `pendingDocuments` filters future `published_at`;
