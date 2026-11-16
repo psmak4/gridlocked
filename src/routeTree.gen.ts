@@ -22,6 +22,8 @@ import { Route as LeaguesIndexRouteImport } from './routes/leagues.index'
 import { Route as LeaguesSlugRouteImport } from './routes/leagues.$slug'
 import { Route as LeaguesNewRouteImport } from './routes/leagues.new'
 import { Route as LegalKindRouteImport } from './routes/legal.$kind'
+import { Route as PricesIndexRouteImport } from './routes/prices.index'
+import { Route as PricesHowRouteImport } from './routes/prices.how'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsDataRouteImport } from './routes/settings.data'
 import { Route as SettingsDeleteRouteImport } from './routes/settings.delete'
@@ -112,6 +114,16 @@ const LeaguesNewRoute = LeaguesNewRouteImport.update({
 const LegalKindRoute = LegalKindRouteImport.update({
   id: '/legal/$kind',
   path: '/legal/$kind',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricesIndexRoute = PricesIndexRouteImport.update({
+  id: '/prices/',
+  path: '/prices/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricesHowRoute = PricesHowRouteImport.update({
+  id: '/prices/how',
+  path: '/prices/how',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
@@ -258,6 +270,7 @@ export interface FileRoutesByFullPath {
   '/leagues/$slug': typeof LeaguesSlugRoute
   '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
+  '/prices/how': typeof PricesHowRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/delete': typeof SettingsDeleteRoute
   '/settings/favorites': typeof SettingsFavoritesRoute
@@ -268,6 +281,7 @@ export interface FileRoutesByFullPath {
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
   '/leagues/': typeof LeaguesIndexRoute
+  '/prices/': typeof PricesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
   '/team/': typeof TeamIndexRoute
@@ -299,6 +313,7 @@ export interface FileRoutesByTo {
   '/leagues/$slug': typeof LeaguesSlugRoute
   '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
+  '/prices/how': typeof PricesHowRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/delete': typeof SettingsDeleteRoute
   '/settings/favorites': typeof SettingsFavoritesRoute
@@ -309,6 +324,7 @@ export interface FileRoutesByTo {
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
   '/leagues': typeof LeaguesIndexRoute
+  '/prices': typeof PricesIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/sign-up': typeof SignUpIndexRoute
   '/team': typeof TeamIndexRoute
@@ -341,6 +357,7 @@ export interface FileRoutesById {
   '/leagues/$slug': typeof LeaguesSlugRoute
   '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
+  '/prices/how': typeof PricesHowRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/delete': typeof SettingsDeleteRoute
   '/settings/favorites': typeof SettingsFavoritesRoute
@@ -351,6 +368,7 @@ export interface FileRoutesById {
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
   '/leagues/': typeof LeaguesIndexRoute
+  '/prices/': typeof PricesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
   '/team/': typeof TeamIndexRoute
@@ -384,6 +402,7 @@ export interface FileRouteTypes {
     | '/leagues/$slug'
     | '/leagues/new'
     | '/legal/$kind'
+    | '/prices/how'
     | '/settings/data'
     | '/settings/delete'
     | '/settings/favorites'
@@ -394,6 +413,7 @@ export interface FileRouteTypes {
     | '/welcome/favorites'
     | '/welcome/spoilers'
     | '/leagues/'
+    | '/prices/'
     | '/settings/'
     | '/sign-up/'
     | '/team/'
@@ -425,6 +445,7 @@ export interface FileRouteTypes {
     | '/leagues/$slug'
     | '/leagues/new'
     | '/legal/$kind'
+    | '/prices/how'
     | '/settings/data'
     | '/settings/delete'
     | '/settings/favorites'
@@ -435,6 +456,7 @@ export interface FileRouteTypes {
     | '/welcome/favorites'
     | '/welcome/spoilers'
     | '/leagues'
+    | '/prices'
     | '/settings'
     | '/sign-up'
     | '/team'
@@ -466,6 +488,7 @@ export interface FileRouteTypes {
     | '/leagues/$slug'
     | '/leagues/new'
     | '/legal/$kind'
+    | '/prices/how'
     | '/settings/data'
     | '/settings/delete'
     | '/settings/favorites'
@@ -476,6 +499,7 @@ export interface FileRouteTypes {
     | '/welcome/favorites'
     | '/welcome/spoilers'
     | '/leagues/'
+    | '/prices/'
     | '/settings/'
     | '/sign-up/'
     | '/team/'
@@ -508,6 +532,7 @@ export interface RootRouteChildren {
   LeaguesSlugRoute: typeof LeaguesSlugRoute
   LeaguesNewRoute: typeof LeaguesNewRoute
   LegalKindRoute: typeof LegalKindRoute
+  PricesHowRoute: typeof PricesHowRoute
   SettingsDataRoute: typeof SettingsDataRoute
   SettingsDeleteRoute: typeof SettingsDeleteRoute
   SettingsFavoritesRoute: typeof SettingsFavoritesRoute
@@ -518,6 +543,7 @@ export interface RootRouteChildren {
   WelcomeFavoritesRoute: typeof WelcomeFavoritesRoute
   WelcomeSpoilersRoute: typeof WelcomeSpoilersRoute
   LeaguesIndexRoute: typeof LeaguesIndexRoute
+  PricesIndexRoute: typeof PricesIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   SignUpIndexRoute: typeof SignUpIndexRoute
   TeamIndexRoute: typeof TeamIndexRoute
@@ -628,6 +654,20 @@ declare module '@tanstack/react-router' {
       path: '/legal/$kind'
       fullPath: '/legal/$kind'
       preLoaderRoute: typeof LegalKindRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/prices/': {
+      id: '/prices/'
+      path: '/prices'
+      fullPath: '/prices/'
+      preLoaderRoute: typeof PricesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/prices/how': {
+      id: '/prices/how'
+      path: '/prices/how'
+      fullPath: '/prices/how'
+      preLoaderRoute: typeof PricesHowRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/': {
@@ -828,6 +868,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeaguesSlugRoute: LeaguesSlugRoute,
   LeaguesNewRoute: LeaguesNewRoute,
   LegalKindRoute: LegalKindRoute,
+  PricesHowRoute: PricesHowRoute,
   SettingsDataRoute: SettingsDataRoute,
   SettingsDeleteRoute: SettingsDeleteRoute,
   SettingsFavoritesRoute: SettingsFavoritesRoute,
@@ -838,6 +879,7 @@ const rootRouteChildren: RootRouteChildren = {
   WelcomeFavoritesRoute: WelcomeFavoritesRoute,
   WelcomeSpoilersRoute: WelcomeSpoilersRoute,
   LeaguesIndexRoute: LeaguesIndexRoute,
+  PricesIndexRoute: PricesIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   SignUpIndexRoute: SignUpIndexRoute,
   TeamIndexRoute: TeamIndexRoute,

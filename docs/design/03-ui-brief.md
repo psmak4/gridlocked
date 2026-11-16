@@ -272,6 +272,13 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **Not built:** the board's Season / Last race tabs. Last race is a column in the desktop table; a table ranked on one race waits for a later milestone. The board's tie note names the tied teams; ours is the general rule.
 - **A private league's standings** are for its members and its owner. Anyone else gets "No league here".
 
+**As built (M6 Task 14, prices and How prices work):**
+- **`/prices`** opens from "Prices" on the team page. Its heading block reads "After round 1 · fixed until Chinese Grand Prix locks", then "Price changes". Tabs are Going up, Going down and All. Going up and Going down put the biggest move first; All puts the dearest first. A row shows the price, the change ("▲0.3"), "in 41% of teams" (of the last locked event's teams) and a "Yours" badge.
+- **Your team value** is your first team's base lineup at these prices, plus its bank, in words: "Up $1.0M since last race."
+- **While the race that moved the prices is hidden** (decision 4), Going up and Going down are a SpoilerCover ("Round 1 — price changes are in"), and the team value's change waits. All still shows every current price with no change. "Show it" goes to `/prices?show=changes`; a signed-in viewer also gets Mark as watched.
+- **Public (decision 3):** a logged-out visitor gets `public, s-maxage=60, stale-while-revalidate=300`, and `/prices?show=changes` is cached as a page of its own. A signed-in viewer's page is private. A logged-out visitor sees "Build a team" in place of the team value.
+- **`/prices/how`** writes the formula of the version in force in words: the window, what a price should score, the thresholds as percentages, each band's moves and the bounds. It then works one example on made-up points ("Example numbers"), computed by `priceChange` itself. The board names a real driver in its example; ours doesn't, so the made-up numbers aren't read as his.
+
 ## Wave 4: community and account (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.
 
