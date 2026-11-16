@@ -236,6 +236,18 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
   - Team and Leagues are for someone signed in: a logged-out visitor goes to sign in and comes back to the page afterwards (`/sign-in?next=`). The weekend hub and the prices stay public.
   - Before the season's game opens, Team and Leagues say "No game yet" and "The game opens before the first race."
 
+**As built (M6 Task 10, Home and the weekend hub):**
+- **The hub's weekend** is the open event; after its lock, the same event until the next one opens; before the season, the next one. A cancelled event is skipped.
+- **Session rows** read as the reference board does, without the forum's parts (threads and "Join" come with M7):
+  - "TBC" when the start isn't confirmed, a Live or Red flag badge, "Ended early", and a dashed "Cancelled" row;
+  - "Locks team" sits on qualifying, or on sprint qualifying at a sprint weekend.
+- **A scored session you haven't seen** says "Results are in · hidden until you watch" and "Hidden", with Mark as watched on its row. Once seen, it says "results are in". The hub never shows a score, so it has no "Show it". The wave 2 note "Spoiler protection is on…" shows under the list while anything is hidden.
+- **The countdown** runs to the lock ("Your team locks in"), then to the race's start ("Race starts in"). The Track switch changes its time too.
+- **The hub is public:** a logged-out visitor gets a cached page with no watched state and a "Build a team" button.
+- **Home** has three of the board's blocks for now: the weekend (which opens the hub), "Locks in", and your season (which opens your first team). Leagues join with Task 12 and hot threads in M7. "Signed in as", Settings and Sign out stay at the bottom until Profile has them.
+- **While the latest scored event is hidden,** your season is a SpoilerCover ("Australian — standings are in"), with Show it and Mark as watched. The total, the global rank ("Global 212th of 1,048") and "Last race" each include that event. Before anything is scored it says "Your points show here after your first race."
+- **The rank's arrow ("▲ up 14") waits for Standings** (Task 13).
+
 ## Wave 4: community and account (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.
 

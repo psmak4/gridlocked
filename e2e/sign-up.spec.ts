@@ -124,7 +124,8 @@ test.describe("signing up", () => {
     await page.getByRole("button", { name: "Finish" }).click();
 
     await expect(page).toHaveURL("/");
-    await expect(heading(page)).toHaveText("GRIDLOCKED");
+    // Home for someone signed in (M6): this server runs no game.
+    await expect(heading(page)).toHaveText("No game yet");
     await expect(page.getByText(`Signed in as ${username}`)).toBeVisible();
   });
 

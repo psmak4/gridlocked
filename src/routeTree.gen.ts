@@ -16,6 +16,7 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as WeekendRouteImport } from './routes/weekend'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
 import { Route as LeaguesIndexRouteImport } from './routes/leagues.index'
 import { Route as LegalKindRouteImport } from './routes/legal.$kind'
@@ -78,6 +79,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WeekendRoute = WeekendRouteImport.update({
+  id: '/weekend',
+  path: '/weekend',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DevComponentsRoute = DevComponentsRouteImport.update({
@@ -229,6 +235,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
+  '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
   '/legal/$kind': typeof LegalKindRoute
   '/settings/data': typeof SettingsDataRoute
@@ -266,6 +273,7 @@ export interface FileRoutesByTo {
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
+  '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
   '/legal/$kind': typeof LegalKindRoute
   '/settings/data': typeof SettingsDataRoute
@@ -304,6 +312,7 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
+  '/weekend': typeof WeekendRoute
   '/_dev/components': typeof DevComponentsRoute
   '/legal/$kind': typeof LegalKindRoute
   '/settings/data': typeof SettingsDataRoute
@@ -343,6 +352,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reset-password'
     | '/sign-in'
+    | '/weekend'
     | '/components'
     | '/legal/$kind'
     | '/settings/data'
@@ -380,6 +390,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reset-password'
     | '/sign-in'
+    | '/weekend'
     | '/components'
     | '/legal/$kind'
     | '/settings/data'
@@ -417,6 +428,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reset-password'
     | '/sign-in'
+    | '/weekend'
     | '/_dev/components'
     | '/legal/$kind'
     | '/settings/data'
@@ -455,6 +467,7 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignInRoute: typeof SignInRoute
+  WeekendRoute: typeof WeekendRoute
   DevComponentsRoute: typeof DevComponentsRoute
   LegalKindRoute: typeof LegalKindRoute
   SettingsDataRoute: typeof SettingsDataRoute
@@ -534,6 +547,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/weekend': {
+      id: '/weekend'
+      path: '/weekend'
+      fullPath: '/weekend'
+      preLoaderRoute: typeof WeekendRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_dev/components': {
@@ -743,6 +763,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignInRoute: SignInRoute,
+  WeekendRoute: WeekendRoute,
   DevComponentsRoute: DevComponentsRoute,
   LegalKindRoute: LegalKindRoute,
   SettingsDataRoute: SettingsDataRoute,
