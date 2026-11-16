@@ -42,8 +42,10 @@ pnpm exec playwright install chromium
 - `fantasy` (port 3101, `CLOCK_MODE=replay`): the specs in `e2e/fantasy/`, one
   at a time. Each seeds the recorded 2026 game with `seedGame` and moves the
   simulated clock with `moveClock` (`e2e/helpers/game.ts`), so the real lock,
-  scoring, finalize and price jobs run on recorded results. Run it alone with
-  `pnpm e2e --project=fantasy --workers=1`.
+  scoring, finalize and price jobs run on recorded results. `addCrowd` fills a
+  league with more teams, copies of the latest saved lineup, for standings
+  that page. `season.spec.ts` walks one person from sign-up to round 2. Run it
+  alone with `pnpm e2e --project=fantasy --workers=1`.
 
 ## Staging
 

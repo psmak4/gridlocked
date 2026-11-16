@@ -1,9 +1,11 @@
 import { and, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedLeagueGames } from "../../tests/helpers/leagues-game";
 import { errorCode } from "../../tests/helpers/staff";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedUser } from "../../tests/helpers/users";
+import * as schema from "@/db/schema";
 import {
   games,
   leagueMemberships,
@@ -119,6 +121,24 @@ describe("teams (M6 Task 6)", () => {
       "auto_country",
     ]);
     expect(joined.every((l) => l.gameId === seeded.gameId)).toBe(true);
+  });
+
+  it("a new team locks the profile as it reads the favorites", async () => {
+    const userId = await seedUser(db);
+    const viewer = await viewerOf(userId);
+    const sent: string[] = [];
+    const logged = drizzle(t.client, {
+      schema,
+      logger: { logQuery: (query) => sent.push(query) },
+    }) as unknown as Db;
+    expect(
+      await createTeamAction(logged, NOW, viewer, { name: "Box Box" }),
+    ).toEqual({ ok: true, slot: 1 });
+    const reads = sent
+      .map((q) => q.toLowerCase())
+      .filter((q) => /^select .* from "profiles"/.test(q));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatch(/ for no key update$/);
   });
 
   it("a fourth team is refused with no_free_slot", async () => {

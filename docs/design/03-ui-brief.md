@@ -279,6 +279,11 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **Public (decision 3):** a logged-out visitor gets `public, s-maxage=60, stale-while-revalidate=300`, and `/prices?show=changes` is cached as a page of its own. A signed-in viewer's page is private. A logged-out visitor sees "Build a team" in place of the team value.
 - **`/prices/how`** writes the formula of the version in force in words: the window, what a price should score, the thresholds as percentages, each band's moves and the bounds. It then works one example on made-up points ("Example numbers"), computed by `priceChange` itself. The board names a real driver in its example; ours doesn't, so the made-up numbers aren't read as his.
 
+**As built (M6 Task 15, the exit check, 16 Nov 2026):**
+- **Every M6 screen at 390 px and 1280 px, light and dark:** `/`, `/weekend`, `/team`, `/team/1`, `/team/1/points`, `/leagues`, `/leagues/new`, a league's standings, `/prices`, `/prices/how` and `/profile`, on the replayed round 1 after it was final, with a nine-team private league. Axe found nothing serious or critical on any of them, and none scrolls sideways.
+- **Against the canvases,** the screens differ only where the notes above say so (Tasks 8–14). Nothing new turned up.
+- **The suite keeps it checked:** axe runs in both themes on the builder, the chip sheet, the locked team, home and the hub, leagues, standings and prices, and in light on the breakdown. `e2e/fantasy/season.spec.ts` walks one person at phone size from sign-up to round 2's Late Call.
+
 ## Wave 4: community and account (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.
 

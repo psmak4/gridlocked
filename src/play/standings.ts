@@ -144,12 +144,15 @@ async function pageOf(
   const first = await read(afterRank, null, limit + 1);
   if (first.length <= limit) return { rows: first, next: null };
   const cut = first[limit - 1]!.rank;
-  const rows =
-    first[limit]!.rank === cut
-      ? await read(afterRank, cut, null)
-      : first.slice(0, limit);
-  // More after the cut: the row after the page is past it.
-  return { rows, next: cut };
+  // The row after the page is past the cut: there's more.
+  if (first[limit]!.rank !== cut) {
+    return { rows: first.slice(0, limit), next: cut };
+  }
+  // The page grows to the end of the shared rank; there's more only if a
+  // row comes after it (a tie can run to the end of the table).
+  const rows = await read(afterRank, cut, null);
+  const more = await read(cut, null, 1);
+  return { rows, next: more.length > 0 ? cut : null };
 }
 
 /** The scored sessions of an event the reader hasn't seen. */

@@ -113,4 +113,25 @@ test("a logged-out visitor gets a public cache header and covered changes", asyn
   expect(shown.headers()["cache-control"]).toBe(
     "public, s-maxage=60, stale-while-revalidate=300",
   );
+  // Keyed on the cookie, so a signed-in reader never gets this copy.
+  expect(shown.headers()["vary"]).toMatch(/cookie/i);
+});
+
+test("public pages are private for a signed-in reader", async ({
+  page,
+  request,
+}) => {
+  await moveClock(request, ROUND_1.final);
+  const loggedOut = await page.request.get("/prices/how");
+  expect(loggedOut.headers()["cache-control"]).toBe(
+    "public, s-maxage=60, stale-while-revalidate=300",
+  );
+  expect(loggedOut.headers()["vary"]).toMatch(/cookie/i);
+
+  // The page carries the account, so it must not reach a shared cache.
+  await createAccount(page.context().request, { origin: FANTASY_ORIGIN });
+  for (const path of ["/prices/how", "/prices", "/weekend"]) {
+    const signedIn = await page.request.get(path);
+    expect(signedIn.headers()["cache-control"], path).toBe("private, no-store");
+  }
 });
