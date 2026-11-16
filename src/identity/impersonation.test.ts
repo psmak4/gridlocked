@@ -17,8 +17,10 @@ import {
   totpCode,
   viewerFor,
 } from "../../tests/helpers/staff";
-import { auditLog, authSessions, users } from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
+import { auditLog, authSessions, profiles, users } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { newId } from "@/lib/ids";
 import { DISABLED_AUTH_PATHS } from "./auth";
 import { startImpersonation, stopImpersonating } from "./impersonation";
 import { banUser } from "./roles";
@@ -399,5 +401,25 @@ describe("impersonation (DM 6.4)", () => {
         }),
       ),
     ).toBe("not_impersonating");
+  });
+
+  it("deleting the admin's row deletes the sessions they were impersonating in", async () => {
+    // With SET NULL the session would stay as the user's own: writable, and
+    // with no hour limit.
+    const other = await seedUser(t.db, { role: "admin" });
+    const id = newId();
+    await t.db.insert(authSessions).values({
+      id,
+      userId: ada,
+      token: `token-${id}`,
+      expiresAt: new Date(now().getTime() + HOUR),
+      impersonatedBy: other,
+    });
+    // Accounts are scrubbed, not deleted, so clear what holds the row first.
+    await t.db.delete(profiles).where(eq(profiles.userId, other));
+    await t.db.delete(users).where(eq(users.id, other));
+    expect(
+      await t.db.select().from(authSessions).where(eq(authSessions.id, id)),
+    ).toEqual([]);
   });
 });
