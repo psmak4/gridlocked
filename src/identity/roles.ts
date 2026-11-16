@@ -16,8 +16,9 @@ import {
   type UserRole,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { audit, requireReason, type StaffActor } from "@/staff/roster";
+import { audit, type StaffActor } from "@/staff/roster";
 import { IdentityError } from "./viewer";
+import { requireStaffReason } from "./identity-error";
 
 export type Role = UserRole;
 export { USER_ROLES as ROLES };
@@ -194,7 +195,7 @@ export async function setRole(
     actor: StaffActor;
   },
 ): Promise<void> {
-  const reason = requireReason(input.reason);
+  const reason = requireStaffReason(input.reason);
   if (input.role === "system" || !USER_ROLES.includes(input.role)) {
     throw new IdentityError("role_reserved");
   }
@@ -237,7 +238,7 @@ export async function banUser(
     actor: StaffActor;
   },
 ): Promise<void> {
-  const reason = requireReason(input.reason);
+  const reason = requireStaffReason(input.reason);
   if (input.until !== null && input.until.getTime() <= now.getTime()) {
     throw new IdentityError("invalid_ban");
   }
@@ -280,7 +281,7 @@ export async function unbanUser(
   now: Date,
   input: { targetUserId: string; reason: string; actor: StaffActor },
 ): Promise<void> {
-  const reason = requireReason(input.reason);
+  const reason = requireStaffReason(input.reason);
   await staffTransaction(db, async (tx) => {
     const target = await lockTarget(tx, input.targetUserId);
     if (!target.banned) return;

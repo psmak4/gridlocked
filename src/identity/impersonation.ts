@@ -10,10 +10,10 @@ import { eq } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
 import { authSessions, users } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { requireReason } from "@/staff/roster";
 import { auditImpersonationStop, type Auth } from "./auth";
 import { requireStaff } from "./staff-access";
 import { IdentityError, requireViewer, type Viewer } from "./viewer";
+import { requireStaffReason } from "./identity-error";
 
 /**
  * Starts impersonating `targetUserId`. `headers` are the admin's request
@@ -33,7 +33,7 @@ export async function startImpersonation(
   },
 ): Promise<{ headers: Headers }> {
   const admin = requireStaff(input.viewer, "admin");
-  const reason = requireReason(input.reason);
+  const reason = requireStaffReason(input.reason);
   // The plugin acts on the session in `headers`; the checks above were on
   // `viewer`. They must be the same session (ruling 39).
   const carried = await auth.api.getSession({ headers: input.headers });

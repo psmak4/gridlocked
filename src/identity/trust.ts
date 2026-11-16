@@ -15,9 +15,9 @@ import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import { getSetting } from "@/settings";
 import type { SettingValue } from "@/settings/defaults";
-import { requireReason } from "@/staff/roster";
 import { lockUserRow } from "./locks";
 import { IdentityError } from "./viewer";
+import { requireStaffReason } from "./identity-error";
 
 export type TrustLevel = 0 | 1 | 2 | 3;
 export type TrustThresholds = SettingValue<"trust_thresholds">;
@@ -207,6 +207,7 @@ async function lockProfile(tx: Db, userId: string) {
     .select({
       trustLevel: profiles.trustLevel,
       trustLevelLocked: profiles.trustLevelLocked,
+      status: profiles.status,
     })
     .from(profiles)
     .where(eq(profiles.userId, userId))
@@ -230,13 +231,17 @@ export async function setTrustLevel(
     actor: TrustActor;
   },
 ): Promise<void> {
-  const reason = requireReason(input.reason);
+  const reason = requireStaffReason(input.reason);
   if (![0, 1, 2, 3].includes(input.level)) {
     throw new IdentityError("invalid_trust_level");
   }
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
     const before = await lockProfile(t, input.userId);
+    // A tombstone keeps no standing to change (DM 5.1).
+    if (before.status === "deleted") throw new IdentityError("inactive");
+    // Already this level and pinned: nothing changes, so nothing is written.
+    if (before.trustLevel === input.level && before.trustLevelLocked) return;
     await t
       .update(profiles)
       .set({ trustLevel: input.level, trustLevelLocked: true, updatedAt: now })
@@ -271,7 +276,7 @@ export async function clearTrustLock(
   now: Date,
   input: { userId: string; reason: string; actor: TrustActor },
 ): Promise<void> {
-  const reason = requireReason(input.reason);
+  const reason = requireStaffReason(input.reason);
   await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
     const before = await lockProfile(t, input.userId);
