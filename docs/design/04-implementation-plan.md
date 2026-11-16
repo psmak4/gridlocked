@@ -253,6 +253,19 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Exit:** the key tests above pass on the replay-mode build, every wave 2–3 board has a test or a named later milestone, and the M5 carry-overs are done.
 - **Approval needed:** none new. One Deploy staging run, with your OK, at the end.
 - **Plan:** [plans/M6-fantasy-screens.md](../plans/M6-fantasy-screens.md).
+- **Result (2026-11-16): met.**
+  - **The tasks:** all 15 tasks are merged (PRs #196–#212). #212 holds Task 15's exit test and the final review's fixes.
+  - **The exit:** `e2e/fantasy/season.spec.ts` runs one season at phone size on the replay-mode build: building a team, Overdrive, joining a league with a code, the lock, a hidden qualifying score and Mark as watched, the breakdown, standings, prices, a round 2 transfer and Late Call. Every wave 2–3 board has a test or a named later milestone (the plan's scenario table). The M5 carry-overs are done, the flaky sign-up e2e (#177) included.
+  - **The staging deploy:** Deploy staging run 43940168599 (main at a630419) applied migration 0040 (`session_watch_marks`) and redeployed the `tick`, with both triggers enabled (`tick-every-minute`, `safety-every-6h`). It also deployed the site to https://gridlocked-staging.vercel.app.
+  - **The staging checks passed:**
+    - the weekend hub, Prices and How prices work answer logged out with "No game yet";
+    - `/team` and `/leagues` redirect to sign-in with `private, no-store`;
+    - **the CSRF Origin check behind Vercel's proxy** (M5's deferred check): a same-origin POST with no `Sec-Fetch-Site` reached a fantasy server function, which answered `unauthenticated`. A foreign `Origin` got 403 from all 19 fantasy server functions.
+  - **Two things only staging showed:**
+    - **Drizzle and the whole schema were in the browser bundle**, in a 186 KB `play-actions` chunk. Routes imported `isRefusal` from a server module. Fixed in #213, and CI now fails if `.output/public` contains Drizzle.
+    - **Vercel's CDN doesn't cache any response with `Vary: Cookie`** (its docs list Cookie as a high-cardinality header). The public pages are correct but every request reaches the function (`x-vercel-cache: MISS`). Carried to M9 below.
+  - **Tests:** `pnpm test` runs 2,355 tests, and `pnpm e2e` runs 136 (76 `chromium`, 60 `fantasy`).
+  - **The final whole-milestone review** found 1 Critical, 1 Important and 6 Minor issues. The Critical was a signed-in How prices work page marked public, so a CDN could have served one person's account to others. The Important was public answers with no `Vary: Cookie`. All but Minors 4 and 5 were fixed in #212. Those two are carried into M8 and M9 below.
 
 ### M7 — Community (target 5 Feb)
 - **Goal:** race weekends feel alive.
@@ -301,6 +314,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - alerts and audit records for failed two-step codes;
   - `setTrustLevel` writes nothing when the level doesn't change, and refuses a deleted profile;
   - a missing staff reason refuses with an `IdentityError`.
+- **Carried from M6:**
+  - standings' "See more" can join two different tables if an event is scored between page loads. Pin the page to the standings' version, or start again when it changes.
 
 ### M9 — Hardening and closed beta (beta 15 Feb – 5 Mar)
 - **Goal:** prove it on real people with replayed 2026 weekends.
@@ -317,8 +332,9 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Before sign-up opens beyond the owner** (decided 2026-11-08): when an address is confirmed from a browser that isn't signed in to that account, delete the sign-up password, the age and terms record and other sessions, then send the person to finish signing up.
   - **The staging checks M5 couldn't run:**
     - deleting a second account, which then can't sign in;
-    - an export link still working on day 6;
-    - one server-function POST, to confirm the CSRF check's fallback to Origin behind Vercel's proxy.
+    - an export link still working on day 6.
+
+    The third, a server-function POST to confirm the CSRF check's fallback to Origin behind Vercel's proxy, passed in M6's staging deploy.
   - **Measure in the budget run:** the per-request `ensureProfile` and `betterAuth()` cost.
   - **Make sure work after a commit can't be lost.** Audits and emails that run after Better Auth's transaction, and `onPasswordReset`'s session revoke, should survive a failure.
   - **Logging, with Sentry:** a value-free config-error class, and logging codes instead of "better-auth error: event".
@@ -331,6 +347,9 @@ Target dates assume steady work and are yours to move. The ordering is what matt
     - `pendingDocuments` filters future `published_at`;
     - DM 6.7 states Neon's soft-delete duration.
   - **A test** for the Discord ban message.
+- **Carried from M6:**
+  - **CDN caching for the public pages** (decision 3). Vercel's CDN doesn't cache a response with `Vary: Cookie`, so the weekend hub, Prices and How prices work run the function on every request. Pick a way to cache the logged-out answer without serving it to a signed-in reader, such as a low-cardinality signed-in header set before the cache. Then measure it in the budget run.
+  - Once that cache works, a logged-out countdown can be up to about 6 minutes slow on a stale copy (`s-maxage=60` plus `stale-while-revalidate=300`). Shorten the stale window near a lock.
 - **Approval needed:**
   - the production Neon project;
   - the production Vercel project and domain;
