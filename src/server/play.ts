@@ -22,6 +22,7 @@ import {
   saveTeamAction,
   saveTeamInput,
 } from "@/play/builder";
+import { breakdownForSlot, getBreakdownInput } from "@/play/breakdown";
 import { currentGame, type CurrentGame } from "@/play/current-game";
 import { getHomeInput, homeState } from "@/play/home";
 import {
@@ -177,6 +178,13 @@ export const getHome = createServerFn({ method: "GET" })
   .validator(getHomeInput)
   .handler(({ data }) =>
     playAction((db, now, viewer) => homeState(db, now, viewer, data)),
+  );
+
+/** `/team/$slot/points`: one team's points by session (M6 Task 11). */
+export const getBreakdown = createServerFn({ method: "GET" })
+  .validator(getBreakdownInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => breakdownForSlot(db, now, viewer, data)),
   );
 
 /** `/leagues` and `/leagues/new`: the viewer's leagues and teams (M6 Task 12). */

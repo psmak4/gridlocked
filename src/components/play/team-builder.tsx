@@ -63,6 +63,8 @@ type TeamBuilderProps = {
 
 const sectionTitle =
   "m-0 font-display text-[18px] leading-[22px] font-normal tracking-[0.02em]";
+const headerLink =
+  "inline-flex min-h-[44px] items-center text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 type Slot = { kind: "driver" | "constructor"; pick: LineupPick | null };
 
@@ -403,12 +405,14 @@ export function TeamBuilder({
         <h1 className="m-0 font-display text-[32px] leading-[34px] font-normal break-words uppercase">
           {team.name}
         </h1>
-        <a
-          href="/team?list=1"
-          className="inline-flex min-h-[44px] items-center self-start text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-        >
-          Your teams
-        </a>
+        <span className="flex flex-wrap gap-x-space-4">
+          <a href="/team?list=1" className={headerLink}>
+            Your teams
+          </a>
+          <a href={`/team/${team.slot}/points`} className={headerLink}>
+            Points breakdown
+          </a>
+        </span>
       </div>
 
       {open ? (

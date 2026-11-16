@@ -248,6 +248,14 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **While the latest scored event is hidden,** your season is a SpoilerCover ("Australian — standings are in"), with Show it and Mark as watched. The total, the global rank ("Global 212th of 1,048") and "Last race" each include that event. Before anything is scored it says "Your points show here after your first race."
 - **The rank's arrow ("▲ up 14") waits for Standings** (Task 13).
 
+**As built (M6 Task 11, the points breakdown and the driver sheet):**
+- **`/team/<slot>/points`** opens from "Points breakdown" on the team page and from Home's season once there are points. It shows the team's latest round with points, and "Other rounds" links to the rest (`?round=`).
+- **One tab per scored session**, the latest first. A row has one number and a plain reason ("P3 · gained 3 places"; a constructor's is "Both drivers · both in Q3"), and a 2× or 3× badge. A row with no points says "No points".
+- **"Boosts and transfers"** lists the open tab's Boost and chip lines, then the event's Strategist move and transfer penalty ("3 transfers, 2 were free"). Those event lines and the weekend's total show only once every scored session is revealed.
+- **A session you haven't seen** is a SpoilerCover ("Race — scores are in") with Show it (`?show=`, never stored) and Mark as watched. The server sends none of its figures, and the page title is always "Your points".
+- **The correction note** has one sentence per re-scored session, by what started the re-score: "Race results were updated after a stewards' decision.", "…were corrected after the session." (a staff override), "…was voided.", or "…was rescored after a rules fix." An override's own reason is written for staff, so it isn't shown, unlike the plan's call.
+- **The driver sheet** lists the asset's lines ("Finished P3" / "Race finishing position"), a constructor's per driver ("Russell · Finished P3"), then the team's Boost on it, and "For your team". Its note says "Overtakes and pit stops aren't scored in this game."
+
 **As built (M6 Task 12, leagues: create, join and leave):**
 - **My leagues** follows the board: "Join with a code" and "Create a league", then Your leagues and Automatic ("You're in these from your profile. Change your favorites to switch."). Everyone (the global league) comes first in Automatic, then the favorite-team, favorite-driver and country leagues. A row's subtitle names the kind or the mini-league's rounds and the number of teams, and the team when you have more than one. Its rank reads "Hidden" while that table's latest event is hidden from you (decision 2), and "–" before anything is scored.
 - **A row in Your leagues** opens a sheet with "Invite with code", Copy and "Leave league", which asks once more before it leaves. Standings (Task 13) turns the rows into links.

@@ -51,7 +51,7 @@ const pts = (n: number) => `${n.toLocaleString("en-GB")} pts`;
 
 /**
  * Your season (wave 3): the first team's total, global rank and last race,
- * which opens the team. While the latest event is hidden, all three are
+ * which opens the breakdown (the team, before any points). While the latest event is hidden, all three are
  * covered (decision 2): each one includes it.
  */
 function Season({
@@ -83,7 +83,11 @@ function Season({
   }
   return (
     <a
-      href={`/team/${season.slot}`}
+      href={
+        season.lastEvent !== null
+          ? `/team/${season.slot}/points`
+          : `/team/${season.slot}`
+      }
       aria-label={`Your season · ${season.teamName}`}
       className={card}
     >
