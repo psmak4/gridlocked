@@ -84,6 +84,10 @@ describe("homeState", () => {
       lastEvent: null,
       hidden: null,
     });
+    // Its leagues: Everyone, with no rank before anything is scored.
+    expect(home.leagues).toEqual([
+      expect.objectContaining({ name: "Everyone", rank: null, members: 1 }),
+    ]);
   });
 
   it("the season total and rank are null while the last race is hidden", async () => {

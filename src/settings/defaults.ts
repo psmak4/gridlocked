@@ -61,6 +61,14 @@ export const settingSchemas = {
     tl2: trustLevelThreshold,
     tl3: trustLevelThreshold,
   }),
+  /**
+   * Tries at a league join code per user (M6 Task 12, Review Focus 5): a
+   * right code counts too, so codes can't be guessed.
+   */
+  league_join_limit: z.object({
+    windowSeconds: positiveInt,
+    max: positiveInt,
+  }),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -97,4 +105,5 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     tl2: { daysVisited: 15, posts: 50, reputation: 25, accountAgeDays: 15 },
     tl3: { daysVisited: 60, posts: 200, reputation: 200, accountAgeDays: 60 },
   },
+  league_join_limit: { windowSeconds: 600, max: 10 },
 };

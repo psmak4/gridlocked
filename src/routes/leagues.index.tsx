@@ -1,31 +1,35 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppShell, NoGame } from "@/components/app-shell";
-import { EmptyState } from "@/components/ui/empty-state";
+import { LeaguesScreen } from "@/components/play/leagues-screen";
 import { privateHeaders } from "@/lib/private-headers";
-import { getCurrentGame } from "@/server/play";
+import { getLeagues, joinMyLeague, leaveMyLeague } from "@/server/play";
+import { isRefusal } from "@/server/play-actions";
 
 // For someone signed in: the root gate sends a logged-out visitor to sign in
 // and back (`signInFirst`).
 export const Route = createFileRoute("/leagues/")({
   head: () => ({ meta: [{ title: "Leagues · Gridlocked" }] }),
   headers: privateHeaders,
-  loader: () => getCurrentGame(),
-  component: LeaguesPage,
+  loader: async () => {
+    const page = await getLeagues();
+    if (isRefusal(page)) throw new Error(`getLeagues: ${page.error}`);
+    return page;
+  },
+  component: LeaguesRoute,
 });
 
-/**
- * Leagues, in the app shell. Before the game opens it says so; the screen
- * itself arrives in M6 Task 12 (#192).
- */
-function LeaguesPage() {
-  const game = Route.useLoaderData();
+/** My leagues (M6 Task 12): join, create, and the ones you're in. */
+function LeaguesRoute() {
+  const page = Route.useLoaderData();
+  const router = useRouter();
   return (
     <AppShell active="leagues">
-      {game ? (
-        <EmptyState
-          headingLevel={1}
-          title="No leagues yet"
-          body="The leagues you play in will be here."
+      {page.game ? (
+        <LeaguesScreen
+          page={page}
+          join={(data) => joinMyLeague({ data })}
+          leave={(data) => leaveMyLeague({ data })}
+          reload={() => router.invalidate()}
         />
       ) : (
         <NoGame />

@@ -1,7 +1,7 @@
 /**
  * Home's read model (M6 Task 10, wave 3's "Home in race week"): at most 5
  * blocks, the weekend, its countdown, your season and 3 leagues. The board's
- * "hot threads" join with the forum in M7, and the league rows with Task 12.
+ * "hot threads" join with the forum in M7.
  */
 import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -11,15 +11,9 @@ import { requireComplete, type Viewer } from "@/identity/viewer";
 import { SCORED_KINDS } from "@/results/validate";
 import { revealedSessions } from "@/spoilers/reveal";
 import { currentGame } from "./current-game";
+import { myLeagues, type LeagueRow } from "./leagues";
 import { myTeams } from "./teams";
 import { readerOf, weekendFor, type Weekend } from "./weekend";
-
-/** One of your leagues on Home (Task 12). */
-export type LeagueRow = {
-  id: string;
-  name: string;
-  rank: number | null;
-};
 
 /** The latest scored event the season's figures include, while it's hidden. */
 export type HiddenEvent = {
@@ -47,6 +41,7 @@ export type SeasonBlock = {
 export type HomeState = {
   weekend: Weekend | null;
   season: SeasonBlock | null;
+  /** The first team's leagues, yours first: at most 3 (wave 3). */
   leagues: LeagueRow[];
   /** The request's "now", so the countdown runs on the server's clock. */
   now: string;
@@ -143,6 +138,30 @@ async function seasonOf(
   };
 }
 
+/** How many leagues Home lists (wave 3). */
+const HOME_LEAGUES = 3;
+
+/** The first active team's leagues: its own ones, then Everyone and the auto ones. */
+async function homeLeagues(
+  db: Db,
+  now: Date,
+  input: { gameId: string; viewer: Viewer },
+): Promise<LeagueRow[]> {
+  const mine = await myLeagues(db, now, {
+    gameId: input.gameId,
+    userId: input.viewer.userId,
+    reader: readerOf(input.viewer),
+  });
+  const teams = await myTeams(db, {
+    gameId: input.gameId,
+    userId: input.viewer.userId,
+  });
+  const teamId = teams.find((t) => t.status === "active")?.id;
+  return [...mine.yours, ...mine.automatic]
+    .filter((row) => row.teamId === teamId)
+    .slice(0, HOME_LEAGUES);
+}
+
 /** `/` for someone signed in. */
 export async function homeState(
   db: Db,
@@ -167,5 +186,6 @@ export async function homeState(
     viewer: v,
     show: data.show ?? [],
   });
-  return { ...base, weekend, season, hasGame: true };
+  const leagues = await homeLeagues(db, now, { gameId: game.id, viewer: v });
+  return { ...base, weekend, season, leagues, hasGame: true };
 }

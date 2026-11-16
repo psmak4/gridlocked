@@ -26,6 +26,15 @@ import { breakdownForSlot, getBreakdownInput } from "@/play/breakdown";
 import { currentGame, type CurrentGame } from "@/play/current-game";
 import { getHomeInput, homeState } from "@/play/home";
 import {
+  createLeagueAction,
+  createLeagueInput,
+  joinLeagueAction,
+  joinLeagueInput,
+  leaguesPage,
+  leaveLeagueAction,
+  leaveLeagueInput,
+} from "@/play/leagues";
+import {
   createTeamAction,
   createTeamInput,
   removeTeamAction,
@@ -176,4 +185,30 @@ export const getBreakdown = createServerFn({ method: "GET" })
   .validator(getBreakdownInput)
   .handler(({ data }) =>
     playAction((db, now, viewer) => breakdownForSlot(db, now, viewer, data)),
+  );
+
+/** `/leagues` and `/leagues/new`: the viewer's leagues and teams (M6 Task 12). */
+export const getLeagues = createServerFn({ method: "GET" }).handler(() =>
+  playAction((db, now, viewer) => leaguesPage(db, now, viewer)),
+);
+
+/** "Create league": the league, with the viewer's team in it. */
+export const createMyLeague = createServerFn({ method: "POST" })
+  .validator(createLeagueInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => createLeagueAction(db, now, viewer, data)),
+  );
+
+/** "Join league" with a code: rate-limited per user (Review Focus 5). */
+export const joinMyLeague = createServerFn({ method: "POST" })
+  .validator(joinLeagueInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => joinLeagueAction(db, now, viewer, data)),
+  );
+
+/** "Leave league". */
+export const leaveMyLeague = createServerFn({ method: "POST" })
+  .validator(leaveLeagueInput)
+  .handler(({ data }) =>
+    playAction((db, now, viewer) => leaveLeagueAction(db, now, viewer, data)),
   );

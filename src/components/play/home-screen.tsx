@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { AssetRow } from "@/components/ui/asset-row";
 import { SpoilerCover } from "@/components/ui/spoiler-cover";
 import { cn } from "@/lib/utils";
 import type { HomeState, SeasonBlock } from "@/play/home";
+import { leagueSubtitle, moveWords, rankFigure } from "./league-words";
 import {
   sectionTitle,
   useViewerTimeZone,
@@ -125,8 +127,8 @@ function Season({
 
 /**
  * Home for someone signed in (wave 3's "Home in race week"): the weekend,
- * which opens the hub, its countdown, and your season. Leagues join with
- * Task 12 and the forum's threads in M7.
+ * which opens the hub, its countdown, your season and your leagues. The
+ * forum's threads join in M7.
  */
 export function HomeScreen({
   home,
@@ -217,7 +219,34 @@ export function HomeScreen({
       )}
 
       {home.leagues.length > 0 ? (
-        <h2 className={sectionTitle}>LEAGUES</h2>
+        <section
+          aria-labelledby="home-leagues"
+          className="flex flex-col gap-space-2"
+        >
+          <h2 id="home-leagues" className={sectionTitle}>
+            LEAGUES
+          </h2>
+          <ul className="m-0 flex list-none flex-col gap-space-2 p-0">
+            {home.leagues.map((league) => (
+              <li key={`${league.leagueId}:${league.teamId}`}>
+                <AssetRow
+                  title={league.name}
+                  subtitle={leagueSubtitle(league, false)}
+                  figure={rankFigure(league)}
+                  secondary={moveWords(league.move)}
+                  tinted={false}
+                  href="/leagues"
+                />
+              </li>
+            ))}
+          </ul>
+          <a href="/leagues" className={card}>
+            <span className="text-[16px] leading-[22px] font-bold">
+              All your leagues
+            </span>
+            <Chevron />
+          </a>
+        </section>
       ) : null}
     </div>
   );

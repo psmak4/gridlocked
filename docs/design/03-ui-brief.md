@@ -244,7 +244,7 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **A scored session you haven't seen** says "Results are in · hidden until you watch" and "Hidden", with Mark as watched on its row. Once seen, it says "results are in". The hub never shows a score, so it has no "Show it". The wave 2 note "Spoiler protection is on…" shows under the list while anything is hidden.
 - **The countdown** runs to the lock ("Your team locks in"), then to the race's start ("Race starts in"). The Track switch changes its time too.
 - **The hub is public:** a logged-out visitor gets a cached page with no watched state and a "Build a team" button.
-- **Home** has three of the board's blocks for now: the weekend (which opens the hub), "Locks in", and your season (which opens your first team). Leagues join with Task 12 and hot threads in M7. "Signed in as", Settings and Sign out stay at the bottom until Profile has them.
+- **Home** has three of the board's blocks for now: the weekend (which opens the hub), "Locks in", and your season (which opens your first team). Leagues joined with Task 12; hot threads come in M7. "Signed in as", Settings and Sign out stay at the bottom until Profile has them.
 - **While the latest scored event is hidden,** your season is a SpoilerCover ("Australian — standings are in"), with Show it and Mark as watched. The total, the global rank ("Global 212th of 1,048") and "Last race" each include that event. Before anything is scored it says "Your points show here after your first race."
 - **The rank's arrow ("▲ up 14") waits for Standings** (Task 13).
 
@@ -255,6 +255,13 @@ The screens are on the canvas [Gridlocked wave 3](https://claude.ai/artifact/BbF
 - **A session you haven't seen** is a SpoilerCover ("Race — scores are in") with Show it (`?show=`, never stored) and Mark as watched. The server sends none of its figures, and the page title is always "Your points".
 - **The correction note** has one sentence per re-scored session, by what started the re-score: "Race results were updated after a stewards' decision.", "…were corrected after the session." (a staff override), "…was voided.", or "…was rescored after a rules fix." An override's own reason is written for staff, so it isn't shown, unlike the plan's call.
 - **The driver sheet** lists the asset's lines ("Finished P3" / "Race finishing position"), a constructor's per driver ("Russell · Finished P3"), then the team's Boost on it, and "For your team". Its note says "Overtakes and pit stops aren't scored in this game."
+
+**As built (M6 Task 12, leagues: create, join and leave):**
+- **My leagues** follows the board: "Join with a code" and "Create a league", then Your leagues and Automatic ("You're in these from your profile. Change your favorites to switch."). Everyone (the global league) comes first in Automatic, then the favorite-team, favorite-driver and country leagues. A row's subtitle names the kind or the mini-league's rounds and the number of teams, and the team when you have more than one. Its rank reads "Hidden" while that table's latest event is hidden from you (decision 2), and "–" before anything is scored.
+- **A row in Your leagues** opens a sheet with "Invite with code", Copy and "Leave league", which asks once more before it leaves. Standings (Task 13) turns the rows into links.
+- **Join with a code** is a sheet: the code (any case, spaces and dashes are ignored), and "Which of your teams joins" when you have more than one. A wrong code and another game's code both say "No league has that code." The 11th try in 10 minutes says "Too many tries. Wait a few minutes." (the `league_join_limit` setting), even with a right code. There's no "found" preview before joining: it would need a lookup that also counts against the limit.
+- **Create a league** is its own page (`/leagues/new`): League name, "Who can join" (With a code / Anyone), "Which races count" (Whole season / Some races, with From and To rounds still to come), and "Your team in this league" when you have more than one. Then the code with Copy. There's no public list in M6, so "Anyone" says "Anyone with the code can join. Public lists come later."
+- **Home** now shows up to 3 leagues for your first team (yours first, then automatic), with "All your leagues".
 
 ## Wave 4: community and account (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1zQ2UffcabkH67GNgJiSS) (private to you). It uses the same design system and rules. Usernames, posts and numbers are illustrative.
