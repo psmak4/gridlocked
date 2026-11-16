@@ -310,10 +310,15 @@ export function createPrivacyExportHandler({
  * it writes (Ruling 45), so a request with no key has no file; once its file
  * is deleted the key and the link are cleared, so each request is swept once.
  * Deleting a missing key is not an error, so a run that died before writing
- * costs one no-op delete. Each file is deleted before its row is cleared, so
- * a failure leaves the row for the next run; a failure doesn't stop the
- * others, and the run throws at the end if any failed. Returns how many it
- * removed.
+ * costs one no-op delete. Each request is checked again under its row lock
+ * before its file goes, since a job running more than a day late may have
+ * completed it since the list was read; a stale open one is marked `failed`
+ * in that transaction, so a late job that has yet to record its file finds
+ * the request closed and removes the file itself (no completed request
+ * points at a deleted file, and no email carries a dead link). Each file is
+ * deleted before its row is cleared, so a failure leaves the row for the
+ * next run; a failure doesn't stop the others, and the run throws at the end
+ * if any failed. Returns how many it removed.
  */
 export async function expireExports(
   db: Db,
@@ -321,29 +326,47 @@ export async function expireExports(
   store: ExportStore,
 ): Promise<number> {
   const dayAgo = new Date(now.getTime() - DAY_MS);
+  const sweepable = and(
+    eq(privacyRequests.kind, "export"),
+    isNotNull(privacyRequests.exportObjectKey),
+    or(
+      lte(privacyRequests.exportExpiresAt, now),
+      eq(profiles.status, "deleted"),
+      eq(privacyRequests.status, "failed"),
+      and(
+        inArray(privacyRequests.status, OPEN),
+        lte(privacyRequests.requestedAt, dayAgo),
+      ),
+    ),
+  );
   const due = await db
     .select({ id: privacyRequests.id })
     .from(privacyRequests)
     .innerJoin(profiles, eq(profiles.userId, privacyRequests.userId))
-    .where(
-      and(
-        eq(privacyRequests.kind, "export"),
-        isNotNull(privacyRequests.exportObjectKey),
-        or(
-          lte(privacyRequests.exportExpiresAt, now),
-          eq(profiles.status, "deleted"),
-          eq(privacyRequests.status, "failed"),
-          and(
-            inArray(privacyRequests.status, OPEN),
-            lte(privacyRequests.requestedAt, dayAgo),
-          ),
-        ),
-      ),
-    );
+    .where(sweepable)
+    .orderBy(privacyRequests.requestedAt, privacyRequests.id);
   let removed = 0;
   let failed = 0;
   for (const { id } of due) {
     try {
+      const still = await db.transaction(async (tx) => {
+        const t = tx as unknown as Db;
+        const [row] = await t
+          .select({ status: privacyRequests.status })
+          .from(privacyRequests)
+          .innerJoin(profiles, eq(profiles.userId, privacyRequests.userId))
+          .where(and(eq(privacyRequests.id, id), sweepable))
+          .for("update", { of: privacyRequests });
+        if (!row) return false;
+        if (row.status === "pending" || row.status === "processing") {
+          await t
+            .update(privacyRequests)
+            .set({ status: "failed" })
+            .where(eq(privacyRequests.id, id));
+        }
+        return true;
+      });
+      if (!still) continue;
       await store.delete(exportObjectKey(id));
       await db
         .update(privacyRequests)
