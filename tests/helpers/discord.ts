@@ -52,10 +52,16 @@ export async function signInWithDiscord(
   auth: AuthHandler,
   fetchStub: Mock<typeof fetch>,
   user: DiscordUser,
+  // The site's Discord button passes "/auth-error".
+  { errorCallbackURL }: { errorCallbackURL?: string } = {},
 ): Promise<Response> {
   fetchStub.mockImplementation(discordFetch(user));
   const start = await auth.handler(
-    authPost("/sign-in/social", { provider: "discord", callbackURL: "/" }),
+    authPost("/sign-in/social", {
+      provider: "discord",
+      callbackURL: "/",
+      ...(errorCallbackURL ? { errorCallbackURL } : {}),
+    }),
   );
   const { url } = (await start.json()) as { url: string };
   const state = new URL(url).searchParams.get("state");

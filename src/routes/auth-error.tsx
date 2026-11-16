@@ -12,6 +12,7 @@ import { CAPTCHA_HEADER, Turnstile } from "@/components/turnstile";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { authClient } from "@/identity/auth-client";
+import { authErrorKind } from "@/lib/auth-error-kind";
 import { checkEmailState } from "@/lib/check-email-state";
 import { privateHeaders } from "@/lib/private-headers";
 
@@ -23,15 +24,12 @@ export const Route = createFileRoute("/auth-error")({
   component: AuthError,
 });
 
-const EXPIRED = ["invalid_token", "token_expired", "expired_token"];
-const BANNED = ["banned", "banned_user"];
-
 function AuthError() {
   const { error } = Route.useSearch();
   const router = useRouter();
-  const code = (error ?? "").toLowerCase();
-  const expired = EXPIRED.includes(code);
-  const banned = BANNED.includes(code);
+  const kind = authErrorKind(error);
+  const expired = kind === "expired";
+  const banned = kind === "banned";
   const [email, setEmail] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [resetKey, setResetKey] = useState(0);
