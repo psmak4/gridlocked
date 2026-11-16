@@ -1221,7 +1221,7 @@ Each step is a job (2.10) keyed by the run ID, so a re-run is safe and a superse
 **`score_session`** runs one step per job, and queues the next under `score:<runId>:<step>:<afterTeamId|start>`:
 - `assets`: `startRun` then `writeAssetLines`. A skip (the same fingerprint as the current run) ends the chain there, with nothing else run. It also stops for a session that was cancelled or has gone back under review since it was queued.
 - `teams`: one `writeTeamAdjustments` batch, then the next batch or `standings`. Totals aren't touched here: the ledger lock doesn't span a run, so they're only right after the last batch.
-- `standings`: `recomputeTotals` from the event, `recomputeStandings`, then one transaction that runs `finishRun` and moves a `locked` game event to **`scored`**. A superseded run doesn't move it.
+- `standings`: one transaction that runs `finishRun`, then `recomputeTotals` from the event and `recomputeStandings`, and moves a `locked` game event to **`scored`**. A superseded run publishes nothing and doesn't move it. Totals never move without a finished run, so the next run's team `before` (the published total) is always what its change is measured from. `game_finalize`'s inline re-runs publish the event's totals as each one finishes, for the same reason (changed 2026-11-16).
 
 `teams` and `standings` stop quietly for a run that isn't `running`, which is what a job run twice finds. Any step stops quietly when the game event is cancelled or hasn't locked. `global` leagues have no standings rows: their ranks are `global_rank` (4.4).
 

@@ -36,7 +36,12 @@ import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { planGameEvents } from "./games";
 import { createGameHandlers, planGameJobs } from "./jobs";
 import { clearSessionException, setSessionException } from "./cancellations";
-import { startRun, writeAssetLines } from "./scoring-runs";
+import {
+  startRun,
+  writeAssetLines,
+  writeTeamAdjustments,
+  type Change,
+} from "./scoring-runs";
 import {
   createScoreHandlers,
   enqueueScoring,
@@ -69,14 +74,28 @@ import type { StaffActor } from "@/staff/roster";
 // weekend doesn't: retries, failures, batches and leagues.
 
 /**
- * `assets`: the writeAssetLines failure of the last-attempt test. `afterFinish`
+ * `assets`: the writeAssetLines failure of the last-attempt test. `standings`:
+ * a recomputeStandings failure, after the totals and before the run finishes. `afterFinish`
  * runs once, after an inline run finishes: what lands between `finalizeGameEvent`'s
  * inline runs and its transaction.
  */
 const breaking = vi.hoisted(() => ({
   assets: false,
+  standings: false,
   afterFinish: null as null | (() => Promise<void>),
 }));
+vi.mock("@/leagues/standings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/leagues/standings")>();
+  return {
+    ...actual,
+    recomputeStandings: (
+      ...args: Parameters<typeof actual.recomputeStandings>
+    ) =>
+      breaking.standings
+        ? Promise.reject(new Error("the standings broke"))
+        : actual.recomputeStandings(...args),
+  };
+});
 vi.mock("./scoring-runs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./scoring-runs")>();
   return {
@@ -124,6 +143,7 @@ describe("the scoring pipeline (DM 4.8)", () => {
   beforeEach(async () => {
     t = await createTestDb();
     breaking.assets = false;
+    breaking.standings = false;
     breaking.afterFinish = null;
     users.clear();
   });
@@ -372,6 +392,74 @@ describe("the scoring pipeline (DM 4.8)", () => {
       ]);
       for (const row of await totals(round1.id)) {
         expect(row.points).toBeGreaterThan(before.get(row.teamId)!);
+      }
+    });
+
+    it("re-running two sessions at finalize counts each team's change once", async () => {
+      await replay({ until: iso(3) });
+      const now = after(3);
+      const qualifying = await sessionOf(t.db, round1.id, "qualifying");
+      const race = await raceId();
+      const before = new Map(
+        (await totals(round1.id)).map((r) => [r.teamId, r.points]),
+      );
+      const firstRuns = new Set((await runs()).map((r) => r.id));
+      for (const sessionId of [qualifying.id, race]) {
+        await addOverride(t.db, now, {
+          sessionId,
+          driverId: await driverId("norris"),
+          kind: "patch",
+          fields: DSQ,
+          reason: "Disqualified",
+          createdBy: "00000000-0000-0000-0000-000000000000",
+        });
+      }
+
+      await finalizeGameEvent(t.db, now, { gameId, eventId: round1.id });
+
+      const reruns = (await runs()).filter((r) => !firstRuns.has(r.id));
+      expect(reruns.map((r) => r.sessionId).sort()).toEqual(
+        [qualifying.id, race].sort(),
+      );
+      for (const row of await totals(round1.id)) {
+        const reported = reruns
+          .flatMap((r) => (r.diffSummary as { biggest: Change[] }).biggest)
+          .filter((c) => c.kind === "team" && c.id === row.teamId)
+          .reduce((sum, c) => sum + c.change, 0);
+        expect(reported).toBe(row.points - before.get(row.teamId)!);
+      }
+    });
+
+    it("a chain of corrections reports changes that add up to each team's total", async () => {
+      const override = (at: number, fields: Record<string, unknown>) => ({
+        at: iso(at),
+        run: async (now: Date) => {
+          await overrideResult(t.db, now, {
+            sessionId: await raceId(),
+            driverId: await driverId("norris"),
+            fields,
+            reason: "Correction",
+            actor: ACTOR,
+          });
+        },
+      });
+      await replay({
+        actions: [
+          override(3, { pit_lane_start: true }),
+          override(4, { pit_lane_start: false }),
+        ],
+        until: iso(5),
+      });
+
+      const all = await runs();
+      expect(all.filter((r) => r.trigger === "override")).toHaveLength(2);
+      for (const row of await totals(round1.id)) {
+        const reported = all
+          .filter((r) => r.status === "succeeded")
+          .flatMap((r) => (r.diffSummary as { biggest: Change[] }).biggest)
+          .filter((c) => c.kind === "team" && c.id === row.teamId)
+          .reduce((sum, c) => sum + c.change, 0);
+        expect(reported).toBe(row.points);
       }
     });
 
@@ -1123,6 +1211,51 @@ describe("the scoring pipeline (DM 4.8)", () => {
         expect(
           (await scoreJobs()).find((j) => j.dedupeKey === "last:try"),
         ).toMatchObject({ status: "dead" });
+      });
+
+      it("a standings step that fails after the totals publishes nothing, and the next run reports the whole change", async () => {
+        await resultsIn();
+        const runId = await startedRun();
+        await writeAssetLines(t.db, scoredAt, runId);
+        for (let afterTeamId: string | null = null; ;) {
+          const batch = await writeTeamAdjustments(t.db, scoredAt, runId, {
+            afterTeamId,
+          });
+          if (batch === "superseded") throw new Error("superseded");
+          if (batch.done) break;
+          afterTeamId = batch.lastTeamId;
+        }
+        breaking.standings = true;
+        await queueStep(
+          {
+            gameId,
+            sessionId: race.id,
+            trigger: "results",
+            runId,
+            step: "standings",
+          },
+          "last:try",
+          1,
+        );
+
+        expect(await run()).toEqual({ ran: 0, failed: 1, lost: 0 });
+        expect(await runOf(runId)).toMatchObject({ status: "failed" });
+        expect(await totals(round1.id)).toEqual([]);
+
+        breaking.standings = false;
+        await enqueueScoring(t.db, scoredAt, {
+          sessionId: race.id,
+          stamp: "again",
+          trigger: "results",
+        });
+        await run();
+        const next = (await runs(race.id)).find((r) => r.id !== runId)!;
+        expect(next).toMatchObject({ status: "succeeded", isCurrent: true });
+        const rows = await totals(round1.id);
+        expect(rows).toHaveLength(2);
+        expect(
+          (next.diffSummary as { teamsChanged: number }).teamsChanged,
+        ).toBe(2);
       });
 
       it("a step that throws with attempts left keeps its run running", async () => {
