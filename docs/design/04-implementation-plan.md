@@ -346,7 +346,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Legal review:**
     - `pendingDocuments` filters future `published_at`;
     - DM 6.7 states Neon's soft-delete duration.
-  - **A test** for the Discord ban message.
+  - ~~**A test** for the Discord ban message~~: done early (2026-11-16). A banned account's Discord callback lands on `/auth-error` with `BANNED_USER`, which the page shows as a ban.
 - **Carried from M6:**
   - **CDN caching for the public pages** (decision 3). Vercel's CDN doesn't cache a response with `Vary: Cookie`, so the weekend hub, Prices and How prices work run the function on every request. Pick a way to cache the logged-out answer without serving it to a signed-in reader, such as a low-cardinality signed-in header set before the cache. Then measure it in the budget run.
   - Once that cache works, a logged-out countdown can be up to about 6 minutes slow on a stale copy (`s-maxage=60` plus `stale-while-revalidate=300`). Shorten the stale window near a lock.
