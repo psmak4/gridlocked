@@ -412,6 +412,9 @@ export function TeamBuilder({
           <a href={`/team/${team.slot}/points`} className={headerLink}>
             Points breakdown
           </a>
+          <a href="/prices" className={headerLink}>
+            Prices
+          </a>
         </span>
       </div>
 

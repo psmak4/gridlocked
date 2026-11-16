@@ -180,7 +180,10 @@ const CHIP_SENTENCES: Record<ChipEffect, string> = {
 const LOCKED_OR_SCORED = new Set(["locked", "scored"]);
 
 /** A ruleset version's params. */
-async function paramsOf(db: Db, versionId: string): Promise<RulesetParams> {
+export async function paramsOf(
+  db: Db,
+  versionId: string,
+): Promise<RulesetParams> {
   const [row] = await db
     .select({ params: rulesetVersions.params })
     .from(rulesetVersions)
@@ -689,8 +692,12 @@ export function constructorCode(shortName: string): string {
   return letters.slice(0, 3).toUpperCase();
 }
 
-/** The priced pool at an event, with what each row shows. */
-async function poolRows(
+/**
+ * The priced pool at an event, with what each row shows. The change since
+ * `previousEventId` shows once that event's race is revealed to `reader`, or
+ * with `showChanges` (Prices' "Show it", M6 Task 14).
+ */
+export async function poolRows(
   db: Db,
   now: Date,
   input: {
@@ -699,8 +706,9 @@ async function poolRows(
     seasonId: string;
     round: number;
     previousEventId: string | null;
-    reader: NonNullable<Reader>;
+    reader: Reader;
     owned: Set<string>;
+    showChanges?: boolean;
   },
 ): Promise<PoolRow[]> {
   const { gameId, eventId, seasonId, previousEventId } = input;
@@ -781,7 +789,8 @@ async function poolRows(
     ).rows[0]?.id;
     const revealed =
       race != null &&
-      (await revealedSessions(db, now, input.reader, [race])).has(race);
+      (input.showChanges === true ||
+        (await revealedSessions(db, now, input.reader, [race])).has(race));
     if (revealed) {
       previousPrice = new Map(
         (

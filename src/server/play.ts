@@ -34,6 +34,12 @@ import {
   leaveLeagueAction,
   leaveLeagueInput,
 } from "@/play/leagues";
+import {
+  getPricesInput,
+  howPricesPage,
+  pricesPage,
+  type PriceBoard,
+} from "@/play/prices";
 import { getStandingsInput, standingsForViewer } from "@/play/standings";
 import {
   createTeamAction,
@@ -173,6 +179,31 @@ export const getWeekend = createServerFn({ method: "GET" }).handler(
     return withRequestNow((db, now) => weekendPage(db, now, viewer));
   },
 );
+
+/**
+ * `/prices`, the price board. Public (decisions 3 and 4): a logged-out
+ * visitor's answer is the same for everyone and cacheable, and
+ * `?show=changes` is a page of its own; a signed-in one's carries their
+ * watched state and their team value, so it is private.
+ */
+export const getPrices = createServerFn({ method: "GET" })
+  .validator(getPricesInput)
+  .handler(
+    async ({ data }): Promise<{ hasGame: boolean; board: PriceBoard }> => {
+      const viewer = await getViewer(getRequest());
+      setResponseHeader(
+        "Cache-Control",
+        viewer ? "private, no-store" : PUBLIC_CACHE,
+      );
+      return withRequestNow((db, now) => pricesPage(db, now, viewer, data));
+    },
+  );
+
+/** `/prices/how`: the formula in words. The same for everyone, so public. */
+export const getHowPrices = createServerFn({ method: "GET" }).handler(() => {
+  setResponseHeader("Cache-Control", PUBLIC_CACHE);
+  return withRequestNow((db) => howPricesPage(db));
+});
 
 /** Home for someone signed in: the weekend, the countdown and your season. */
 export const getHome = createServerFn({ method: "GET" })
