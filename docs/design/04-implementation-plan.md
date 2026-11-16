@@ -290,6 +290,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - whether a held username should also hold its 0/o look-alikes;
   - whether `accountAgeDays` still earns its place in the trust rules;
   - a test of `expireExports`' `failed` branch.
+- **Plan:** [plans/M7-community.md](../plans/M7-community.md), written 2026-11-16. **Waiting on your decisions 1–7**, the first being approval of DM Part 5. Those also decide the approvals M7 needs: one new dependency each for Markdown and Web Push, a VAPID key pair you create, a `chat-archives` bucket, and staging runs for the deploy and the chat load test.
 
 ### M8 — Staff tools (target 12 Feb)
 - **Goal:** a normal weekend needs no staff, and an abnormal one is quick to fix.
