@@ -312,8 +312,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - `requireStaff` runs before `setRole` and `banUser` on every staff screen;
   - TOTP codes can't be replayed within their window;
   - alerts and audit records for failed two-step codes;
-  - `setTrustLevel` writes nothing when the level doesn't change, and refuses a deleted profile;
-  - a missing staff reason refuses with an `IdentityError`.
+  - ~~`setTrustLevel` writes nothing when the level doesn't change, and refuses a deleted profile;~~ done early (2026-11-16). It still locks an unlocked profile at its own level, since that's a change;
+  - ~~a missing staff reason refuses with an `IdentityError`~~: done early (2026-11-16), as `reason_required`.
 - **Carried from M6:**
   - standings' "See more" can join two different tables if an event is scored between page loads. Pin the page to the standings' version, or start again when it changes.
 
@@ -340,7 +340,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Logging, with Sentry:** a value-free config-error class, and logging codes instead of "better-auth error: event".
   - **Rate limits:** tune the per-IP and per-path limits with beta traffic.
   - **Job hardening:**
-    - queue `identity_daily` even when `sync_calendar` fails;
+    - ~~queue `identity_daily` even when `sync_calendar` fails~~: done early (2026-11-16). The sync queues it before fetching anything;
     - ~~re-check a stale open export under a lock~~: done early (2026-11-16). The sweep re-checks each request under its row lock and fails a stale open one;
     - pass the Neon plan step only the env it needs.
   - **Legal review:**

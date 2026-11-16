@@ -511,6 +511,16 @@ describe("the sync_calendar handler", () => {
       ]);
     });
 
+    it("a sync that fails still queues the day's identity_daily", async () => {
+      pipeline.serve("/ergast/f1/2026.json", () => {
+        throw new TypeError("fetch failed");
+      });
+      await syncKeeping(T0);
+      expect(await daily()).toMatchObject([
+        { dedupeKey: "identity_daily:2026-02-01", runAt: T0 },
+      ]);
+    });
+
     it("sync_calendar queues one identity_daily a day", async () => {
       await syncKeeping(T0);
       expect(await daily()).toMatchObject([
