@@ -376,7 +376,7 @@ Your scoring tables match the [official rules](https://fantasy.formula1.com/en/g
 - **Logged-out visitors are spoiler-safe by default (decided 2026-10-27).** A reveal-all toggle is saved in their browser.
 - Pages are rendered spoiler-safe by default and revealed per user. That keeps public pages cacheable.
 
-### 7.4 Trust levels, rate limits, filtering (proposed; modeled on Discourse)
+### 7.4 Trust levels, rate limits, filtering (approved 2026-11-16 with DM Part 5; modeled on Discourse)
 | Level | How it's reached | Can |
 |---|---|---|
 | TL0 new | signs up with a verified email | reply and chat; no links or images; slow rate limits; can't start threads |

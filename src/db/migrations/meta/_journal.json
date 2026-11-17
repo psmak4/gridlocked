@@ -295,6 +295,20 @@
       "when": 1794869142389,
       "tag": "0041_impersonation_cascade",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794890561807,
+      "tag": "0042_freezing_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794890571010,
+      "tag": "0043_community_seed",
+      "breakpoints": true
     }
   ]
 }

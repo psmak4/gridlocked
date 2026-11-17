@@ -1351,7 +1351,9 @@ None of these grows with the user count. Public league pages are cached at the C
 
 ---
 
-## Part 5. Community (proposed)
+## Part 5. Community (approved 2026-11-16)
+
+**Approved with three changes from the M7 plan (decision 1):** the chat refresh is the same response for every viewer, so the CDN can share it (no cookie read, no `Vary`; spoiler gating is the client's choice whether to ask, 5.5); league threads keep their column but wait for after launch; and the moderation queue's screen waits for M8 (M7 builds the queue and its actions). The retention in 5.10 and HLD §7.4's trust table are approved with it.
 
 This part covers the forum, live session chat, votes, spoiler state, moderation and notifications. It follows HLD §7 and §10. Two decisions shape it, both made 2026-10-27:
 - **Deleted accounts are always anonymized.** Posts stay, the author shows as "deleted user", and personal data is removed. Before leaving, a user can still delete individual posts.
@@ -1549,7 +1551,7 @@ A user can report a given target only once.
 
 **Rate limits** are checked by counting the user's recent rows, e.g. posts by this author in the last 10 minutes. That uses the index `posts (author_user_id, created_at)`, so there's no separate counter table to keep in sync.
 
-### 5.10 Retention (proposed except chat, which you decided)
+### 5.10 Retention (approved 2026-11-16; chat decided 2026-10-27)
 | Data | Kept |
 |---|---|
 | Posts, threads, votes | Permanently, unless removed for legal reasons |
@@ -1599,7 +1601,7 @@ A user can report a given target only once.
   - The Resend `Idempotency-Key` is the row id, so a crash between the send and the update can't send twice. A 422 is a rejected address (`failed`, not retried); a quota error from Resend holds the batch until the next UTC day; other errors leave the row queued for the next hour.
   - At 80% of `perDay` a review item `email_cap_near` opens, once per UTC day (key `email_cap_near:<yyyy-mm-dd>`).
 
-### 5.12 Search (proposed; not in the HLD's launch list, so it can wait)
+### 5.12 Search (after launch, decided 2026-11-16)
 It's cheap enough to include at launch. If it's deferred, adding it later is purely additive.
 - Threads and posts get a generated `tsvector` column with a GIN index: Postgres full-text search, with no extra service.
 - **Search never returns:** private league threads, removed content, or results inside a spoiler window for users who haven't revealed them.
