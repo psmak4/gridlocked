@@ -339,6 +339,36 @@ describe("data export (DM 6.7)", () => {
     expect(await expireExports(t.db, week, files.store)).toBe(0);
   });
 
+  it("a file the store can't delete keeps its key, the others go, and the run fails", async () => {
+    const first = await requestExport(t.db, NOW, {
+      userId: await seedUser(t.db),
+    });
+    const second = await requestExport(t.db, NOW, {
+      userId: await seedUser(t.db),
+    });
+    await runJobs(NOW);
+    const stuck = `exports/${first.requestId}.json`;
+    const store = {
+      ...files.store,
+      delete: async (key: string) => {
+        if (key === stuck) throw new Error("storage is down");
+        return files.store.delete(key);
+      },
+    };
+
+    const week = new Date(NOW.getTime() + 7 * DAY);
+    await expect(expireExports(t.db, week, store)).rejects.toThrow(
+      "expireExports: 1 of 2 failed",
+    );
+    expect(files.objects.has(stuck)).toBe(true);
+    expect((await request(first.requestId)).exportObjectKey).toBe(stuck);
+    expect(files.objects.has(`exports/${second.requestId}.json`)).toBe(false);
+    expect((await request(second.requestId)).exportObjectKey).toBeNull();
+    // The next run, with the store back, finishes the job.
+    expect(await expireExports(t.db, week, files.store)).toBe(1);
+    expect(files.objects.has(stuck)).toBe(false);
+  });
+
   it("an export job for a deleted user stops, and any file goes at the next daily run", async () => {
     const actorOf = (userId: string) => ({
       kind: "user" as const,
@@ -465,6 +495,86 @@ describe("data export (DM 6.7)", () => {
     expect(row).toMatchObject({ status: "completed", exportObjectKey: key });
     expect(files.objects.has(key)).toBe(true);
     expect(files.deleted).toEqual([]);
+  });
+
+  it("a job more than a day late that finishes after the sweep fails its request and leaves no file", async () => {
+    const userId = await seedUser(t.db, { email: "ada@example.test" });
+    const { requestId } = await requestExport(t.db, NOW, { userId });
+    const key = `exports/${requestId}.json`;
+    const late = new Date(NOW.getTime() + DAY + MIN);
+    clock.set(late);
+    // The daily sweep runs while the job is between its write and its record.
+    const job = createPrivacyExportHandler({
+      store: afterPut(async () => {
+        await expireExports(t.db, late, files.store);
+      }),
+      sender: mail.sender,
+      log: () => {},
+    });
+    await job(exportJob(requestId), { db: t.db, clock });
+
+    // No completed request pointing at a deleted file, and no email with a
+    // dead link: the sweep failed the request, and the job saw that.
+    expect(await request(requestId)).toMatchObject({
+      status: "failed",
+      exportObjectKey: null,
+      exportUrl: null,
+    });
+    expect(files.objects.has(key)).toBe(false);
+    expect(await t.db.select().from(emailOutbox)).toEqual([]);
+  });
+
+  it("a late job that completes between the sweep's read and its delete keeps its file", async () => {
+    // An older failed request, swept first, so the late job can finish in
+    // between the sweep's read and its turn at the second request.
+    const other = await seedUser(t.db);
+    const oldId = newId();
+    const oldKey = `exports/${oldId}.json`;
+    await t.db.insert(privacyRequests).values({
+      id: oldId,
+      userId: other,
+      kind: "export",
+      status: "failed",
+      requestedAt: new Date(NOW.getTime() - 3 * DAY),
+      exportObjectKey: oldKey,
+    });
+    await files.store.put(oldKey, "{}");
+
+    const userId = await seedUser(t.db, { email: "ada@example.test" });
+    const { requestId } = await requestExport(t.db, NOW, { userId });
+    const key = `exports/${requestId}.json`;
+    // An earlier attempt recorded the key and died before writing.
+    await t.db
+      .update(privacyRequests)
+      .set({ exportObjectKey: key })
+      .where(eq(privacyRequests.id, requestId));
+
+    const late = new Date(NOW.getTime() + DAY + MIN);
+    clock.set(late);
+    const job = createPrivacyExportHandler({
+      store: files.store,
+      sender: mail.sender,
+      log: () => {},
+    });
+    let ran = false;
+    const sweepStore: ExportStore = {
+      ...files.store,
+      async delete(k) {
+        if (k === oldKey && !ran) {
+          ran = true;
+          await job(exportJob(requestId), { db: t.db, clock });
+        }
+        await files.store.delete(k);
+      },
+    };
+    expect(await expireExports(t.db, late, sweepStore)).toBe(1);
+    expect(ran).toBe(true);
+
+    const row = await request(requestId);
+    expect(row).toMatchObject({ status: "completed", exportObjectKey: key });
+    expect(row.exportUrl).toContain(key);
+    expect(files.objects.has(key)).toBe(true);
+    expect(files.objects.has(oldKey)).toBe(false);
   });
 
   it("an account deleted between the build and the record has its file deleted", async () => {

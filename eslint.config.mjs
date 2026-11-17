@@ -24,7 +24,7 @@ const providerBoundaryPatterns = [
 const betterAuthBoundaryPattern = {
   group: ["better-auth", "better-auth/*", "@better-auth/*"],
   message:
-    "Better Auth is confined to src/identity/auth.ts, src/identity/auth-client.ts and src/server/.",
+    "Better Auth is confined to src/identity/auth/, src/identity/auth-client.ts and src/server/.",
 };
 
 // What every file may not import. The blocks below replace the rule's options
@@ -107,7 +107,7 @@ const eslintConfig = defineConfig([
   {
     // Better Auth's own files may import it; the provider boundary still holds.
     files: [
-      "src/identity/auth.ts",
+      "src/identity/auth/**",
       "src/identity/auth-client.ts",
       "src/server/**",
     ],

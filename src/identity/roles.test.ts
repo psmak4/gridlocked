@@ -9,6 +9,7 @@ import {
   PASSWORD,
   recordingSender,
   TEST_NOW,
+  TEST_ORIGIN,
   testAuth,
   type TestAuth,
 } from "../../tests/helpers/auth";
@@ -17,6 +18,7 @@ import { errorCode, signUpAs, viewerFor } from "../../tests/helpers/staff";
 import { seedUser } from "../../tests/helpers/users";
 import { auditLog, authSessions, users } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { authErrorKind } from "@/lib/auth-error-kind";
 import { newId } from "@/lib/ids";
 import type { StaffActor } from "@/staff/roster";
 import { banUser, setRole, unbanUser, type Role } from "./roles";
@@ -116,7 +118,7 @@ describe("roles and bans (DM 6.4)", () => {
         reason: "   ",
         actor,
       }),
-    ).rejects.toThrow("a staff action needs a reason");
+    ).rejects.toMatchObject({ code: "reason_required" });
     expect(await roleOf(ada)).toBe("user");
     expect(await audits("user.role.update")).toHaveLength(0);
   });
@@ -243,9 +245,14 @@ describe("roles and bans (DM 6.4)", () => {
       reason: "Spam",
       actor,
     });
-    expect(hasSession(await signInWithDiscord(auth, fetchStub, person))).toBe(
-      false,
-    );
+    const refused = await signInWithDiscord(auth, fetchStub, person, {
+      errorCallbackURL: "/auth-error",
+    });
+    expect(hasSession(refused)).toBe(false);
+    // It lands on the error page with a code that page shows as a ban.
+    const landed = new URL(refused.headers.get("location") ?? "", TEST_ORIGIN);
+    expect(landed.pathname).toBe("/auth-error");
+    expect(authErrorKind(landed.searchParams.get("error"))).toBe("banned");
 
     // Magic link, for the same banned account.
     await auth.handler(

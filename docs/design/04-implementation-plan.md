@@ -309,12 +309,12 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a lock never moving into the past;
   - optimistic concurrency, so two staff can't resolve the same item.
 - **Carried from M5:**
-  - `auth_sessions.impersonated_by` becomes `ON DELETE CASCADE`;
+  - ~~`auth_sessions.impersonated_by` becomes `ON DELETE CASCADE`~~: done early (2026-11-16), migration 0041;
   - `requireStaff` runs before `setRole` and `banUser` on every staff screen;
   - TOTP codes can't be replayed within their window;
   - alerts and audit records for failed two-step codes;
-  - `setTrustLevel` writes nothing when the level doesn't change, and refuses a deleted profile;
-  - a missing staff reason refuses with an `IdentityError`.
+  - ~~`setTrustLevel` writes nothing when the level doesn't change, and refuses a deleted profile;~~ done early (2026-11-16). It still locks an unlocked profile at its own level, since that's a change;
+  - ~~a missing staff reason refuses with an `IdentityError`~~: done early (2026-11-16), as `reason_required`.
 - **Carried from M6:**
   - standings' "See more" can join two different tables if an event is scored between page loads. Pin the page to the standings' version, or start again when it changes.
 
@@ -341,13 +341,13 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Logging, with Sentry:** a value-free config-error class, and logging codes instead of "better-auth error: event".
   - **Rate limits:** tune the per-IP and per-path limits with beta traffic.
   - **Job hardening:**
-    - queue `identity_daily` even when `sync_calendar` fails;
-    - re-check a stale open export under a lock;
+    - ~~queue `identity_daily` even when `sync_calendar` fails~~: done early (2026-11-16). The sync queues it before fetching anything;
+    - ~~re-check a stale open export under a lock~~: done early (2026-11-16). The sweep re-checks each request under its row lock and fails a stale open one;
     - pass the Neon plan step only the env it needs.
   - **Legal review:**
     - `pendingDocuments` filters future `published_at`;
     - DM 6.7 states Neon's soft-delete duration.
-  - **A test** for the Discord ban message.
+  - ~~**A test** for the Discord ban message~~: done early (2026-11-16). A banned account's Discord callback lands on `/auth-error` with `BANNED_USER`, which the page shows as a ban.
 - **Carried from M6:**
   - **CDN caching for the public pages** (decision 3). Vercel's CDN doesn't cache a response with `Vary: Cookie`, so the weekend hub, Prices and How prices work run the function on every request. Pick a way to cache the logged-out answer without serving it to a signed-in reader, such as a low-cardinality signed-in header set before the cache. Then measure it in the budget run.
   - Once that cache works, a logged-out countdown can be up to about 6 minutes slow on a stale copy (`s-maxage=60` plus `stale-while-revalidate=300`). Shorten the stale window near a lock.

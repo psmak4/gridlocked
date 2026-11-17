@@ -251,7 +251,7 @@ describe("trust levels in the database", () => {
           reason: "  ",
           actor: actor(mod),
         }),
-      ).rejects.toThrow("needs a reason");
+      ).rejects.toMatchObject({ code: "reason_required" });
       await expect(
         setTrustLevel(t.db, NOW, {
           userId: id,
@@ -260,6 +260,60 @@ describe("trust levels in the database", () => {
           actor: actor(mod),
         }),
       ).rejects.toThrow("invalid_trust_level");
+      expect(await changes(id)).toHaveLength(0);
+    });
+
+    it("setting the level it already holds, locked, writes nothing", async () => {
+      const id = await seedActive();
+      const mod = await seedUser(t.db, { role: "moderator" });
+      const set = () =>
+        setTrustLevel(t.db, NOW, {
+          userId: id,
+          level: 2,
+          reason: "helper",
+          actor: actor(mod),
+        });
+      await set();
+      await set();
+      expect(await changes(id)).toHaveLength(1);
+      expect(
+        await t.db
+          .select()
+          .from(auditLog)
+          .where(eq(auditLog.action, "user.trust_level.set")),
+      ).toHaveLength(1);
+    });
+
+    it("the same level on an unlocked profile still locks it", async () => {
+      const id = await seedActive();
+      const mod = await seedUser(t.db, { role: "moderator" });
+      await setTrustLevel(t.db, NOW, {
+        userId: id,
+        level: 0,
+        reason: "keep them new",
+        actor: actor(mod),
+      });
+      expect(await profile(id)).toMatchObject({
+        trustLevel: 0,
+        trustLevelLocked: true,
+      });
+    });
+
+    it("refuses a deleted profile", async () => {
+      const id = await seedActive();
+      const mod = await seedUser(t.db, { role: "moderator" });
+      await t.db
+        .update(profiles)
+        .set({ status: "deleted" })
+        .where(eq(profiles.userId, id));
+      await expect(
+        setTrustLevel(t.db, NOW, {
+          userId: id,
+          level: 2,
+          reason: "r",
+          actor: actor(mod),
+        }),
+      ).rejects.toMatchObject({ code: "inactive" });
       expect(await changes(id)).toHaveLength(0);
     });
 

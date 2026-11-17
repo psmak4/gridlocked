@@ -454,7 +454,7 @@ describe("account deletion (DM 6.7)", () => {
             actor: { kind: "moderator", userId: moderator, label: "mod_one" },
             reason,
           }),
-        ).rejects.toThrow(/reason/);
+        ).rejects.toMatchObject({ code: "reason_required" });
       }
       expect((await profileRow(t.db, userId)).status).toBe("active");
     });

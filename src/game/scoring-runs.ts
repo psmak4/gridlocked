@@ -643,11 +643,19 @@ export async function dryRunEvent(
  * summary (`previousRunId`, `assetsChanged`, `teamsChanged`, the `BIGGEST`
  * biggest changes, and `assets`: every asset whose points changed). A newer
  * run means `superseded`. Run again, it returns `succeeded`.
+ *
+ * `publish` runs in the same transaction, after the run is marked and only
+ * when it is: the totals (and standings) a finished run moves. So totals never
+ * move without a finished run, and a finished run's totals are always
+ * published. The next run's team `before` is the published total, so either
+ * gap would misreport a change (a failed run's change never reported, or a
+ * finished one's counted again by the next).
  */
 export async function finishRun(
   db: Db,
   now: Date,
   runId: string,
+  options: { publish?: (tx: Db) => Promise<void> } = {},
 ): Promise<"succeeded" | "superseded"> {
   return db.transaction(async (tx) => {
     const run = await loadRun(tx, runId);
@@ -665,6 +673,7 @@ export async function finishRun(
       .update(scoringRuns)
       .set({ status: "succeeded", finishedAt: now, diffSummary: diff })
       .where(eq(scoringRuns.id, run.id));
+    await options.publish?.(tx);
     return "succeeded";
   });
 }
