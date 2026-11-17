@@ -85,10 +85,23 @@ describe("the sign-in-first pages (M6)", () => {
     expect(signInFirst("/leagues/abc", "?tab=x", null)).toBe(
       "/leagues/abc?tab=x",
     );
+    // M7: starting a thread needs an account; reading the forum doesn't.
+    expect(signInFirst("/forum/new", "?category=fantasy", null)).toBe(
+      "/forum/new?category=fantasy",
+    );
   });
 
   it("leaves the public pages and anyone signed in alone", () => {
-    for (const path of ["/", "/weekend", "/prices", "/prices/how", "/teams"]) {
+    for (const path of [
+      "/",
+      "/weekend",
+      "/prices",
+      "/prices/how",
+      "/teams",
+      "/forum",
+      "/forum/fantasy",
+      "/t/0190c3c0-0000-7000-8000-000000000000",
+    ]) {
       expect(signInFirst(path, "", null)).toBeNull();
     }
     expect(signInFirst("/team", "", complete)).toBeNull();

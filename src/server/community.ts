@@ -11,17 +11,23 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import {
+  categoryPageInput,
   createThreadInput,
   deletePostInput,
   editPostInput,
   replyInput,
+  threadPageInput,
   voteInput,
 } from "@/community/inputs";
+import { composerData, writerOf } from "@/community/composer";
+import { categoryList, threadList, threadPage } from "@/community/read";
 import { deleteOwnPost, editPost, reply } from "@/community/posts";
 import { createThread } from "@/community/threads";
 import { vote } from "@/community/votes";
 import type { Viewer } from "@/identity/viewer";
+import { readerOf } from "@/play/weekend";
 import type { ServerDb } from "./db";
+import { cacheFor } from "./public-cache";
 import { getViewer, withRequestNow } from "./session";
 
 // Not exported: only the handlers below use it, so the client build drops it.
@@ -67,3 +73,60 @@ export const voteFn = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     communityAction((db, now, viewer) => vote(db, now, viewer, data)),
   );
+
+// --- Reads -------------------------------------------------------------------
+// Public (HLD §7.3): a logged-out visitor's answer is spoiler-safe and the
+// same for everyone, so a CDN may keep it; a signed-in one's carries their
+// reveals and votes, so it is private.
+
+/** `/forum`: the categories, and whether the viewer may start a thread. */
+export const getForumFn = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const viewer = await getViewer(getRequest());
+    cacheFor(viewer);
+    return withRequestNow(async (db, now) => ({
+      categories: await categoryList(db, now),
+      writer: writerOf(viewer),
+      /** The request's clock, for "3 h" and the like. */
+      now: now.toISOString(),
+    }));
+  },
+);
+
+/** `/forum/$category`: its threads, hot or new. */
+export const getCategoryFn = createServerFn({ method: "GET" })
+  .validator(categoryPageInput)
+  .handler(async ({ data }) => {
+    const viewer = await getViewer(getRequest());
+    cacheFor(viewer);
+    return withRequestNow(async (db, now) => ({
+      page: await threadList(db, now, readerOf(viewer), {
+        categorySlug: data.slug,
+        sort: data.sort,
+        cursor: data.cursor,
+        show: data.show,
+      }),
+      writer: writerOf(viewer),
+      /** The request's clock, for "3 h" and the like. */
+      now: now.toISOString(),
+    }));
+  });
+
+/** `/t/$threadId`: the thread, or its cover while it would spoil. */
+export const getThreadFn = createServerFn({ method: "GET" })
+  .validator(threadPageInput)
+  .handler(async ({ data }) => {
+    const viewer = await getViewer(getRequest());
+    cacheFor(viewer);
+    return withRequestNow(async (db, now) => ({
+      page: await threadPage(db, now, readerOf(viewer), data),
+      writer: writerOf(viewer),
+      /** The request's clock, for "3 h" and the like. */
+      now: now.toISOString(),
+    }));
+  });
+
+/** "New thread": where the viewer may start one, and the spoiler check. */
+export const getComposerFn = createServerFn({ method: "GET" }).handler(() =>
+  communityAction((db, now, viewer) => composerData(db, now, writerOf(viewer))),
+);

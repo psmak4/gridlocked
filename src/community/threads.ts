@@ -20,7 +20,11 @@ export type CreateThreadInput = {
   body: string;
   /** Ties the thread to a session, which makes it spoiler-scoped. */
   sessionId?: string | null;
-  containsSpoilers: boolean;
+  /**
+   * The author's answer to "Contains spoilers". Left out, the title check
+   * decides (HLD §7.3); a plain no from the author wins over it.
+   */
+  containsSpoilers?: boolean;
 };
 
 export type CreateThreadResult =
@@ -54,7 +58,7 @@ export async function createThread(
     eventId = session.eventId;
   }
 
-  const spoilers = input.containsSpoilers || gate.spoilerTitle;
+  const spoilers = input.containsSpoilers ?? gate.spoilerTitle;
   const status: PostStatus = gate.hold ? "pending_review" : "visible";
   const threadId = newId();
   const postId = newId();

@@ -18,6 +18,9 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as WeekendRouteImport } from './routes/weekend'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
+import { Route as ForumIndexRouteImport } from './routes/forum.index'
+import { Route as ForumCategoryRouteImport } from './routes/forum.$category'
+import { Route as ForumNewRouteImport } from './routes/forum.new'
 import { Route as LeaguesIndexRouteImport } from './routes/leagues.index'
 import { Route as LeaguesSlugRouteImport } from './routes/leagues.$slug'
 import { Route as LeaguesNewRouteImport } from './routes/leagues.new'
@@ -33,6 +36,7 @@ import { Route as SettingsSignInRouteImport } from './routes/settings.sign-in'
 import { Route as SettingsUsernameRouteImport } from './routes/settings.username'
 import { Route as SignUpIndexRouteImport } from './routes/sign-up.index'
 import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
+import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
 import { Route as TeamIndexRouteImport } from './routes/team.index'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
 import { Route as WelcomeFavoritesRouteImport } from './routes/welcome.favorites'
@@ -41,6 +45,7 @@ import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiTestBanRouteImport } from './routes/api/test.ban'
 import { Route as ApiTestClearAcceptancesRouteImport } from './routes/api/test.clear-acceptances'
 import { Route as ApiTestClockRouteImport } from './routes/api/test.clock'
+import { Route as ApiTestCommunityRouteImport } from './routes/api/test.community'
 import { Route as ApiTestEmailsRouteImport } from './routes/api/test.emails'
 import { Route as ApiTestExportFileRouteImport } from './routes/api/test.export-file'
 import { Route as ApiTestGameRouteImport } from './routes/api/test.game'
@@ -94,6 +99,21 @@ const WeekendRoute = WeekendRouteImport.update({
 const DevComponentsRoute = DevComponentsRouteImport.update({
   id: '/_dev/components',
   path: '/components',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForumIndexRoute = ForumIndexRouteImport.update({
+  id: '/forum/',
+  path: '/forum/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForumCategoryRoute = ForumCategoryRouteImport.update({
+  id: '/forum/$category',
+  path: '/forum/$category',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForumNewRoute = ForumNewRouteImport.update({
+  id: '/forum/new',
+  path: '/forum/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LeaguesIndexRoute = LeaguesIndexRouteImport.update({
@@ -171,6 +191,11 @@ const SignUpEmailRoute = SignUpEmailRouteImport.update({
   path: '/sign-up/email',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TThreadIdRoute = TThreadIdRouteImport.update({
+  id: '/t/$threadId',
+  path: '/t/$threadId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamIndexRoute = TeamIndexRouteImport.update({
   id: '/team/',
   path: '/team/',
@@ -209,6 +234,11 @@ const ApiTestClearAcceptancesRoute = ApiTestClearAcceptancesRouteImport.update({
 const ApiTestClockRoute = ApiTestClockRouteImport.update({
   id: '/api/test/clock',
   path: '/api/test/clock',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestCommunityRoute = ApiTestCommunityRouteImport.update({
+  id: '/api/test/community',
+  path: '/api/test/community',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTestEmailsRoute = ApiTestEmailsRouteImport.update({
@@ -267,6 +297,8 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
+  '/forum/$category': typeof ForumCategoryRoute
+  '/forum/new': typeof ForumNewRoute
   '/leagues/$slug': typeof LeaguesSlugRoute
   '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
@@ -278,8 +310,10 @@ export interface FileRoutesByFullPath {
   '/settings/sign-in': typeof SettingsSignInRoute
   '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
+  '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/forum/': typeof ForumIndexRoute
   '/leagues/': typeof LeaguesIndexRoute
   '/prices/': typeof PricesIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -290,6 +324,7 @@ export interface FileRoutesByFullPath {
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/clock': typeof ApiTestClockRoute
+  '/api/test/community': typeof ApiTestCommunityRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
   '/api/test/game': typeof ApiTestGameRoute
@@ -310,6 +345,8 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
+  '/forum/$category': typeof ForumCategoryRoute
+  '/forum/new': typeof ForumNewRoute
   '/leagues/$slug': typeof LeaguesSlugRoute
   '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
@@ -321,8 +358,10 @@ export interface FileRoutesByTo {
   '/settings/sign-in': typeof SettingsSignInRoute
   '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
+  '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/forum': typeof ForumIndexRoute
   '/leagues': typeof LeaguesIndexRoute
   '/prices': typeof PricesIndexRoute
   '/settings': typeof SettingsIndexRoute
@@ -333,6 +372,7 @@ export interface FileRoutesByTo {
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/clock': typeof ApiTestClockRoute
+  '/api/test/community': typeof ApiTestCommunityRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
   '/api/test/game': typeof ApiTestGameRoute
@@ -354,6 +394,8 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/weekend': typeof WeekendRoute
   '/_dev/components': typeof DevComponentsRoute
+  '/forum/$category': typeof ForumCategoryRoute
+  '/forum/new': typeof ForumNewRoute
   '/leagues/$slug': typeof LeaguesSlugRoute
   '/leagues/new': typeof LeaguesNewRoute
   '/legal/$kind': typeof LegalKindRoute
@@ -365,8 +407,10 @@ export interface FileRoutesById {
   '/settings/sign-in': typeof SettingsSignInRoute
   '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
+  '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
+  '/forum/': typeof ForumIndexRoute
   '/leagues/': typeof LeaguesIndexRoute
   '/prices/': typeof PricesIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -377,6 +421,7 @@ export interface FileRoutesById {
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/clock': typeof ApiTestClockRoute
+  '/api/test/community': typeof ApiTestCommunityRoute
   '/api/test/emails': typeof ApiTestEmailsRoute
   '/api/test/export-file': typeof ApiTestExportFileRoute
   '/api/test/game': typeof ApiTestGameRoute
@@ -399,6 +444,8 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/weekend'
     | '/components'
+    | '/forum/$category'
+    | '/forum/new'
     | '/leagues/$slug'
     | '/leagues/new'
     | '/legal/$kind'
@@ -410,8 +457,10 @@ export interface FileRouteTypes {
     | '/settings/sign-in'
     | '/settings/username'
     | '/sign-up/email'
+    | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/forum/'
     | '/leagues/'
     | '/prices/'
     | '/settings/'
@@ -422,6 +471,7 @@ export interface FileRouteTypes {
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
     | '/api/test/clock'
+    | '/api/test/community'
     | '/api/test/emails'
     | '/api/test/export-file'
     | '/api/test/game'
@@ -442,6 +492,8 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/weekend'
     | '/components'
+    | '/forum/$category'
+    | '/forum/new'
     | '/leagues/$slug'
     | '/leagues/new'
     | '/legal/$kind'
@@ -453,8 +505,10 @@ export interface FileRouteTypes {
     | '/settings/sign-in'
     | '/settings/username'
     | '/sign-up/email'
+    | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/forum'
     | '/leagues'
     | '/prices'
     | '/settings'
@@ -465,6 +519,7 @@ export interface FileRouteTypes {
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
     | '/api/test/clock'
+    | '/api/test/community'
     | '/api/test/emails'
     | '/api/test/export-file'
     | '/api/test/game'
@@ -485,6 +540,8 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/weekend'
     | '/_dev/components'
+    | '/forum/$category'
+    | '/forum/new'
     | '/leagues/$slug'
     | '/leagues/new'
     | '/legal/$kind'
@@ -496,8 +553,10 @@ export interface FileRouteTypes {
     | '/settings/sign-in'
     | '/settings/username'
     | '/sign-up/email'
+    | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
+    | '/forum/'
     | '/leagues/'
     | '/prices/'
     | '/settings/'
@@ -508,6 +567,7 @@ export interface FileRouteTypes {
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
     | '/api/test/clock'
+    | '/api/test/community'
     | '/api/test/emails'
     | '/api/test/export-file'
     | '/api/test/game'
@@ -529,6 +589,8 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   WeekendRoute: typeof WeekendRoute
   DevComponentsRoute: typeof DevComponentsRoute
+  ForumCategoryRoute: typeof ForumCategoryRoute
+  ForumNewRoute: typeof ForumNewRoute
   LeaguesSlugRoute: typeof LeaguesSlugRoute
   LeaguesNewRoute: typeof LeaguesNewRoute
   LegalKindRoute: typeof LegalKindRoute
@@ -540,8 +602,10 @@ export interface RootRouteChildren {
   SettingsSignInRoute: typeof SettingsSignInRoute
   SettingsUsernameRoute: typeof SettingsUsernameRoute
   SignUpEmailRoute: typeof SignUpEmailRoute
+  TThreadIdRoute: typeof TThreadIdRoute
   WelcomeFavoritesRoute: typeof WelcomeFavoritesRoute
   WelcomeSpoilersRoute: typeof WelcomeSpoilersRoute
+  ForumIndexRoute: typeof ForumIndexRoute
   LeaguesIndexRoute: typeof LeaguesIndexRoute
   PricesIndexRoute: typeof PricesIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
@@ -552,6 +616,7 @@ export interface RootRouteChildren {
   ApiTestBanRoute: typeof ApiTestBanRoute
   ApiTestClearAcceptancesRoute: typeof ApiTestClearAcceptancesRoute
   ApiTestClockRoute: typeof ApiTestClockRoute
+  ApiTestCommunityRoute: typeof ApiTestCommunityRoute
   ApiTestEmailsRoute: typeof ApiTestEmailsRoute
   ApiTestExportFileRoute: typeof ApiTestExportFileRoute
   ApiTestGameRoute: typeof ApiTestGameRoute
@@ -626,6 +691,27 @@ declare module '@tanstack/react-router' {
       path: '/components'
       fullPath: '/components'
       preLoaderRoute: typeof DevComponentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forum/': {
+      id: '/forum/'
+      path: '/forum'
+      fullPath: '/forum/'
+      preLoaderRoute: typeof ForumIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forum/$category': {
+      id: '/forum/$category'
+      path: '/forum/$category'
+      fullPath: '/forum/$category'
+      preLoaderRoute: typeof ForumCategoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forum/new': {
+      id: '/forum/new'
+      path: '/forum/new'
+      fullPath: '/forum/new'
+      preLoaderRoute: typeof ForumNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/leagues/': {
@@ -733,6 +819,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignUpEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/t/$threadId': {
+      id: '/t/$threadId'
+      path: '/t/$threadId'
+      fullPath: '/t/$threadId'
+      preLoaderRoute: typeof TThreadIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/team/': {
       id: '/team/'
       path: '/team'
@@ -787,6 +880,13 @@ declare module '@tanstack/react-router' {
       path: '/api/test/clock'
       fullPath: '/api/test/clock'
       preLoaderRoute: typeof ApiTestClockRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/community': {
+      id: '/api/test/community'
+      path: '/api/test/community'
+      fullPath: '/api/test/community'
+      preLoaderRoute: typeof ApiTestCommunityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/test/emails': {
@@ -865,6 +965,8 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   WeekendRoute: WeekendRoute,
   DevComponentsRoute: DevComponentsRoute,
+  ForumCategoryRoute: ForumCategoryRoute,
+  ForumNewRoute: ForumNewRoute,
   LeaguesSlugRoute: LeaguesSlugRoute,
   LeaguesNewRoute: LeaguesNewRoute,
   LegalKindRoute: LegalKindRoute,
@@ -876,8 +978,10 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsSignInRoute: SettingsSignInRoute,
   SettingsUsernameRoute: SettingsUsernameRoute,
   SignUpEmailRoute: SignUpEmailRoute,
+  TThreadIdRoute: TThreadIdRoute,
   WelcomeFavoritesRoute: WelcomeFavoritesRoute,
   WelcomeSpoilersRoute: WelcomeSpoilersRoute,
+  ForumIndexRoute: ForumIndexRoute,
   LeaguesIndexRoute: LeaguesIndexRoute,
   PricesIndexRoute: PricesIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
@@ -888,6 +992,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTestBanRoute: ApiTestBanRoute,
   ApiTestClearAcceptancesRoute: ApiTestClearAcceptancesRoute,
   ApiTestClockRoute: ApiTestClockRoute,
+  ApiTestCommunityRoute: ApiTestCommunityRoute,
   ApiTestEmailsRoute: ApiTestEmailsRoute,
   ApiTestExportFileRoute: ApiTestExportFileRoute,
   ApiTestGameRoute: ApiTestGameRoute,

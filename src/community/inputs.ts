@@ -13,7 +13,7 @@ export const createThreadInput = z.object({
   title: z.string().trim().min(1).max(THREAD_TITLE_MAX),
   body,
   sessionId: z.uuid().nullish(),
-  containsSpoilers: z.boolean().default(false),
+  containsSpoilers: z.boolean().optional(),
 });
 
 export const replyInput = z.object({
@@ -29,4 +29,24 @@ export const deletePostInput = z.object({ postId: z.uuid() });
 export const voteInput = z.object({
   postId: z.uuid(),
   value: z.union([z.literal(1), z.literal(-1), z.literal(0)]),
+});
+
+/** `?show=`: the session or thread ids revealed on this page only. */
+const show = z.array(z.uuid()).max(10).optional();
+
+export const categoryPageInput = z.object({
+  slug: z.string().min(1).max(60),
+  sort: z.enum(["hot", "new"]).default("hot"),
+  cursor: z
+    .string()
+    .regex(/^\d{1,6}$/)
+    .nullish(),
+  show,
+});
+
+export const threadPageInput = z.object({
+  threadId: z.uuid(),
+  postId: z.uuid().nullish(),
+  sort: z.enum(["best", "new"]).default("best"),
+  show,
 });

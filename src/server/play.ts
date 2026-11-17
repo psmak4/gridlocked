@@ -50,13 +50,13 @@ import {
   teamsPage,
 } from "@/play/teams";
 import { weekendPage, type WeekendPage } from "@/play/weekend";
-import { PUBLIC_CACHE, PUBLIC_VARY } from "@/lib/public-headers";
 import type { ServerDb } from "./db";
 import { refusalOf, type Refusal } from "@/play/refusal";
 import {
   markSessionsWatchedAction,
   markSessionsWatchedInput,
 } from "./play-actions";
+import { cacheFor } from "./public-cache";
 import { getViewer, withRequestNow } from "./session";
 
 /**
@@ -152,20 +152,6 @@ export const getWeekend = createServerFn({ method: "GET" }).handler(
     return withRequestNow((db, now) => weekendPage(db, now, viewer));
   },
 );
-
-/**
- * A public answer's headers: private for a signed-in viewer, else cacheable
- * and keyed on the cookie, so the CDN never answers a signed-in request from
- * a logged-out visitor's copy (the server-function URL is the same for both).
- */
-function cacheFor(viewer: unknown) {
-  if (viewer) {
-    setResponseHeader("Cache-Control", "private, no-store");
-    return;
-  }
-  setResponseHeader("Cache-Control", PUBLIC_CACHE);
-  setResponseHeader("Vary", PUBLIC_VARY);
-}
 
 /**
  * `/prices`, the price board. Public (decisions 3 and 4): a logged-out

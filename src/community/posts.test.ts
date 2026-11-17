@@ -3,6 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { categoryId, seedViewer } from "../../tests/helpers/community";
 import {
+  constructors,
   postMentions,
   postRevisions,
   posts,
@@ -81,6 +82,33 @@ describe("threads, posts and votes", () => {
         containsSpoilers: false,
       }),
     ).toEqual({ ok: false, error: "trust_too_low" });
+  });
+
+  it("the author's spoiler choice wins, and the title check decides when they make none", async () => {
+    await t.db.insert(constructors).values({
+      id: newId(),
+      slug: "ferrari",
+      name: "Ferrari",
+      nationality: "Italian",
+    });
+    const make = async (minute: number, containsSpoilers?: boolean) => {
+      const r = await createThread(t.db, at(minute), ada, {
+        categoryId: await categoryId(t.db, "race-weekend"),
+        title: `Ferrari on pole ${minute}`,
+        body: `Called it ${minute}`,
+        containsSpoilers,
+      });
+      if (!r.ok) throw new Error(r.error);
+      return threadRow(r.threadId);
+    };
+    expect(await make(0)).toMatchObject({
+      containsSpoilers: true,
+      spoilerSafeTitle: "Spoiler thread",
+    });
+    expect(await make(1, false)).toMatchObject({
+      containsSpoilers: false,
+      spoilerSafeTitle: null,
+    });
   });
 
   it("a reply three deep has depth 3 and its path ends in its own id", async () => {
