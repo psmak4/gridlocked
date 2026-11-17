@@ -13,6 +13,54 @@ export const Route = createFileRoute("/profile")({
   component: Profile,
 });
 
+/** What happened, in plain words (DM 5.9). */
+const ACTION_WORDS: Record<string, string> = {
+  remove: "Removed",
+  restore: "Restored",
+  lock: "Locked",
+  unlock: "Unlocked",
+  pin: "Pinned",
+  unpin: "Unpinned",
+  move: "Moved",
+  retitle: "Retitled",
+  warn: "Warning",
+  mute: "Muted",
+  unmute: "Unmuted",
+  chat_ban: "Chat ban",
+  ban: "Banned",
+  unban: "Unbanned",
+  set_trust_level: "Trust level changed",
+};
+
+const TARGET_WORDS: Record<string, string> = {
+  post: "your post",
+  thread: "your thread",
+  chat_message: "your chat message",
+};
+
+const dateWords = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** "Removed your post · 7 Mar 2026", "Muted until 8 Mar 2026". */
+function actionLine(a: {
+  action: string;
+  targetType: string;
+  until: string | null;
+  createdAt: string;
+}): string {
+  const what = [ACTION_WORDS[a.action] ?? a.action, TARGET_WORDS[a.targetType]]
+    .filter(Boolean)
+    .join(" ");
+  const until = a.until
+    ? ` until ${dateWords.format(Date.parse(a.until))}`
+    : "";
+  return `${what}${until} · ${dateWords.format(Date.parse(a.createdAt))}`;
+}
+
 /** Two letters for the avatar: the first of each word, or the first two. */
 function initials(username: string): string {
   const words = username.split(/[_.]+/).filter(Boolean);
@@ -180,6 +228,31 @@ function Profile() {
             </p>
           )}
         </section>
+
+        {profile.actions.length > 0 ? (
+          <section
+            aria-labelledby="profile-actions"
+            className="flex flex-col gap-space-2"
+          >
+            <h2
+              id="profile-actions"
+              className="m-0 text-[12px] font-bold tracking-[0.12em] text-ink-muted"
+            >
+              ACTIONS ON YOUR ACCOUNT
+            </h2>
+            <ul className="m-0 flex list-none flex-col gap-space-2 p-0">
+              {profile.actions.map((a) => (
+                <li
+                  key={`${a.createdAt}-${a.action}`}
+                  className="flex flex-col gap-[2px] rounded-radius-m bg-surface-raised px-space-3 py-space-2"
+                >
+                  <span className="font-bold">{actionLine(a)}</span>
+                  <span className="text-[14px] text-ink-muted">{a.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </Body>
     </Screen>
   );

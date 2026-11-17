@@ -39,7 +39,11 @@ describe("the Turnstile check for our own forms", () => {
 
   it("a local build with no secret takes only the stand-in's token", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
-    const verify = createTurnstileVerifier({ secret: null, local: true, fetch });
+    const verify = createTurnstileVerifier({
+      secret: null,
+      local: true,
+      fetch,
+    });
     expect(await verify(LOCAL_TURNSTILE_TOKEN)).toBe(true);
     expect(await verify("anything-else")).toBe(false);
     expect(fetch).not.toHaveBeenCalled();

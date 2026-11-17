@@ -19,6 +19,7 @@ import {
   eventEntries,
   resultOverrides,
   reviewItems,
+  userRestrictions,
   users,
 } from "@/db/schema";
 import { seedUser } from "../../tests/helpers/users";
@@ -593,5 +594,107 @@ describe("pnpm staff set-role", () => {
       }),
     ).toThrow(/STAFF_CHANGE/);
     expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+});
+
+const NOW = new Date("2026-03-07T12:00:00Z");
+
+describe("pnpm staff moderate", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let ada: string;
+  const env = (change: Record<string, unknown>, dryRun = "true") => ({
+    STAFF_CHANGE: JSON.stringify(change),
+    STAFF_REASON: "Abuse in the race thread",
+    STAFF_ACTOR: "staff-login",
+    STAFF_REQUEST_ID: "gh-run:12",
+    STAFF_EVENT: "",
+    STAFF_DRY_RUN: dryRun,
+  });
+  beforeEach(async () => {
+    t = await createTestDb();
+    ada = await seedUser(t.db, {
+      username: "Ada_R",
+      email: "ada.private@example.test",
+    });
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("a dry run resolves the user and writes nothing", async () => {
+    const change = {
+      action: "mute",
+      target: "user",
+      username: "ada_r",
+      until: "2026-03-08T12:00:00Z",
+    };
+    const cmd = parseStaffEnv("moderate", env(change));
+    expect(cmd).toMatchObject({ command: "moderate", dryRun: true });
+    const report = await runStaffCommand(t.db, NOW, cmd);
+    expect(report).toEqual({
+      dryRun: true,
+      command: "moderate",
+      resolved: {
+        action: "mute",
+        targetType: "user",
+        targetId: ada,
+        username: "Ada_R",
+      },
+    });
+    expect(JSON.stringify(report)).not.toContain("example.test");
+    expect(await t.db.select().from(userRestrictions)).toEqual([]);
+    expect(await t.db.select().from(auditLog)).toEqual([]);
+  });
+
+  it("the real run mutes, and the audit names the login", async () => {
+    const change = {
+      action: "mute",
+      target: "user",
+      username: "Ada_R",
+      until: "2026-03-08T12:00:00Z",
+    };
+    const report = await runStaffCommand(
+      t.db,
+      NOW,
+      parseStaffEnv("moderate", env(change, "false")),
+    );
+    expect(report).toMatchObject({
+      dryRun: false,
+      result: { ok: true, changed: true },
+    });
+    const [restriction] = await t.db.select().from(userRestrictions);
+    expect(restriction).toMatchObject({
+      userId: ada,
+      kind: "mute",
+      until: new Date("2026-03-08T12:00:00Z"),
+    });
+    const [audit] = await t.db.select().from(auditLog);
+    expect(audit).toMatchObject({
+      action: "moderation.mute",
+      actorUserId: null,
+      actorKind: "admin",
+      actorLabel: "staff-login",
+      requestId: "gh-run:12",
+      reason: "Abuse in the race thread",
+    });
+  });
+
+  it("refuses a target named the wrong way, or an unknown user", async () => {
+    expect(() =>
+      parseStaffEnv(
+        "moderate",
+        env({ action: "lock", target: "thread", username: "Ada_R" }),
+      ),
+    ).toThrow(/STAFF_CHANGE/);
+    await expect(
+      runStaffCommand(
+        t.db,
+        NOW,
+        parseStaffEnv(
+          "moderate",
+          env({ action: "warn", target: "user", username: "nobody" }),
+        ),
+      ),
+    ).rejects.toThrow("no user nobody");
   });
 });

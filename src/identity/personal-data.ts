@@ -39,6 +39,7 @@ import {
   legalAcceptances,
   legalDocuments,
   lineupPicks,
+  modActions,
   lineupVersions,
   poolAssets,
   postMentions,
@@ -701,6 +702,39 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
         .orderBy(asc(reports.createdAt), asc(reports.id));
       return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt) }));
     },
+  },
+  {
+    table: "mod_actions",
+    userColumn: "target_user_id",
+    onDelete: "keep",
+    why: "moderation history about the user, kept for the 2-year retention period (DM 5.10); exported, since users can see actions taken against them (DM 5.9)",
+    exportAs: "moderation",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          action: modActions.action,
+          targetType: modActions.targetType,
+          targetId: modActions.targetId,
+          reason: modActions.reason,
+          until: modActions.until,
+          createdAt: modActions.createdAt,
+        })
+        .from(modActions)
+        .where(eq(modActions.targetUserId, userId))
+        .orderBy(asc(modActions.createdAt), asc(modActions.id));
+      return rows.map((r) => ({
+        ...r,
+        until: iso(r.until),
+        createdAt: iso(r.createdAt),
+      }));
+    },
+  },
+  {
+    table: "mod_actions",
+    userColumn: "moderator_user_id",
+    onDelete: "keep",
+    why: `actions a moderator took: ${KEEP_STAFF}`,
+    exportAs: null,
   },
   {
     table: "mod_queue_items",

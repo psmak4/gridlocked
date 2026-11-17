@@ -13,6 +13,7 @@
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { writeAudit } from "@/audit/log";
+import { accountActions, type AccountAction } from "@/community/moderate";
 import {
   authAccounts,
   constructors,
@@ -142,6 +143,8 @@ export type ProfileState = {
   };
   /** The viewer's teams in the current game, by slot. */
   teams: { slot: number; name: string; status: "active" | "retired" }[];
+  /** "Actions on your account" (DM 5.9), newest first. */
+  actions: AccountAction[];
 };
 
 const regionNames = new Intl.DisplayNames(["en"], {
@@ -215,6 +218,7 @@ export async function profileState(
     ),
     favorites: await favoriteNames(db, v.profile),
     teams: await profileTeams(db, v.userId),
+    actions: await accountActions(db, v.userId),
   };
 }
 

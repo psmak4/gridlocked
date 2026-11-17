@@ -138,6 +138,7 @@ describe("data export (DM 6.7)", () => {
         "chat",
         "leaguesOwned",
         "legalAcceptances",
+        "moderation",
         "postRevisions",
         "posts",
         "privacyRequests",

@@ -35,11 +35,7 @@ import { getSetting } from "@/settings";
 import type { ServerDb } from "./db";
 import { webChatArchiveStore } from "./chat-archive";
 import { cacheFor } from "./public-cache";
-import {
-  getViewer,
-  requestCaptchaVerifier,
-  withRequestNow,
-} from "./session";
+import { getViewer, requestCaptchaVerifier, withRequestNow } from "./session";
 
 // Not exported: only the handlers below use it, so the client build drops it.
 async function communityAction<T>(
