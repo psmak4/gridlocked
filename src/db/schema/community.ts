@@ -11,6 +11,8 @@ import {
   text,
   timestamp,
   uuid,
+  uniqueIndex,
+  jsonb,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import {
@@ -62,6 +64,35 @@ export const POST_STATUSES = [
 export const CHAT_STATUSES = ["visible", "removed"] as const;
 /** DM 5.9: what a restriction stops. */
 export const RESTRICTION_KINDS = ["mute", "chat_ban", "thread_ban"] as const;
+
+/** DM 5.8. M7 takes reports on posts, threads and chat messages. */
+export const REPORT_TARGET_TYPES = [
+  "post",
+  "thread",
+  "chat_message",
+  "user",
+  "team_name",
+  "league_name",
+] as const;
+export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number];
+
+/** `copyright` covers DMCA notices (HLD §13.6). */
+export const REPORT_REASONS = [
+  "spam",
+  "abuse",
+  "spoiler",
+  "off_topic",
+  "illegal",
+  "copyright",
+  "other",
+] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+export const QUEUE_SOURCES = ["reports", "filter", "auto_hide"] as const;
+export type QueueSource = (typeof QUEUE_SOURCES)[number];
+
+export const QUEUE_STATUSES = ["open", "actioned", "dismissed"] as const;
+export type QueueStatus = (typeof QUEUE_STATUSES)[number];
 
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 export type ThreadKind = (typeof THREAD_KINDS)[number];
@@ -354,5 +385,95 @@ export const userRestrictions = pgTable(
     index("user_restrictions_active_idx")
       .on(t.userId)
       .where(sql`${t.liftedAt} is null`),
+  ],
+);
+
+/**
+ * DM 5.9: one open item per target. Reports about the same thing group here,
+ * a filter hit opens one too, and `content_snapshot` keeps what was posted
+ * when it was first queued, with each later edit appended, so the evidence
+ * survives edits, deletes and the chat archive.
+ */
+export const modQueueItems = pgTable(
+  "mod_queue_items",
+  {
+    id: uuid("id").primaryKey(),
+    targetType: text("target_type", { enum: REPORT_TARGET_TYPES }).notNull(),
+    targetId: uuid("target_id").notNull(),
+    /** Whose content it is, for per-user moderation history. */
+    targetUserId: uuid("target_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    source: text("source", { enum: QUEUE_SOURCES }).notNull(),
+    reportCount: integer("report_count").notNull().default(0),
+    weightSum: real("weight_sum").notNull().default(0),
+    contentSnapshot: jsonb("content_snapshot").notNull(),
+    filterHits: jsonb("filter_hits"),
+    status: text("status", { enum: QUEUE_STATUSES }).notNull().default("open"),
+    resolvedBy: uuid("resolved_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolution: text("resolution"),
+    version: integer("version").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check(
+      "mod_queue_items_target_type_check",
+      oneOf(t.targetType, REPORT_TARGET_TYPES),
+    ),
+    check("mod_queue_items_source_check", oneOf(t.source, QUEUE_SOURCES)),
+    check("mod_queue_items_status_check", oneOf(t.status, QUEUE_STATUSES)),
+    check("mod_queue_items_counts_check", sql`${t.reportCount} >= 0`),
+    uniqueIndex("mod_queue_items_open_target_unique")
+      .on(t.targetType, t.targetId)
+      .where(sql`${t.status} = 'open'`),
+    index("mod_queue_items_open_idx")
+      .on(t.status, t.createdAt)
+      .where(sql`${t.status} = 'open'`),
+    index("mod_queue_items_target_user_idx").on(t.targetUserId),
+  ],
+);
+
+/**
+ * DM 5.8: a report, from anyone. A logged-out one has no reporter but a
+ * contact address, cleared when its item is resolved. One report per person
+ * per target.
+ */
+export const reports = pgTable(
+  "reports",
+  {
+    id: uuid("id").primaryKey(),
+    queueItemId: uuid("queue_item_id")
+      .notNull()
+      .references(() => modQueueItems.id, { onDelete: "restrict" }),
+    targetType: text("target_type", { enum: REPORT_TARGET_TYPES }).notNull(),
+    targetId: uuid("target_id").notNull(),
+    reporterUserId: uuid("reporter_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    reporterContact: text("reporter_contact"),
+    reason: text("reason", { enum: REPORT_REASONS }).notNull(),
+    note: text("note"),
+    weight: real("weight").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check(
+      "reports_target_type_check",
+      oneOf(t.targetType, REPORT_TARGET_TYPES),
+    ),
+    check("reports_reason_check", oneOf(t.reason, REPORT_REASONS)),
+    check("reports_weight_check", sql`${t.weight} >= 0`),
+    check(
+      "reports_note_length_check",
+      sql`${t.note} is null or char_length(${t.note}) <= 1000`,
+    ),
+    uniqueIndex("reports_reporter_target_unique")
+      .on(t.targetType, t.targetId, t.reporterUserId)
+      .where(sql`${t.reporterUserId} is not null`),
+    index("reports_queue_item_idx").on(t.queueItemId),
+    index("reports_reporter_idx").on(t.reporterUserId),
   ],
 );

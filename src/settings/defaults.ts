@@ -106,6 +106,19 @@ export const settingSchemas = {
     refreshLimit: positiveInt,
     windowSeconds: positiveInt,
   }),
+  /**
+   * Report weight by the reporter's trust level (HLD §7.4, M7's call): when
+   * an item's weights reach `threshold`, the content hides pending review.
+   * Moderators and admins use `tl3`; a logged-out report weighs `visitor`.
+   */
+  report_weights: z.object({
+    tl0: z.number().nonnegative(),
+    tl1: z.number().nonnegative(),
+    tl2: z.number().nonnegative(),
+    tl3: z.number().nonnegative(),
+    visitor: z.number().nonnegative(),
+    threshold: z.number().positive(),
+  }),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -157,5 +170,13 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     maxLength: 500,
     refreshLimit: 50,
     windowSeconds: 3,
+  },
+  report_weights: {
+    tl0: 1,
+    tl1: 1,
+    tl2: 2,
+    tl3: 5,
+    visitor: 1,
+    threshold: 5,
   },
 };

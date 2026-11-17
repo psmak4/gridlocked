@@ -10,6 +10,7 @@ import { newId } from "@/lib/ids";
 import { refuse, type CommunityRefusal } from "./errors";
 import { checkPost } from "./gate";
 import { pathLabel, writeMentions } from "./mentions";
+import { queueFilterHits } from "./moderation";
 
 /** What anyone who hasn't revealed the session sees for a spoiler thread. */
 export const SPOILER_THREAD_TITLE = "Spoiler thread";
@@ -91,6 +92,19 @@ export async function createThread(
       createdAt: now,
     });
     await writeMentions(t, postId, v.userId, body);
+    await queueFilterHits(
+      t,
+      now,
+      {
+        type: "thread",
+        id: threadId,
+        authorUserId: v.userId,
+        threadId,
+        title,
+        body,
+      },
+      gate.flags,
+    );
   });
   return { ok: true, threadId, postId, status };
 }

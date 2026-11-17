@@ -47,6 +47,7 @@ import {
   posts,
   privacyRequests,
   profiles,
+  reports,
   sessionWatchMarks,
   sessions,
   teams,
@@ -678,6 +679,41 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
     userColumn: "created_by",
     onDelete: "keep",
     why: `restrictions a moderator set: ${KEEP_STAFF}`,
+    exportAs: null,
+  },
+  {
+    table: "reports",
+    userColumn: "reporter_user_id",
+    onDelete: "keep",
+    why: "reports they filed stay with the tombstone for the 2-year retention period (DM 5.10, 6.7); exported, since they are the person's own words",
+    exportAs: "reports",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          targetType: reports.targetType,
+          targetId: reports.targetId,
+          reason: reports.reason,
+          note: reports.note,
+          createdAt: reports.createdAt,
+        })
+        .from(reports)
+        .where(eq(reports.reporterUserId, userId))
+        .orderBy(asc(reports.createdAt), asc(reports.id));
+      return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt) }));
+    },
+  },
+  {
+    table: "mod_queue_items",
+    userColumn: "target_user_id",
+    onDelete: "keep",
+    why: "moderation history about the user, kept for the 2-year retention period (DM 5.10); not exported, since it groups other people's reports; what was done to them is in mod_actions (DM 5.9)",
+    exportAs: null,
+  },
+  {
+    table: "mod_queue_items",
+    userColumn: "resolved_by",
+    onDelete: "keep",
+    why: `queue items a moderator resolved: ${KEEP_STAFF}`,
     exportAs: null,
   },
   {

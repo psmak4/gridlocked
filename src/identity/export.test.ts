@@ -142,6 +142,7 @@ describe("data export (DM 6.7)", () => {
         "posts",
         "privacyRequests",
         "profile",
+        "reports",
         "restrictions",
         "sessions",
         "signInMethods",

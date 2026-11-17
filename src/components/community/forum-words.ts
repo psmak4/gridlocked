@@ -59,6 +59,7 @@ const WORDS: Record<CommunityErrorCode, string> = {
   chat_closed: "Chat is closed for this session.",
   not_found: "That post isn't there any more.",
   forbidden: "You can't do that.",
+  captcha_failed: "The bot check didn't pass. Try it again.",
 };
 
 /** A refusal in words, with the wait when there is one. */
