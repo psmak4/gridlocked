@@ -4,6 +4,7 @@ import { createTestDb } from "../../tests/helpers/test-db";
 import { seedResultsWorld } from "../../tests/helpers/results-2026";
 import { allJobs, eventOfRound } from "../../tests/helpers/pipeline-2026";
 import { events, jobs, sessions, settings } from "@/db/schema";
+import { mondayOf } from "@/community/session-threads";
 import { planEventJobs } from "./plan-event";
 
 const MIN = 60_000;
@@ -27,7 +28,7 @@ describe("planEventJobs", () => {
   }
   const at = (d: Date, ms = 0) => new Date(d.getTime() + ms).toISOString();
 
-  it("plans round 18: a poll per scored session, four finalizer checks, two roster checks", async () => {
+  it("plans round 18: a poll per scored session, four finalizer checks, two roster checks and the session threads", async () => {
     const { event, sessions: s } = await eventOfRound(t.db, 18);
     const by = Object.fromEntries(s.map((x) => [x.kind, x]));
     await planEventJobs(t.db, event.id);
@@ -41,7 +42,12 @@ describe("planEventJobs", () => {
       [`finalize:${event.id}:+6h`]: at(by.race!.scheduledEnd, 6 * HOUR),
       [`finalize:${event.id}:+24h`]: at(by.race!.scheduledEnd, 24 * HOUR),
       [`finalize:${event.id}:+48h`]: at(by.race!.scheduledEnd, 48 * HOUR),
+      // The Monday 00:00 UTC of the first session's week (M7).
+      [`open_threads:${event.id}`]: mondayOf(
+        by.fp1!.scheduledStart,
+      ).toISOString(),
     });
+    expect(mondayOf(by.fp1!.scheduledStart).getUTCDay()).toBe(1);
   });
 
   it("uses the right kind and payload for each job", async () => {
@@ -90,7 +96,7 @@ describe("planEventJobs", () => {
     const first = await planned();
     await planEventJobs(t.db, event.id);
     expect(await planned()).toEqual(first);
-    expect(await allJobs(t.db)).toHaveLength(8);
+    expect(await allJobs(t.db)).toHaveLength(9);
   });
 
   it("moving qualifying 30 minutes later moves only its poll job", async () => {
@@ -114,7 +120,7 @@ describe("planEventJobs", () => {
     const without = (jobsByKey: Record<string, string>) =>
       Object.entries(jobsByKey).filter(([k]) => k !== key);
     expect(without(after)).toEqual(without(before));
-    expect(Object.keys(after)).toHaveLength(8);
+    expect(Object.keys(after)).toHaveLength(9);
   });
 
   it("moving the race moves its poll and every finalizer check", async () => {
@@ -131,7 +137,7 @@ describe("planEventJobs", () => {
     const end = new Date(race.scheduledEnd.getTime() + 3 * HOUR);
     expect(after[`poll:${race.id}:start`]).toBe(at(end));
     expect(after[`finalize:${event.id}:+48h`]).toBe(at(end, 48 * HOUR));
-    expect(Object.keys(after)).toHaveLength(8);
+    expect(Object.keys(after)).toHaveLength(9);
   });
 
   it("does not move a poll job that already ran", async () => {
@@ -181,7 +187,7 @@ describe("planEventJobs", () => {
     expect(keys).not.toContain(`roster:${event.id}:fp3`);
     expect(keys).not.toContain(`poll:${quali.id}:start`);
     expect(keys).toContain(`roster:${event.id}:fp2`);
-    expect(keys).toHaveLength(6);
+    expect(keys).toHaveLength(7);
   });
 
   it("takes the finalizer checks from the setting", async () => {

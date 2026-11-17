@@ -75,4 +75,15 @@ describe("renderPost (DM 5.4: Markdown through a strict sanitizer)", () => {
     expect(html).toContain("<blockquote>");
     expect(html).toContain("<li>one</li>");
   });
+
+  it("a link to a page on this site is kept for anyone, and a // link is not", () => {
+    expect(renderPost("[Results and points](/weekend)", tl0)).toBe(
+      '<p><a href="/weekend">Results and points</a></p>',
+    );
+    expect(renderPost("[x](//evil.example/a)", tl0)).not.toContain("href");
+    // micromark encodes the backslash, which leaves a path on this site.
+    expect(renderPost("[x](/\\evil.example)", tl0)).toContain(
+      'href="/%5Cevil.example"',
+    );
+  });
 });

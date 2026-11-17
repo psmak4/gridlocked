@@ -313,9 +313,20 @@ describe("the sync_calendar handler", () => {
         rounds.add(
           p.eventId ? roundOf.get(p.eventId)! : sessionRound.get(p.sessionId!)!,
         );
-        // Everything planned is still in the future.
+        // Everything planned is still in the future, but the session
+        // threads of an event whose week has begun: they open at once (M7).
+        if (job.kind === "open_threads") continue;
         expect(job.runAt.getTime()).toBeGreaterThan(NOW.getTime());
       }
+      const due = (await planned()).filter(
+        (j) => j.runAt.getTime() <= NOW.getTime(),
+      );
+      expect(
+        due.map((j) => [
+          j.kind,
+          roundOf.get((j.payload as { eventId: string }).eventId),
+        ]),
+      ).toEqual([["open_threads", 19]]);
       expect([...rounds].sort((a, b) => a - b)).toEqual([19, 20, 21, 22, 23]);
 
       // The only job due now or earlier is the sync itself: today's has run,

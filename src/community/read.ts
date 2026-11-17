@@ -39,6 +39,7 @@ import {
   type Reader,
 } from "@/spoilers/reveal";
 import { renderPost } from "./render";
+import { shortEvent, threadMode } from "./session-threads";
 import { SPOILER_THREAD_TITLE } from "./threads";
 
 /** How a deleted account's name reads anywhere it wrote (DM 5.1). */
@@ -108,9 +109,6 @@ export function sessionPhrase(kind: SessionKind): string {
   return SESSION_LABELS[kind].toLowerCase();
 }
 
-/** "Monaco GP" for "Monaco Grand Prix", as wave 4's rows say it. */
-const shortEvent = (name: string) => name.replace(/\bGrand Prix\b/, "GP");
-
 type SpoilerFacts = {
   id: string;
   containsSpoilers: boolean;
@@ -171,6 +169,8 @@ type TitleFacts = {
 /** The title a hidden thread shows, and the line under it. */
 function hiddenTitle(t: TitleFacts): { title: string; note: string } {
   const safe = t.spoilerSafeTitle ?? SPOILER_THREAD_TITLE;
+  // A session thread's own safe title already names its session.
+  const generic = safe === SPOILER_THREAD_TITLE;
   if (!t.sessionKind || !t.eventName) {
     return {
       title: safe,
@@ -179,7 +179,7 @@ function hiddenTitle(t: TitleFacts): { title: string; note: string } {
   }
   const label = SESSION_LABELS[t.sessionKind].toLowerCase();
   return {
-    title: `${safe} · ${shortEvent(t.eventName)} ${label}`,
+    title: generic ? `${safe} · ${shortEvent(t.eventName)} ${label}` : safe,
     note: `Title hidden until you’ve watched ${sessionPhrase(t.sessionKind)}`,
   };
 }
@@ -407,18 +407,6 @@ export type ThreadPage = {
   posts: PostView[];
 };
 
-/**
- * Chat or discussion, from the clock (DM 5.3: never stored). Task 7 adds the
- * session's status: a red flag keeps chat open past its window.
- */
-function modeAt(
-  t: { chatOpensAt: Date | null; chatClosesAt: Date | null },
-  now: Date,
-): ThreadMode {
-  if (!t.chatOpensAt || !t.chatClosesAt) return "discussion";
-  return now >= t.chatOpensAt && now < t.chatClosesAt ? "chat" : "discussion";
-}
-
 type PostFacts = {
   id: string;
   parentPostId: string | null;
@@ -468,6 +456,7 @@ export async function threadPage(
       chatOpensAt: threads.chatOpensAt,
       chatClosesAt: threads.chatClosesAt,
       leagueId: threads.leagueId,
+      sessionStatus: sessions.status,
     })
     .from(threads)
     .innerJoin(categories, eq(categories.id, threads.categoryId))
@@ -493,7 +482,11 @@ export async function threadPage(
   };
   const base = {
     thread,
-    mode: modeAt(t, now),
+    mode: threadMode(
+      now,
+      t.sessionStatus ? { status: t.sessionStatus } : null,
+      t,
+    ),
     hidden,
     focusPostId: input.postId ?? null,
   };

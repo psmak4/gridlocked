@@ -20,6 +20,7 @@ import {
   type GameOpenPayload,
   type ScoreSessionPayload,
 } from "@/jobs/kinds";
+import { postResults } from "@/community/session-threads";
 import { enqueue } from "@/jobs/queue";
 import type { JobHandler } from "@/jobs/runner";
 import { recomputeStandings } from "@/leagues/standings";
@@ -531,6 +532,9 @@ export function createScoreHandlers(
         publish: async (tx) => {
           await recomputeTotals(tx, now, { gameId, fromEventId: eventId });
           await recomputeStandings(tx, now, { gameId, eventId });
+          // The session thread's results post (M7), with the totals it
+          // points to: once per session, so a re-score adds nothing.
+          await postResults(tx, now, sessionId);
           await tx
             .update(gameEvents)
             .set({ status: "scored", updatedAt: now })

@@ -1,3 +1,4 @@
+import { createOpenThreadsHandler } from "@/community/session-threads";
 import { createIdentityDailyHandler } from "@/identity/daily";
 import type { EmailSender } from "@/identity/email/sender";
 import {
@@ -45,7 +46,8 @@ export type PipelineHandlers = Record<
   | "game_finalize"
   | "game_checks"
   | "identity_daily"
-  | "privacy_export",
+  | "privacy_export"
+  | "open_threads",
   JobHandler
 >;
 
@@ -74,5 +76,7 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
       store: exportStore,
       sender: deps.emailSender ?? null,
     }),
+    // The forum's: database only.
+    open_threads: createOpenThreadsHandler(),
   };
 }
