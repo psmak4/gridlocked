@@ -29,7 +29,8 @@ import type { Viewer } from "@/identity/viewer";
 import { getSetting } from "@/settings";
 import { refuse, type CommunityRefusal } from "./errors";
 
-export type PostKind = "thread" | "reply" | "chat";
+/** `edit` is a post's new text: no rate limit and no duplicate check. */
+export type PostKind = "thread" | "reply" | "chat" | "edit";
 
 type FilterEffect = (typeof FILTER_EFFECTS)[number];
 type FilterMatchType = (typeof FILTER_MATCH_TYPES)[number];
@@ -37,7 +38,7 @@ type FilterScope = (typeof FILTER_SCOPES)[number];
 
 export type CheckPostInput = {
   kind: PostKind;
-  /** For a reply or a chat message. */
+  /** For a reply, an edit or a chat message. */
   threadId?: string;
   /** For a new thread. */
   categoryId?: string;
@@ -322,7 +323,7 @@ export async function checkPost(
         if (nextAt > now) return refuse("slow_mode", secondsUntil(now, nextAt));
       }
     }
-  } else {
+  } else if (input.kind !== "edit") {
     const windowMs = postLimits.windowSeconds * 1000;
     const since = new Date(now.getTime() - windowMs);
     const limit =
@@ -373,7 +374,7 @@ export async function checkPost(
   }
 
   // Duplicates: the same post twice. Chat repeats itself by nature.
-  if (input.kind !== "chat") {
+  if (input.kind === "thread" || input.kind === "reply") {
     const since = new Date(
       now.getTime() - postLimits.duplicateWindowHours * 3_600_000,
     );

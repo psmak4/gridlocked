@@ -13,7 +13,14 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import {
+  CHAT_BODY_MAX,
+  POST_BODY_MAX,
+  THREAD_TITLE_MAX,
+} from "../../community/limits";
 import { createdAt, ltree, oneOf } from "./helpers";
+
+export { CHAT_BODY_MAX, POST_BODY_MAX, THREAD_TITLE_MAX };
 import { users } from "./identity";
 import { leagues } from "./leagues";
 import { events, sessions } from "./reference";
@@ -52,12 +59,6 @@ export const POST_STATUSES = [
   "removed",
   "deleted_by_author",
 ] as const;
-/** DM 5.4: a post's Markdown source, in characters. */
-export const POST_BODY_MAX = 10_000;
-/** A thread's title, in characters. */
-export const THREAD_TITLE_MAX = 120;
-/** DM 5.5: a chat message, in characters. */
-export const CHAT_BODY_MAX = 500;
 export const CHAT_STATUSES = ["visible", "removed"] as const;
 /** DM 5.9: what a restriction stops. */
 export const RESTRICTION_KINDS = ["mute", "chat_ban", "thread_ban"] as const;

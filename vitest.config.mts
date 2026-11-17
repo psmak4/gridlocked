@@ -15,6 +15,8 @@ const dbTests = [
   "src/leagues/**/*.test.{ts,tsx}",
   "src/settings/**/*.test.{ts,tsx}",
   "src/spoilers/**/*.test.{ts,tsx}",
+  "src/community/**/*.test.{ts,tsx}",
+  "src/notifications/**/*.test.{ts,tsx}",
   "src/reference/**/*.test.{ts,tsx}",
   "src/results/**/*.test.{ts,tsx}",
   "src/providers/snapshots.test.ts",
