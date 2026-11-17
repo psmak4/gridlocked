@@ -6,6 +6,13 @@ import { SESSION_KINDS } from "@/db/schema";
 // default when there is no row, so nothing needs a seeded `settings` row.
 
 const positiveInt = z.number().int().positive();
+const nonNegativeInt = z.number().int().nonnegative();
+
+const postTier = z.object({
+  replies: nonNegativeInt,
+  threads: nonNegativeInt,
+  links: nonNegativeInt.nullable(),
+});
 
 const rateLimits = z.object({
   perSecond: positiveInt,
@@ -69,6 +76,36 @@ export const settingSchemas = {
     windowSeconds: positiveInt,
     max: positiveInt,
   }),
+  /**
+   * The forum's limits per trust level (HLD §7.4, M7's calls). Counts are per
+   * `windowSeconds`; `links` is per post, null for unlimited. Moderators and
+   * admins use `tl3`.
+   */
+  post_limits: z.object({
+    windowSeconds: positiveInt,
+    tl0: postTier,
+    tl1: postTier,
+    tl2: postTier,
+    tl3: postTier,
+    mentionsPerPost: positiveInt,
+    duplicateWindowHours: positiveInt,
+  }),
+  /**
+   * Live chat (HLD §7.2, §11.2): slow mode in seconds per trust level (a
+   * moderator can raise it per thread), the message length, a refresh's
+   * size and its window.
+   */
+  chat_limits: z.object({
+    slowModeSeconds: z.object({
+      tl0: nonNegativeInt,
+      tl1: nonNegativeInt,
+      tl2: nonNegativeInt,
+      tl3: nonNegativeInt,
+    }),
+    maxLength: positiveInt,
+    refreshLimit: positiveInt,
+    windowSeconds: positiveInt,
+  }),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -106,4 +143,19 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     tl3: { daysVisited: 60, posts: 200, reputation: 200, accountAgeDays: 60 },
   },
   league_join_limit: { windowSeconds: 600, max: 10 },
+  post_limits: {
+    windowSeconds: 600,
+    tl0: { replies: 3, threads: 0, links: 0 },
+    tl1: { replies: 10, threads: 2, links: 1 },
+    tl2: { replies: 30, threads: 5, links: null },
+    tl3: { replies: 30, threads: 5, links: null },
+    mentionsPerPost: 5,
+    duplicateWindowHours: 24,
+  },
+  chat_limits: {
+    slowModeSeconds: { tl0: 10, tl1: 5, tl2: 0, tl3: 0 },
+    maxLength: 500,
+    refreshLimit: 50,
+    windowSeconds: 3,
+  },
 };

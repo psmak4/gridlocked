@@ -7,11 +7,13 @@ import { buildExport } from "@/identity/export";
 import { newId } from "@/lib/ids";
 import {
   categories,
+  chatMessages,
   postMentions,
   postRevisions,
   posts,
   postVotes,
   threads,
+  userRestrictions,
 } from "./schema";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
@@ -173,6 +175,23 @@ describe("community tables (DM 5.2–5.6)", () => {
     await t.db.insert(postMentions).values({ postId, userId: author });
     await t.db.insert(postMentions).values({ postId, userId: other });
 
+    await t.db.insert(chatMessages).values({
+      id: newId(),
+      threadId,
+      authorUserId: author,
+      body: "lights out",
+      createdAt: AT,
+    });
+    await t.db.insert(userRestrictions).values({
+      id: newId(),
+      userId: author,
+      kind: "mute",
+      until: null,
+      reason: "Cooling off",
+      createdBy: other,
+      createdAt: AT,
+    });
+
     const data = (await buildExport(t.db, author)) as Record<string, unknown[]>;
     expect(data.threads).toMatchObject([
       { id: threadId, category: "race-weekend" },
@@ -180,6 +199,10 @@ describe("community tables (DM 5.2–5.6)", () => {
     expect(data.posts).toHaveLength(2);
     expect(data.postRevisions).toMatchObject([{ postId, body: "first text" }]);
     expect(data.votes).toMatchObject([{ postId, value: 1 }]);
+    expect(data.chat).toMatchObject([{ body: "lights out" }]);
+    expect(data.restrictions).toMatchObject([
+      { kind: "mute", reason: "Cooling off" },
+    ]);
 
     await scrubAccount(t.db, AT, {
       userId: author,
@@ -187,6 +210,7 @@ describe("community tables (DM 5.2–5.6)", () => {
     });
     expect(await t.db.select().from(posts)).toHaveLength(2);
     expect(await t.db.select().from(postVotes)).toHaveLength(1);
+    expect(await t.db.select().from(chatMessages)).toHaveLength(1);
     // Only the deleted account's mention goes.
     expect(await t.db.select().from(postMentions)).toMatchObject([
       { userId: other },

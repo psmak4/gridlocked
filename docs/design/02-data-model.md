@@ -1408,6 +1408,7 @@ erDiagram
 | event_id | uuid FK, nullable | For the event hub's thread list |
 | league_id | uuid FK, nullable | League threads. **A private league's thread is visible only to members**, and is never in public listings, search or the CDN cache |
 | chat_opens_at, chat_closes_at | timestamptz, nullable | Session threads only. Derived from the session's times (−15 min / +15 min, HLD §7.2) and updated when the session moves. While the session is `suspended`, chat stays open past `chat_closes_at` |
+| slow_mode_seconds | smallint, nullable | A moderator's slow mode for this thread's chat (M7). The gate uses the larger of this and the trust level's (`chat_limits`) |
 | status | text: `open`, `locked`, `removed`, `archived` | |
 | pinned | boolean | |
 | reply_count, score | integer | Counters, updated in the same transaction as the post or vote |
@@ -1550,6 +1551,17 @@ A user can report a given target only once.
 - It's config, editable by admins and audited. Link limits, mention limits and duplicate detection are code, with their thresholds in `settings` (2.11).
 
 **Rate limits** are checked by counting the user's recent rows, e.g. posts by this author in the last 10 minutes. That uses the index `posts (author_user_id, created_at)`, so there's no separate counter table to keep in sync.
+
+**The gate (M7, `checkPost`)** runs before every thread, reply and chat insert, cheapest first:
+1. active restrictions, in the same query as the trust level;
+2. the target, which must exist and be open, and the category's `min_trust_to_start_thread`;
+3. length: titles 120, posts 10,000, chat 500 characters;
+4. rate limits (`post_limits`: per 10 minutes, TL0 3 replies and no threads, TL1 10 and 2, TL2 and up 30 and 5) and chat slow mode (`chat_limits`: TL0 10 s, TL1 5 s, none from TL2, or the thread's own if higher);
+5. links (none for TL0, 1 for TL1, unlimited from TL2) and at most 5 mentions;
+6. the same post body from one author within 24 hours, not applied to chat;
+7. the filter rules: `block` refuses, `hold_for_review` creates the post `pending_review`, and every hit goes to the queue item.
+
+Moderators and admins count as TL3. In Race Weekend, a title naming a driver or team next to a result word (win, pole, podium, P1–P20, DNF, crash, retires) is flagged as a spoiler, not refused.
 
 ### 5.10 Retention (approved 2026-11-16; chat decided 2026-10-27)
 | Data | Kept |

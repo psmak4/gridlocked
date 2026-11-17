@@ -135,12 +135,14 @@ describe("data export (DM 6.7)", () => {
     expect(Object.keys(data).sort()).toEqual(
       [
         "account",
+        "chat",
         "leaguesOwned",
         "legalAcceptances",
         "postRevisions",
         "posts",
         "privacyRequests",
         "profile",
+        "restrictions",
         "sessions",
         "signInMethods",
         "teams",
