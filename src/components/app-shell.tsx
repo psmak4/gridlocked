@@ -4,13 +4,14 @@ import { BottomNav, type BottomNavItem } from "./ui/bottom-nav";
 import { EmptyState } from "./ui/empty-state";
 import { Icon } from "./ui/icons";
 
-/** The app's main places. Forum and the bell join in M7. */
-export type ShellItem = "home" | "team" | "leagues" | "profile";
+/** The app's main places, in wave 4's order. The bell joins in Task 13. */
+export type ShellItem = "home" | "team" | "leagues" | "forum" | "profile";
 
 const ITEMS: (BottomNavItem & { id: ShellItem; href: string })[] = [
   { id: "home", label: "Home", href: "/" },
   { id: "team", label: "Team", href: "/team" },
   { id: "leagues", label: "Leagues", href: "/leagues" },
+  { id: "forum", label: "Forum", href: "/forum" },
   { id: "profile", label: "Profile", href: "/profile" },
 ];
 

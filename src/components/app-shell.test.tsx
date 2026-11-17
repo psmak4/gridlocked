@@ -30,23 +30,30 @@ describe("AppShell", () => {
     expect(html).toContain("<p>Body</p>");
   });
 
-  it("four items in order", () => {
+  it("five items in wave 4's order", () => {
     const html = renderToString(
       <AppShell active="home">
         <p>Body</p>
       </AppShell>,
     );
     const [side, bottom] = navs(html);
-    expect(labels(bottom!)).toEqual(["Home", "Team", "Leagues", "Profile"]);
-    // The side menu has the wordmark first, then the same four.
+    expect(labels(bottom!)).toEqual([
+      "Home",
+      "Team",
+      "Leagues",
+      "Forum",
+      "Profile",
+    ]);
+    // The side menu has the wordmark first, then the same five.
     expect(labels(side!)).toEqual([
       "GRIDLOCKED",
       "Home",
       "Team",
       "Leagues",
+      "Forum",
       "Profile",
     ]);
-    for (const href of ["/", "/team", "/leagues", "/profile"]) {
+    for (const href of ["/", "/team", "/leagues", "/forum", "/profile"]) {
       expect(bottom).toContain(`href="${href}"`);
     }
   });

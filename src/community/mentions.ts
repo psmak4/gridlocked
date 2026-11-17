@@ -1,7 +1,7 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { postMentions, profiles, users } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { mentionedNames } from "./gate";
+import { mentionedNames } from "./text";
 
 /** An ltree label for a uuid: labels allow letters, digits and `_`. */
 export const pathLabel = (id: string) => id.replaceAll("-", "_");

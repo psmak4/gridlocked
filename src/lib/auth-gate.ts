@@ -42,9 +42,14 @@ export function gateRedirect(
  * Pages for someone signed in (M6): a logged-out visitor is sent to sign in
  * first, and comes back after. The weekend hub (`/weekend`) and the prices
  * (`/prices`, `/prices/how`) stay public and cacheable (M6 decision 3), like
- * every page not listed here.
+ * every page not listed here. The forum is public to read (HLD §7.3); only
+ * starting a thread needs an account (M7).
  */
-const SIGN_IN_FIRST = [/^\/team(\/.*)?$/, /^\/leagues(\/.*)?$/];
+const SIGN_IN_FIRST = [
+  /^\/team(\/.*)?$/,
+  /^\/leagues(\/.*)?$/,
+  /^\/forum\/new$/,
+];
 
 /**
  * Where to come back to after signing in, when a logged-out visitor opens a
