@@ -47,6 +47,8 @@ export const categoryPageInput = z.object({
     .regex(/^\d{1,6}$/)
     .nullish(),
   show,
+  /** `?show=all`: a visitor's device shows every result. */
+  showAll: z.boolean().optional(),
 });
 
 export const threadPageInput = z.object({
@@ -54,4 +56,5 @@ export const threadPageInput = z.object({
   postId: z.uuid().nullish(),
   sort: z.enum(["best", "new"]).default("best"),
   show,
+  showAll: z.boolean().optional(),
 });

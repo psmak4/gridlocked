@@ -7,13 +7,17 @@ import {
   backLink,
   pageTitle,
 } from "@/components/community/forum-screens";
+import {
+  DeviceRevealSwitch,
+  useDeviceReveal,
+} from "@/components/community/device-reveal";
 import { ThreadRowItem } from "@/components/community/thread-row";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs } from "@/components/ui/tabs";
 import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
-import { shownIds } from "@/lib/shown-ids";
+import { SHOW_ALL, shownIds, showsAll } from "@/lib/shown-ids";
 import { getCategoryFn } from "@/server/community";
 
 /** `?sort=new` for the newest; hot by default. `?page=` is the next page's cursor. */
@@ -36,6 +40,7 @@ export const Route = createFileRoute("/forum/$category")({
     sort: search.sort ?? "hot",
     page: search.page,
     show: shownIds(search.show),
+    showAll: showsAll(search.show),
   }),
   loader: async ({ params, deps }) => {
     const result = await getCategoryFn({
@@ -44,6 +49,7 @@ export const Route = createFileRoute("/forum/$category")({
         sort: deps.sort,
         cursor: deps.page ?? null,
         ...(deps.show.length > 0 ? { show: deps.show } : {}),
+        ...(deps.showAll ? { showAll: true } : {}),
       },
     });
     if (!result.page) throw notFound();
@@ -59,9 +65,24 @@ export const Route = createFileRoute("/forum/$category")({
 /** A category's threads (wave 4): Hot or New, pinned first. */
 function CategoryRoute() {
   const { page, writer, nowMs } = Route.useLoaderData();
-  const { sort } = Route.useLoaderDeps();
+  const { sort, showAll } = Route.useLoaderDeps();
   const navigate = Route.useNavigate();
   const { category } = page;
+  // A visitor's device choice (HLD §7.3): "all" asks for `?show=all`.
+  const visitor = writer === null;
+  const hasHidden = page.threads.some((row) => row.hidden);
+  const setShow = (show: string | undefined) =>
+    void navigate({
+      search: (prev) => ({ ...prev, show }),
+      replace: true,
+      resetScroll: false,
+    });
+  useDeviceReveal({
+    visitor,
+    hasHidden,
+    showAll,
+    showEverything: () => setShow(SHOW_ALL),
+  });
   return (
     <AppShell active="forum">
       <ForumPage>
@@ -97,6 +118,13 @@ function CategoryRoute() {
             })
           }
         />
+        {visitor && (hasHidden || showAll) ? (
+          <DeviceRevealSwitch
+            on={showAll}
+            onShowAll={() => setShow(SHOW_ALL)}
+            onShowSafe={() => setShow(undefined)}
+          />
+        ) : null}
         {page.threads.length === 0 ? (
           <EmptyState title="No threads yet" body="Start the first one." />
         ) : (
@@ -115,6 +143,7 @@ function CategoryRoute() {
             staticLink
             href={`/forum/${category.slug}?${new URLSearchParams({
               ...(sort === "new" ? { sort } : {}),
+              ...(showAll ? { show: SHOW_ALL } : {}),
               page: page.nextCursor,
             }).toString()}`}
           >

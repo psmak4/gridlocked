@@ -128,7 +128,9 @@ async function hiddenThreads(
   reader: Reader,
   rows: SpoilerFacts[],
   show: readonly string[] = [],
+  showAll = false,
 ): Promise<Set<string>> {
+  if (showAll) return new Set();
   const shown = new Set(show);
   const spoilers = rows.filter(
     (r) =>
@@ -314,6 +316,8 @@ export async function threadList(
     /** From the last page's `nextCursor`. */
     cursor?: string | null;
     show?: readonly string[];
+    /** `?show=all`: nothing hidden on this page. */
+    showAll?: boolean;
   },
 ): Promise<ThreadListPage | null> {
   const [category] = await db
@@ -352,7 +356,14 @@ export async function threadList(
     .offset(offset);
 
   const page = rows.slice(0, THREADS_PER_PAGE);
-  const hidden = await hiddenThreads(db, now, reader, page, input.show);
+  const hidden = await hiddenThreads(
+    db,
+    now,
+    reader,
+    page,
+    input.show,
+    input.showAll,
+  );
   return {
     category,
     threads: page.map((t) => toRow(t, hidden.has(t.id))),
@@ -446,6 +457,7 @@ export async function threadPage(
     postId?: string | null;
     sort?: PostSort;
     show?: readonly string[];
+    showAll?: boolean;
   },
 ): Promise<ThreadPage | null> {
   const [t] = await db
@@ -467,9 +479,9 @@ export async function threadPage(
     .where(and(eq(threads.id, input.threadId), listable(reader)));
   if (!t) return null;
 
-  const hidden = (await hiddenThreads(db, now, reader, [t], input.show)).has(
-    t.id,
-  );
+  const hidden = (
+    await hiddenThreads(db, now, reader, [t], input.show, input.showAll)
+  ).has(t.id);
   const thread = {
     ...toRow(t, hidden),
     categorySlug: t.categorySlug,
