@@ -285,11 +285,12 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - a report flow and auto-hide;
   - a data export including archived chat (moved from M5 on 2026-11-07).
 - **Carried from M5:**
-  - split `src/identity/auth.ts` (about 900 lines) before adding to it;
-  - the scoring correction notice's open points: the team diff between sessions in `runInline`, a crash between `recomputeTotals` and `finishRun`, and the missing `team_event_totals` and chain tests;
-  - whether a held username should also hold its 0/o look-alikes;
-  - whether `accountAgeDays` still earns its place in the trust rules;
-  - a test of `expireExports`' `failed` branch.
+  - ~~split `src/identity/auth.ts` (about 900 lines) before adding to it~~: done early (2026-11-16, #218);
+  - ~~the scoring correction notice's open points: the team diff between sessions in `runInline`, a crash between `recomputeTotals` and `finishRun`, and the missing `team_event_totals` and chain tests~~: done early (2026-11-16, #217);
+  - ~~whether a held username should also hold its 0/o look-alikes~~: no, the exact name only (decided 2026-11-16, DM 6.3);
+  - ~~whether `accountAgeDays` still earns its place in the trust rules~~: it stays (decided 2026-11-16, DM 6.5);
+  - ~~a test of `expireExports`' `failed` branch~~: done early (2026-11-16, #218).
+- **Plan:** [plans/M7-community.md](../plans/M7-community.md), written 2026-11-16. **Decisions 1–7 made 2026-11-16**, all as recommended: DM Part 5 approved with the plan's changes, search after launch, `micromark` for Markdown, `web-push` with a VAPID key pair you create, a `chat-archives` bucket, and the chat load test in M7 on staging with your OK.
 
 ### M8 — Staff tools (target 12 Feb)
 - **Goal:** a normal weekend needs no staff, and an abnormal one is quick to fix.

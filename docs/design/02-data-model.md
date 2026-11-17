@@ -1763,7 +1763,7 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
   - Driver and team names are reserved as whole names (exactly, after normalizing), not as substrings: `Ferrari_Fan` is allowed, `Hamilton` is reserved for everyone. Word rules and these names are compared by skeleton.
   - The display name must equal the username ignoring case, at sign-up and in `changeUsername`, so a reserved name can't hide there.
   - A blocked name can be appealed through moderators.
-- **Changes are limited:** once every `username_change_days` (a setting, default 30). **`username_history`** (`user_id`, `username`, `changed_at`) keeps old names. An old name stays held for 90 days after `changed_at`, so nobody can grab a just-abandoned name to impersonate its owner. The hold is against other people: a user can take their own old name back.
+- **Changes are limited:** once every `username_change_days` (a setting, default 30). **`username_history`** (`user_id`, `username`, `changed_at`) keeps old names. An old name stays held for 90 days after `changed_at`, so nobody can grab a just-abandoned name to impersonate its owner. The hold is against other people: a user can take their own old name back. **It holds the exact name only (decided 2026-11-16):** look-alikes (such as `0` for `o`) are blocked through `normalizeForCheck` for reserved names alone, and someone using a held name's look-alike to impersonate its owner is a report.
 - **`changeUsername` is the only rename path:** one transaction that locks the user row, refuses with `username_too_soon` inside the wait, writes the history row and sets `profiles.username_changed_at`. Two people racing for one name both pass the check; the unique index lets one in and the other gets `taken`. Changing only the capitals of your own name updates `display_username` alone: no history row, no wait. Choosing a first name (none before) starts no wait either. Better Auth's `/update-user` refuses `username` and `displayUsername`, and `/sign-in/username` and `/is-username-available` are disabled.
 - **Mentions survive renames.** `post_mentions` stores the user ID (5.4). The post text keeps the old `@name` as written, and the mention link still points at the right person.
 
@@ -1794,6 +1794,8 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
   | TL3 | 60 | 200 | 200 | 60 |
 
   A user gets the highest level whose numbers they all meet.
+
+  **Account age stays (decided 2026-11-16):** once posts count from M7, it's what stops a day-old account reaching TL1 by posting ten times.
 - **Posts and upheld actions come from the forum (M7).** Until then the job's counts return zeros, so everyone stays at TL0; the forum passes real counts without changing the job.
 - **Automatic demotion** only happens after upheld moderation actions (the level is then recomputed from the counts, so it can fall). Going quiet never lowers a level.
 - **A moderator's change** (`setTrustLevel`) sets the level, sets `trust_level_locked`, and writes the history row (source `moderator`, `changed_by`, a required reason) and an `audit_log` row (`user.trust_level.set`) in one transaction. Clearing the lock (`user.trust_level.unlock`) is audited too and leaves the level as it is.
