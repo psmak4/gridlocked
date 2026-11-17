@@ -670,8 +670,9 @@ describe("the finalize_check handler", () => {
           throw new TypeError("fetch failed");
         });
       }
+      // The finalize check, and the event's session threads (M7).
       expect(await run(after(race.scheduledEnd, 2))).toEqual({
-        ran: 1,
+        ran: 2,
         failed: 0,
         lost: 0,
       });
@@ -722,16 +723,17 @@ describe("the finalize_check handler", () => {
 
     it("fails for the runner's retry when the provider answers 404", async () => {
       const { race } = await setup({ polls: false });
-      // Nothing served: a 404 is a bug in the request, not an outage.
+      // Nothing served: a 404 is a bug in the request, not an outage. The
+      // one that ran is the event's session threads (M7).
       const res = await run(after(race.scheduledEnd, 2));
-      expect(res).toEqual({ ran: 0, failed: 1, lost: 0 });
+      expect(res).toEqual({ ran: 1, failed: 1, lost: 0 });
     });
 
     it("still fails for the runner's retry on a programming error", async () => {
       const { race } = await setup({ polls: false });
       await t.db.delete(providerIds);
       const res = await run(after(race.scheduledEnd, 2));
-      expect(res).toEqual({ ran: 0, failed: 1, lost: 0 });
+      expect(res).toEqual({ ran: 1, failed: 1, lost: 0 });
     });
   });
 });

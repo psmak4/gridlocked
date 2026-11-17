@@ -2,13 +2,16 @@ import { and, asc, eq, ne } from "drizzle-orm";
 import { events, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { getSetting } from "@/settings";
+import { mondayOf } from "@/community/session-threads";
 import {
   finalizeKey,
+  openThreadsKey,
   POLLED_KINDS,
   pollStartKey,
   ROSTER_KINDS,
   rosterKey,
   type FinalizePayload,
+  type OpenThreadsPayload,
   type PollPayload,
   type RosterPayload,
 } from "./kinds";
@@ -28,7 +31,9 @@ const ROSTER_DELAY_MS = 30 * MINUTE_MS;
  *   for it;
  * - `finalize:<event>:+<h>h` at the race's `scheduled_end` plus each
  *   `finalizer_checks` setting (the last one finalizes the event);
- * - `roster:<event>:fp2|fp3` 30 minutes after that practice session ends.
+ * - `roster:<event>:fp2|fp3` 30 minutes after that practice session ends;
+ * - `open_threads:<event>` at 00:00 UTC on the Monday of the first session's
+ *   week: the forum's session threads (M7).
  *
  * A cancelled event, and a cancelled session, get nothing. A job that is
  * running or has finished is left alone by `enqueue`, and a job planned
@@ -63,6 +68,17 @@ export async function planEventJobs(db: Db, eventId: string): Promise<void> {
           payload,
         });
       }
+    }
+
+    const first = planned[0];
+    if (first) {
+      const payload: OpenThreadsPayload = { eventId };
+      await enqueue(tx, {
+        kind: "open_threads",
+        dedupeKey: openThreadsKey(eventId),
+        runAt: mondayOf(first.scheduledStart),
+        payload,
+      });
     }
 
     // The first practice session of each kind (a format never has two).

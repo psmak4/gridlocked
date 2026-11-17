@@ -23,6 +23,7 @@ import {
   gameEvents,
   jobs,
   leagueStandings,
+  posts,
   priceUpdateRuns,
   reviewItems,
   scoringRuns,
@@ -30,7 +31,10 @@ import {
   sessions,
   teamEventStates,
   teamEventTotals,
+  threads,
 } from "@/db/schema";
+import { RESULTS_POST_BODY } from "@/community/session-threads";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import { createTeam } from "./teams";
 import { openGame, saveLineup, type LineupPick } from "./lineups";
 import { planGameEvents } from "./games";
@@ -295,6 +299,20 @@ describe("the scoring pipeline (DM 4.8)", () => {
       );
       // Their lineups differ only in the Boost, so their points do too.
       expect(rows[0]!.points).not.toBe(rows[1]!.points);
+
+      // The race's thread opened on Monday, and the run's finish posted the
+      // results link in it (M7).
+      const [thread] = await t.db
+        .select({ id: threads.id })
+        .from(threads)
+        .where(and(eq(threads.sessionId, race), eq(threads.kind, "session")));
+      const replies = await t.db
+        .select({ author: posts.authorUserId, body: posts.body })
+        .from(posts)
+        .where(and(eq(posts.threadId, thread!.id), eq(posts.isOpening, false)));
+      expect(replies).toEqual([
+        { author: SYSTEM_USER_ID, body: RESULTS_POST_BODY },
+      ]);
     });
 
     it("the event becomes scored, then final after the +48h check", async () => {

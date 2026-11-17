@@ -3,6 +3,7 @@ import { circuits, events, providerIds, sessions } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { Clock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
+import { moveChatWindow } from "@/community/session-threads";
 import { getSetting } from "@/settings";
 import type {
   CalendarCircuit,
@@ -559,6 +560,12 @@ export async function syncCalendar(
                 updatedAt: now,
               })
               .where(eq(sessions.id, row.id));
+            // Its thread's chat window moves with it, in this transaction.
+            await moveChatWindow(tx as unknown as Db, {
+              id: row.id,
+              scheduledStart: s.start,
+              scheduledEnd: end,
+            });
             changed = true;
           }
         }

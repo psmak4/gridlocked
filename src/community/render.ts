@@ -49,6 +49,7 @@ export function isEmbedHost(hostname: string): boolean {
   return EMBED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
 }
 
+const SITE_PATH = /^\/(?![/\\])[^\s"]*$/;
 const LINK = /<a href="([^"]*)"(?: title="[^"]*")?>([\s\S]*?)<\/a>/g;
 const IMAGE = /<img src="[^"]*" alt="([^"]*)"(?: title="[^"]*")? \/>/g;
 
@@ -61,6 +62,9 @@ export function renderPost(
   return html
     .replace(IMAGE, (_match, alt: string) => alt)
     .replace(LINK, (_match, href: string, inner: string) => {
+      // A page on this site: a path, never `//host` or `/\host`, which a
+      // browser reads as another host. Safe for anyone, so it stays a link.
+      if (SITE_PATH.test(href)) return `<a href="${href}">${inner}</a>`;
       const url = parseHttpUrl(href);
       if (!url) return inner;
       if (!options.linksAllowed && !isEmbedHost(url.hostname)) return inner;

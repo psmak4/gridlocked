@@ -71,15 +71,15 @@ describe("replayWeekend", () => {
     expect(report.resultChanges).toBe(0);
     expect(report.cancelledSessions).toEqual([]);
     // Two roster checks, four polls for qualifying and four for the race
-    // (+0, +5, +20 min empty, +80 min published), and the four finalize
-    // checks; every one succeeded.
-    expect(report.jobs).toEqual({ succeeded: 14 });
+    // (+0, +5, +20 min empty, +80 min published), the four finalize checks
+    // and the session threads (M7); every one succeeded.
+    expect(report.jobs).toEqual({ succeeded: 15 });
     // The calendar sync recurs: the first safety tick (Friday 06:07 UTC)
     // finds none pending and starts the chain, then it runs at 06:00 UTC on
     // each of the four days after; Wednesday's is queued.
     expect(report.calendarSyncs).toEqual({ succeeded: 5, pending: 1 });
     // Every job and every sync ran at a minute of its own.
-    expect(report.wakeTicks).toBe(14 + 5);
+    expect(report.wakeTicks).toBe(15 + 5);
   });
 
   it("shows a late +5 s penalty as result_changes and a new order at the next finalize check", async () => {
@@ -204,7 +204,8 @@ describe("replayWeekend", () => {
       race: "final",
     });
     expect(report.eventStatus).toBe("completed");
-    expect(report.jobs).toEqual({ succeeded: 16 });
+    // With the session threads (M7).
+    expect(report.jobs).toEqual({ succeeded: 17 });
   });
 
   it("finalizes with no other action once an admin resolves a held qualifying", async () => {
@@ -235,7 +236,8 @@ describe("replayWeekend", () => {
     expect(items.every((i) => i.status === "resolved")).toBe(true);
     // As the plain weekend's 14, plus the one follow-up check, minus the last
     // qualifying poll: a session under review ends its poll chain.
-    expect(report.jobs).toEqual({ succeeded: 14 });
+    // With the session threads (M7).
+    expect(report.jobs).toEqual({ succeeded: 15 });
   });
 
   it("gives the same report when it steps every minute as when it jumps to the next due minute", async () => {

@@ -2,7 +2,8 @@ import { z } from "zod";
 import { SCORING_RUN_TRIGGERS } from "@/db/schema";
 
 /**
- * The job kinds of the ingestion pipeline. Threads add theirs in M7.
+ * The job kinds of the ingestion pipeline. `open_threads` is the forum's
+ * (M7, handler in `src/community/session-threads.ts`).
  * `game_lock` and `game_open` are the game layer's (handlers in
  * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
  * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
@@ -32,6 +33,7 @@ export const JOB_KINDS = [
   "email_flush",
   "identity_daily",
   "privacy_export",
+  "open_threads",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -283,3 +285,8 @@ export type PrivacyExportPayload = z.infer<typeof privacyExportPayload>;
 /** One job per export request. */
 export const privacyExportKey = (requestId: string) =>
   `privacy_export:${requestId}`;
+
+/** An event's session threads, opened on the Monday of its week (M7). */
+export const openThreadsPayload = z.object({ eventId: z.string().min(1) });
+export type OpenThreadsPayload = z.infer<typeof openThreadsPayload>;
+export const openThreadsKey = (eventId: string) => `open_threads:${eventId}`;
