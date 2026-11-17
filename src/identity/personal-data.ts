@@ -27,6 +27,7 @@ import {
   authTwoFactors,
   authVerifications,
   categories,
+  chatMessages,
   chipPlays,
   constructors,
   drivers,
@@ -51,6 +52,7 @@ import {
   teams,
   threads,
   trustLevelChanges,
+  userRestrictions,
   usernameHistory,
   users,
 } from "@/db/schema";
@@ -623,6 +625,60 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
         .orderBy(asc(postVotes.createdAt), asc(postVotes.postId));
       return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt) }));
     },
+  },
+  {
+    table: "chat_messages",
+    userColumn: "author_user_id",
+    onDelete: "keep",
+    why: "chat stays, anonymized, until it is archived (DM 5.1, 5.5); the row holds only the id next to the text",
+    exportAs: "chat",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          id: chatMessages.id,
+          threadId: chatMessages.threadId,
+          body: chatMessages.body,
+          status: chatMessages.status,
+          createdAt: chatMessages.createdAt,
+        })
+        .from(chatMessages)
+        .where(eq(chatMessages.authorUserId, userId))
+        .orderBy(asc(chatMessages.id));
+      return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt) }));
+    },
+  },
+  {
+    table: "user_restrictions",
+    userColumn: "user_id",
+    onDelete: "keep",
+    why: "moderation history about the user, kept for the 2-year retention period (DM 5.10); exported, since users can see actions taken against them (DM 5.9)",
+    exportAs: "restrictions",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          kind: userRestrictions.kind,
+          until: userRestrictions.until,
+          reason: userRestrictions.reason,
+          createdAt: userRestrictions.createdAt,
+          liftedAt: userRestrictions.liftedAt,
+        })
+        .from(userRestrictions)
+        .where(eq(userRestrictions.userId, userId))
+        .orderBy(asc(userRestrictions.createdAt), asc(userRestrictions.id));
+      return rows.map((r) => ({
+        ...r,
+        until: iso(r.until),
+        createdAt: iso(r.createdAt),
+        liftedAt: iso(r.liftedAt),
+      }));
+    },
+  },
+  {
+    table: "user_restrictions",
+    userColumn: "created_by",
+    onDelete: "keep",
+    why: `restrictions a moderator set: ${KEEP_STAFF}`,
+    exportAs: null,
   },
   {
     table: "session_watch_marks",

@@ -54,11 +54,20 @@ export const POST_STATUSES = [
 ] as const;
 /** DM 5.4: a post's Markdown source, in characters. */
 export const POST_BODY_MAX = 10_000;
+/** A thread's title, in characters. */
+export const THREAD_TITLE_MAX = 120;
+/** DM 5.5: a chat message, in characters. */
+export const CHAT_BODY_MAX = 500;
+export const CHAT_STATUSES = ["visible", "removed"] as const;
+/** DM 5.9: what a restriction stops. */
+export const RESTRICTION_KINDS = ["mute", "chat_ban", "thread_ban"] as const;
 
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 export type ThreadKind = (typeof THREAD_KINDS)[number];
 export type ThreadStatus = (typeof THREAD_STATUSES)[number];
 export type PostStatus = (typeof POST_STATUSES)[number];
+export type ChatStatus = (typeof CHAT_STATUSES)[number];
+export type RestrictionKind = (typeof RESTRICTION_KINDS)[number];
 
 /** DM 5.2. */
 export const categories = pgTable(
@@ -120,6 +129,8 @@ export const threads = pgTable(
     }),
     chatOpensAt: timestamp("chat_opens_at", { withTimezone: true }),
     chatClosesAt: timestamp("chat_closes_at", { withTimezone: true }),
+    /** A moderator's slow mode for this thread's chat, over the trust level's. */
+    slowModeSeconds: smallint("slow_mode_seconds"),
     status: text("status", { enum: THREAD_STATUSES }).notNull().default("open"),
     pinned: boolean("pinned").notNull().default(false),
     replyCount: integer("reply_count").notNull().default(0),
@@ -133,6 +144,10 @@ export const threads = pgTable(
   (t) => [
     check("threads_kind_check", oneOf(t.kind, THREAD_KINDS)),
     check("threads_status_check", oneOf(t.status, THREAD_STATUSES)),
+    check(
+      "threads_slow_mode_check",
+      sql`${t.slowModeSeconds} is null or ${t.slowModeSeconds} between 0 and 3600`,
+    ),
     check(
       "threads_chat_window_check",
       sql`(${t.chatOpensAt} is null) = (${t.chatClosesAt} is null) and (${t.chatOpensAt} is null or ${t.chatOpensAt} < ${t.chatClosesAt})`,
@@ -244,5 +259,75 @@ export const postVotes = pgTable(
     primaryKey({ columns: [t.postId, t.userId] }),
     check("post_votes_value_check", sql`${t.value} in (1, -1)`),
     index("post_votes_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * DM 5.5: live session chat, apart from posts. The UUIDv7 id is the cursor:
+ * a refresh reads a thread's messages after an id, in id order. Archived
+ * after 30 days (Task 9).
+ */
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "restrict" }),
+    /** The spoiler scope, copied from the thread. */
+    sessionId: uuid("session_id").references(() => sessions.id, {
+      onDelete: "restrict",
+    }),
+    authorUserId: uuid("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** Plain text, never HTML. */
+    body: text("body").notNull(),
+    status: text("status", { enum: CHAT_STATUSES })
+      .notNull()
+      .default("visible"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("chat_messages_status_check", oneOf(t.status, CHAT_STATUSES)),
+    check(
+      "chat_messages_body_length_check",
+      sql`char_length(${t.body}) between 1 and ${sql.raw(String(CHAT_BODY_MAX))}`,
+    ),
+    index("chat_messages_thread_id_idx").on(t.threadId, t.id),
+    // Slow mode and rate limits count a person's own recent messages.
+    index("chat_messages_author_created_idx").on(t.authorUserId, t.createdAt),
+  ],
+);
+
+/**
+ * DM 5.9: active limits on a user. `until` null means until lifted; a
+ * restriction counts while `lifted_at` is null and `until` hasn't passed.
+ */
+export const userRestrictions = pgTable(
+  "user_restrictions",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: RESTRICTION_KINDS }).notNull(),
+    until: timestamp("until", { withTimezone: true }),
+    reason: text("reason").notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: createdAt(),
+    liftedAt: timestamp("lifted_at", { withTimezone: true }),
+  },
+  (t) => [
+    check("user_restrictions_kind_check", oneOf(t.kind, RESTRICTION_KINDS)),
+    check(
+      "user_restrictions_reason_check",
+      sql`length(btrim(${t.reason})) > 0`,
+    ),
+    index("user_restrictions_active_idx")
+      .on(t.userId)
+      .where(sql`${t.liftedAt} is null`),
   ],
 );
