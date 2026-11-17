@@ -347,6 +347,20 @@ describe("the posting gate (checkPost)", () => {
     });
   });
 
+  it("an edit isn't rate limited or a duplicate, but still meets the other rules", async () => {
+    const tl0 = await seedViewer(t.db, { trustLevel: 0 });
+    await pastReply(tl0, 540, "one");
+    await pastReply(tl0, 300, "two");
+    await pastReply(tl0, 60, "three");
+    const edit = (body: string) =>
+      checkPost(t.db, NOW, tl0, { kind: "edit", threadId, body });
+    expect(await edit("three")).toMatchObject({ ok: true });
+    expect(await edit("See https://example.com")).toEqual({
+      ok: false,
+      error: "links_not_allowed",
+    });
+  });
+
   it("a reply to a locked thread gets thread_locked, and to a missing one not_found", async () => {
     const locked = await seedThread(t.db, { at: ago(3600), status: "locked" });
     const tl1 = await seedViewer(t.db, { trustLevel: 1 });
