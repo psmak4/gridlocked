@@ -15,6 +15,10 @@ import { createResendSender } from "@/identity/email/resend";
 import type { EmailSender } from "@/identity/email/sender";
 import { pendingDocuments } from "@/identity/consent";
 import { parseAuthEnv, type AuthEnv } from "@/identity/env";
+import {
+  createTurnstileVerifier,
+  type TokenVerifier,
+} from "@/identity/turnstile";
 import { touchViewer, type Viewer } from "@/identity/viewer";
 import { clockModeFromEnv, resolveClock } from "@/lib/resolve-clock";
 import { withDb, type ServerDb } from "./db";
@@ -96,6 +100,18 @@ export function withAuth<T>(
       db,
       now,
     );
+  });
+}
+
+/** Checks a Turnstile token for our own forms (a logged-out report). */
+export function requestCaptchaVerifier(
+  deps: SessionDeps = defaultDeps,
+): TokenVerifier {
+  const env = deps.env();
+  return createTurnstileVerifier({
+    secret: env.turnstileSecret,
+    local: env.local,
+    fetch,
   });
 }
 

@@ -4,6 +4,7 @@ import type { CommunityRefusal } from "@/community/errors";
 import type { PostView } from "@/community/read";
 import { cn } from "@/lib/utils";
 import { ReplyForm } from "./composer";
+import { MoreMenu } from "./more-menu";
 import { FAILED, ago, refusalWords } from "./forum-words";
 
 export type VoteResult = { ok: true; score: number } | CommunityRefusal;
@@ -18,6 +19,8 @@ type PostActions = {
   reply: (parentPostId: string | null, body: string) => Promise<ReplyResult>;
   /** Where "Continue thread" goes for a post. */
   continueHref: (postId: string) => string;
+  /** "Report" in a post's "…" menu; anyone can, but not on their own post. */
+  report?: (post: PostView) => void;
 };
 
 const iconButton =
@@ -175,6 +178,12 @@ export function PostItem({
             >
               Reply
             </button>
+          ) : null}
+          {actions.report && !post.mine ? (
+            <MoreMenu
+              label={`More for the post by ${post.author ?? "a deleted user"}`}
+              onReport={() => actions.report?.(post)}
+            />
           ) : null}
         </div>
       ) : null}

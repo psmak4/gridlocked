@@ -20,9 +20,18 @@ import {
   POST_BODY_MAX,
   THREAD_TITLE_MAX,
 } from "../../community/limits";
+import {
+  REPORT_NOTE_MAX,
+  REPORT_REASONS,
+  REPORT_TARGET_TYPES,
+  type ReportReason,
+  type ReportTargetType,
+} from "../../community/report-values";
 import { createdAt, ltree, oneOf } from "./helpers";
 
 export { CHAT_BODY_MAX, POST_BODY_MAX, THREAD_TITLE_MAX };
+export { REPORT_REASONS, REPORT_TARGET_TYPES };
+export type { ReportReason, ReportTargetType };
 import { users } from "./identity";
 import { leagues } from "./leagues";
 import { events, sessions } from "./reference";
@@ -64,29 +73,6 @@ export const POST_STATUSES = [
 export const CHAT_STATUSES = ["visible", "removed"] as const;
 /** DM 5.9: what a restriction stops. */
 export const RESTRICTION_KINDS = ["mute", "chat_ban", "thread_ban"] as const;
-
-/** DM 5.8. M7 takes reports on posts, threads and chat messages. */
-export const REPORT_TARGET_TYPES = [
-  "post",
-  "thread",
-  "chat_message",
-  "user",
-  "team_name",
-  "league_name",
-] as const;
-export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number];
-
-/** `copyright` covers DMCA notices (HLD §13.6). */
-export const REPORT_REASONS = [
-  "spam",
-  "abuse",
-  "spoiler",
-  "off_topic",
-  "illegal",
-  "copyright",
-  "other",
-] as const;
-export type ReportReason = (typeof REPORT_REASONS)[number];
 
 export const QUEUE_SOURCES = ["reports", "filter", "auto_hide"] as const;
 export type QueueSource = (typeof QUEUE_SOURCES)[number];
@@ -468,7 +454,7 @@ export const reports = pgTable(
     check("reports_weight_check", sql`${t.weight} >= 0`),
     check(
       "reports_note_length_check",
-      sql`${t.note} is null or char_length(${t.note}) <= 1000`,
+      sql`${t.note} is null or char_length(${t.note}) <= ${sql.raw(String(REPORT_NOTE_MAX))}`,
     ),
     uniqueIndex("reports_reporter_target_unique")
       .on(t.targetType, t.targetId, t.reporterUserId)

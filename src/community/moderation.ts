@@ -25,10 +25,9 @@ import { newId } from "@/lib/ids";
 import { getSetting } from "@/settings";
 import { refuse, type CommunityRefusal } from "./errors";
 import { effectiveLevel, type FilterHit } from "./gate";
+import type { ReportableType } from "./report-values";
 
-/** What M7 takes reports on. */
-export const REPORTABLE_TYPES = ["post", "thread", "chat_message"] as const;
-export type ReportableType = (typeof REPORTABLE_TYPES)[number];
+export { REPORTABLE_TYPES, type ReportableType } from "./report-values";
 
 /** A logged-out reporter (DM 5.8): an address to answer, and a bot check. */
 export type VisitorReporter = { contact: string; captchaToken: string };
