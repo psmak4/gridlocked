@@ -74,9 +74,12 @@ function SideMenu({ active }: { active: ShellItem }) {
 export function AppShell({
   active,
   children,
+  bottomNav = true,
 }: {
   active: ShellItem;
   children: ReactNode;
+  /** Live chat has its own bar at the bottom instead (wave 2). */
+  bottomNav?: boolean;
 }) {
   return (
     <div data-slot="app-shell" className="lg:flex">
@@ -84,9 +87,11 @@ export function AppShell({
       <main className="mx-auto flex min-h-dvh w-full max-w-[1200px] min-w-0 flex-col">
         {children}
       </main>
-      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface-raised pb-[env(safe-area-inset-bottom)] lg:hidden">
-        <BottomNav items={ITEMS} active={active} />
-      </div>
+      {bottomNav ? (
+        <div className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface-raised pb-[env(safe-area-inset-bottom)] lg:hidden">
+          <BottomNav items={ITEMS} active={active} />
+        </div>
+      ) : null}
     </div>
   );
 }

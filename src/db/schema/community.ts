@@ -302,6 +302,30 @@ export const chatMessages = pgTable(
 );
 
 /**
+ * DM 5.5: a session thread's chat after 30 days, as one gzip JSON-lines file
+ * in object storage (Task 9 writes it). One row per thread: the rows it
+ * replaced are gone, and the thread page replays the file.
+ */
+export const chatArchives = pgTable(
+  "chat_archives",
+  {
+    threadId: uuid("thread_id")
+      .primaryKey()
+      .references(() => threads.id, { onDelete: "restrict" }),
+    objectKey: text("object_key").notNull(),
+    messageCount: integer("message_count").notNull(),
+    firstMessageAt: timestamp("first_message_at", { withTimezone: true }),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    bytes: integer("bytes").notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    check("chat_archives_count_check", sql`${t.messageCount} >= 0`),
+    check("chat_archives_bytes_check", sql`${t.bytes} >= 0`),
+  ],
+);
+
+/**
  * DM 5.9: active limits on a user. `until` null means until lifted; a
  * restriction counts while `lifted_at` is null and `until` hasn't passed.
  */

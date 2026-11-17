@@ -1,6 +1,8 @@
 import { createFileRoute, notFound, useRouter } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
+import { ChatView } from "@/components/community/chat-view";
 import { ReplyForm } from "@/components/community/composer";
 import {
   ForumPage,
@@ -17,10 +19,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { SpoilerCover } from "@/components/ui/spoiler-cover";
 import { Tabs } from "@/components/ui/tabs";
+import { systemTimer } from "@/lib/clock";
 import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
 import { shownIds, withShown } from "@/lib/shown-ids";
-import { getThreadFn, replyFn, voteFn } from "@/server/community";
+import { createRefreshChannel } from "@/realtime/refresh";
+import { getThreadFn, replyFn, sendChatFn, voteFn } from "@/server/community";
 import { markSessionsWatched } from "@/server/play";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -71,7 +75,7 @@ const commentsWords = (n: number) =>
 
 /** A thread (wave 4): the opening post, then the comments as a tree. */
 function ThreadRoute() {
-  const { page, writer, nowMs } = Route.useLoaderData();
+  const { page, writer, nowMs, chat } = Route.useLoaderData();
   const { sort } = Route.useLoaderDeps();
   const navigate = Route.useNavigate();
   const router = useRouter();
@@ -93,12 +97,34 @@ function ThreadRoute() {
     continueHref: (postId) => `/t/${thread.id}?post=${postId}`,
   };
 
+  // Chat mode (HLD §7.2): one channel for the page while it lasts. It is
+  // made only once the thread is shown, so a viewer who hasn't revealed the
+  // session never asks for its chat.
+  const chatting = chat !== null && !page.hidden;
+  const channel = useMemo(
+    () =>
+      chatting
+        ? createRefreshChannel({
+            windowSeconds: chat.windowSeconds,
+            offsetMs: nowMs - systemTimer.now(),
+            send: (threadId, body) => sendChatFn({ data: { threadId, body } }),
+            onModeChange: (mode) => {
+              if (mode === "discussion") void router.invalidate();
+            },
+          })
+        : null,
+    // One channel per thread while it is shown in chat mode; the loader's
+    // clock seeds it once, and each refresh corrects it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [thread.id, chatting, chat?.windowSeconds],
+  );
+
   const opening = page.posts.find((p) => p.isOpening);
   const replies = page.posts.filter((p) => !p.isOpening);
   const revealId = thread.sessionId ?? thread.id;
 
   return (
-    <AppShell active="forum">
+    <AppShell active="forum" bottomNav={!chatting}>
       <ForumPage>
         <a href={`/forum/${thread.categorySlug}`} className={backLink}>
           {`← ${thread.categoryName}`}
@@ -148,6 +174,16 @@ function ThreadRoute() {
                     }).finally(() => router.invalidate())
                 : undefined
             }
+          />
+        ) : chatting && channel ? (
+          <ChatView
+            threadId={thread.id}
+            channel={channel}
+            writer={writer}
+            slowSeconds={chat.slowSeconds}
+            phrase={thread.sessionPhrase ?? "the session"}
+            signInHref={`/sign-in?next=${encodeURIComponent(`/t/${thread.id}`)}`}
+            onClosed={() => void router.invalidate()}
           />
         ) : (
           <>
