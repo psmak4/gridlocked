@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthErrorRouteImport } from './routes/auth-error'
 import { Route as CheckEmailRouteImport } from './routes/check-email'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
@@ -75,6 +76,11 @@ const CheckEmailRoute = CheckEmailRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfileRoute = ProfileRouteImport.update({
@@ -298,6 +304,7 @@ export interface FileRoutesByFullPath {
   '/auth-error': typeof AuthErrorRoute
   '/check-email': typeof CheckEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/notifications': typeof NotificationsRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
@@ -347,6 +354,7 @@ export interface FileRoutesByTo {
   '/auth-error': typeof AuthErrorRoute
   '/check-email': typeof CheckEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/notifications': typeof NotificationsRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
@@ -397,6 +405,7 @@ export interface FileRoutesById {
   '/auth-error': typeof AuthErrorRoute
   '/check-email': typeof CheckEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/notifications': typeof NotificationsRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
@@ -448,6 +457,7 @@ export interface FileRouteTypes {
     | '/auth-error'
     | '/check-email'
     | '/forgot-password'
+    | '/notifications'
     | '/profile'
     | '/reset-password'
     | '/sign-in'
@@ -497,6 +507,7 @@ export interface FileRouteTypes {
     | '/auth-error'
     | '/check-email'
     | '/forgot-password'
+    | '/notifications'
     | '/profile'
     | '/reset-password'
     | '/sign-in'
@@ -546,6 +557,7 @@ export interface FileRouteTypes {
     | '/auth-error'
     | '/check-email'
     | '/forgot-password'
+    | '/notifications'
     | '/profile'
     | '/reset-password'
     | '/sign-in'
@@ -596,6 +608,7 @@ export interface RootRouteChildren {
   AuthErrorRoute: typeof AuthErrorRoute
   CheckEmailRoute: typeof CheckEmailRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  NotificationsRoute: typeof NotificationsRoute
   ProfileRoute: typeof ProfileRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignInRoute: typeof SignInRoute
@@ -669,6 +682,13 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profile': {
@@ -980,6 +1000,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthErrorRoute: AuthErrorRoute,
   CheckEmailRoute: CheckEmailRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  NotificationsRoute: NotificationsRoute,
   ProfileRoute: ProfileRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignInRoute: SignInRoute,

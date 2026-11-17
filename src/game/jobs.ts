@@ -19,10 +19,14 @@ import {
   gameOpenPayload,
   gameOpenRecheckKey,
   gameOpenSweepKey,
+  LOCK_REMINDER_HOURS,
+  lockReminderKey,
   type GameFinalizePayload,
   type GameLockPayload,
   type GameOpenPayload,
+  type LockReminderPayload,
 } from "@/jobs/kinds";
+import { createLockReminderHandler } from "@/notifications/lock-reminder";
 import { enqueue } from "@/jobs/queue";
 import type { JobHandler } from "@/jobs/runner";
 import { getSetting } from "@/settings";
@@ -54,6 +58,8 @@ export const isLockedOrLater = (status: GameEventStatus) =>
  * (DM 2.10), all through `enqueue` so planning again only moves them:
  * - `game_lock:<game>:<event>` at `lock_at` for every `upcoming` or `open`
  *   event;
+ * - `lock_reminder:<game>:<event>:<24|1>h` a day and an hour before `lock_at`,
+ *   for the same events, while that time is still to come;
  * - `game_open:<game>:<event>` for every `upcoming` event after the first, at
  *   the end of the previous event's race plus the largest `finalizer_checks`
  *   delay, when that event has been finalized or is about to be;
@@ -162,6 +168,23 @@ export async function planGameJobs(
         runAt: event.lockAt,
         payload: lock,
       });
+      // The owners' reminders, a day and an hour before; one already past
+      // isn't queued, and a pending one moves with `lock_at`.
+      for (const hours of LOCK_REMINDER_HOURS) {
+        const runAt = new Date(event.lockAt.getTime() - hours * HOUR_MS);
+        if (runAt.getTime() <= now.getTime()) continue;
+        const reminder: LockReminderPayload = {
+          gameId,
+          eventId: event.eventId,
+          hours,
+        };
+        await enqueue(tx, {
+          kind: "lock_reminder",
+          dedupeKey: lockReminderKey(gameId, event.eventId, hours),
+          runAt,
+          payload: reminder,
+        });
+      }
       // A lock job that put itself off (or went on to a next batch) has a key
       // of its own: the pending one, whichever it is, moves with `lock_at`.
       const ofThisLock = [
@@ -314,7 +337,7 @@ async function loadOrder(db: Db, gameId: string, eventId: string) {
  */
 export function createGameHandlers(
   options: { batch?: number } = {},
-): Record<"game_lock" | "game_open", JobHandler> {
+): Record<"game_lock" | "game_open" | "lock_reminder", JobHandler> {
   const lock: JobHandler = async (job, ctx) => {
     const db = ctx.db as Db;
     const { gameId, eventId, afterTeamId, wait, sweep } = gameLockPayload.parse(
@@ -432,5 +455,10 @@ export function createGameHandlers(
     });
   };
 
-  return { game_lock: lock, game_open: open };
+  // Queued by `planGameJobs` with the lock, so it runs where the lock does.
+  return {
+    game_lock: lock,
+    game_open: open,
+    lock_reminder: createLockReminderHandler(),
+  };
 }

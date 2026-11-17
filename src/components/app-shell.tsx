@@ -1,11 +1,18 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useAccount } from "./account-context";
+import { bellCount, bellLabel, NotificationBell } from "./notification-bell";
 import { BottomNav, type BottomNavItem } from "./ui/bottom-nav";
 import { EmptyState } from "./ui/empty-state";
 import { Icon } from "./ui/icons";
 
-/** The app's main places, in wave 4's order. The bell joins in Task 13. */
+/**
+ * The app's main places, in wave 4's order. The bottom nav keeps these five;
+ * the bell is in the Home and Forum headers on a phone, and a side-menu item
+ * from 1024 px.
+ */
 export type ShellItem = "home" | "team" | "leagues" | "forum" | "profile";
+export type ShellPlace = ShellItem | "notifications";
 
 const ITEMS: (BottomNavItem & { id: ShellItem; href: string })[] = [
   { id: "home", label: "Home", href: "/" },
@@ -22,7 +29,15 @@ const focusRing =
  * From 1024 px, the side menu replaces the bottom nav (wave 3): the wordmark,
  * then the same items.
  */
-function SideMenu({ active }: { active: ShellItem }) {
+function SideMenu({
+  active,
+  unread,
+}: {
+  active: ShellPlace;
+  /** Signed in: the bell's count. */
+  unread: number | null;
+}) {
+  const bellCurrent = active === "notifications";
   return (
     <nav
       aria-label="Main"
@@ -60,6 +75,33 @@ function SideMenu({ active }: { active: ShellItem }) {
             </li>
           );
         })}
+        {unread !== null ? (
+          <li>
+            <a
+              href="/notifications"
+              aria-label={bellLabel(unread)}
+              aria-current={bellCurrent ? "page" : undefined}
+              className={cn(
+                "flex min-h-[44px] items-center gap-space-3 rounded-radius-m px-space-2 font-sans text-[16px] no-underline",
+                focusRing,
+                bellCurrent
+                  ? "bg-surface font-bold text-heat-text"
+                  : "font-semibold text-ink-muted hover:text-ink",
+              )}
+            >
+              <Icon name="bell" />
+              Notifications
+              {unread > 0 ? (
+                <span
+                  aria-hidden="true"
+                  className="ml-auto min-w-[22px] rounded-radius-pill bg-heat px-[6px] text-center text-[12px] leading-[20px] font-bold text-on-heat"
+                >
+                  {bellCount(unread)}
+                </span>
+              ) : null}
+            </a>
+          </li>
+        ) : null}
       </ul>
     </nav>
   );
@@ -76,15 +118,24 @@ export function AppShell({
   children,
   bottomNav = true,
 }: {
-  active: ShellItem;
+  active: ShellPlace;
   children: ReactNode;
   /** Live chat has its own bar at the bottom instead (wave 2). */
   bottomNav?: boolean;
 }) {
+  const account = useAccount();
+  const unread = account?.complete ? account.unread : null;
+  const headerBell =
+    unread !== null && (active === "home" || active === "forum");
   return (
     <div data-slot="app-shell" className="lg:flex">
-      <SideMenu active={active} />
+      <SideMenu active={active} unread={unread} />
       <main className="mx-auto flex min-h-dvh w-full max-w-[1200px] min-w-0 flex-col">
+        {headerBell ? (
+          <div className="flex justify-end px-space-2 pt-space-2 lg:hidden">
+            <NotificationBell unread={unread} />
+          </div>
+        ) : null}
         {children}
       </main>
       {bottomNav ? (

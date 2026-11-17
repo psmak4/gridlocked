@@ -49,6 +49,7 @@ const SIGN_IN_FIRST = [
   /^\/team(\/.*)?$/,
   /^\/leagues(\/.*)?$/,
   /^\/forum\/new$/,
+  /^\/notifications$/,
 ];
 
 /**

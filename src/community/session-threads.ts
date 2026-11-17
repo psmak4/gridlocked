@@ -9,6 +9,8 @@
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
   categories,
+  drivers,
+  effectiveResults,
   events,
   posts,
   sessions,
@@ -21,6 +23,7 @@ import { openThreadsPayload } from "@/jobs/kinds";
 import type { JobHandler } from "@/jobs/runner";
 import { newId } from "@/lib/ids";
 import { SESSION_LABELS } from "@/play/weekend";
+import { broadcast } from "@/notifications/write";
 import { pathLabel } from "./mentions";
 
 type SessionStatus = (typeof SESSION_STATUSES)[number];
@@ -258,7 +261,60 @@ export async function postResults(
         lastActivityAt: now,
       })
       .where(eq(threads.id, row.threadId));
+    await broadcastScores(t, now, sessionId);
     return true;
+  });
+}
+
+/** Sessions whose winner (or pole-sitter) "Scores are in" names. */
+const LED: ReadonlySet<string> = new Set([
+  "qualifying",
+  "sprint_qualifying",
+  "sprint",
+  "race",
+]);
+
+/**
+ * "Scores are in" for everyone, once per session (wave 4: SCORES). The
+ * leader's name is stored, but shown only to readers who revealed the session.
+ */
+async function broadcastScores(
+  db: Db,
+  now: Date,
+  sessionId: string,
+): Promise<void> {
+  const [session] = await db
+    .select({ kind: sessions.kind, eventId: events.id, event: events.name })
+    .from(sessions)
+    .innerJoin(events, eq(events.id, sessions.eventId))
+    .where(eq(sessions.id, sessionId));
+  if (!session) return;
+  let leader: string | null = null;
+  if (LED.has(session.kind)) {
+    const [first] = await db
+      .select({ given: drivers.givenName, family: drivers.familyName })
+      .from(effectiveResults)
+      .innerJoin(drivers, eq(drivers.id, effectiveResults.driverId))
+      .where(
+        and(
+          eq(effectiveResults.sessionId, sessionId),
+          eq(effectiveResults.position, 1),
+        ),
+      )
+      .limit(1);
+    leader = first ? `${first.given} ${first.family}` : null;
+  }
+  await broadcast(db, now, {
+    kind: "scores_in",
+    sessionId,
+    eventId: session.eventId,
+    dedupeKey: `scores_in:${sessionId}`,
+    data: {
+      event: session.event,
+      session: SESSION_LABELS[session.kind],
+      sessionKind: session.kind,
+      leader,
+    },
   });
 }
 

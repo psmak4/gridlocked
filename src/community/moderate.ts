@@ -28,6 +28,7 @@ import type { Db } from "@/db/types";
 import { IdentityError } from "@/identity/identity-error";
 import { SYSTEM_USER_ID } from "@/identity/system";
 import type { Viewer } from "@/identity/viewer";
+import { notify } from "@/notifications/write";
 import { newId } from "@/lib/ids";
 
 /** The actions M7 takes, and what each one acts on. */
@@ -342,6 +343,16 @@ async function changeUser(
  * `version_conflict` when the queue item was decided or changed since the
  * moderator looked.
  */
+/** The actions the person acted on hears about (wave 4: MODERATION). */
+const NOTIFIED = new Set<string>([
+  "remove",
+  "restore",
+  "warn",
+  "mute",
+  "chat_ban",
+  "unmute",
+]);
+
 export async function moderate(
   db: Db,
   now: Date,
@@ -430,6 +441,17 @@ export async function moderate(
         reason,
         requestId: actor.requestId ?? null,
       });
+      if (change.changed && change.targetUserId && NOTIFIED.has(input.action)) {
+        // The moderator stays unnamed: the text says "a moderator".
+        await notify(t, now, {
+          userId: change.targetUserId,
+          kind: "moderation",
+          data: {
+            action: input.action,
+            until: input.until?.toISOString() ?? null,
+          },
+        });
+      }
       return { ok: true, actionId, changed: change.changed };
     });
   } catch (error) {

@@ -11,7 +11,9 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * daily checks (handler in `src/game/corrections.ts`). `email_flush` sends the
  * queued account emails (handler in `src/identity/email/outbox.ts`). `identity_daily` is the day's
  * trust, purge, prune and export-expiry steps (handler in `src/identity/daily.ts`), and
- * `privacy_export` builds one data export (handler in `src/identity/export.ts`). `normalize` and `validate`
+ * `privacy_export` builds one data export (handler in `src/identity/export.ts`).
+ * `lock_reminder` tells team owners a lock is near (handler in
+ * `src/notifications/lock-reminder.ts`). `normalize` and `validate`
  * are reserved: the poll and finalize jobs run both steps inline, so nothing
  * enqueues them yet.
  *
@@ -36,6 +38,7 @@ export const JOB_KINDS = [
   "privacy_export",
   "open_threads",
   "community_daily",
+  "lock_reminder",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -295,3 +298,21 @@ export const privacyExportKey = (requestId: string) =>
 export const openThreadsPayload = z.object({ eventId: z.string().min(1) });
 export type OpenThreadsPayload = z.infer<typeof openThreadsPayload>;
 export const openThreadsKey = (eventId: string) => `open_threads:${eventId}`;
+
+/** The hours before a lock that owners are reminded at (wave 4: LOCK). */
+export const LOCK_REMINDER_HOURS = [24, 1] as const;
+export type LockReminderHours = (typeof LOCK_REMINDER_HOURS)[number];
+
+/** One reminder: a game's event, so many hours before its lock. */
+export const lockReminderPayload = z.object({
+  gameId: z.string().min(1),
+  eventId: z.string().min(1),
+  hours: z.union([z.literal(24), z.literal(1)]),
+});
+export type LockReminderPayload = z.infer<typeof lockReminderPayload>;
+
+export const lockReminderKey = (
+  gameId: string,
+  eventId: string,
+  hours: LockReminderHours,
+) => `lock_reminder:${gameId}:${eventId}:${hours}h`;

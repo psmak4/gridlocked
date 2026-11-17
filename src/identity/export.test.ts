@@ -139,6 +139,8 @@ describe("data export (DM 6.7)", () => {
         "leaguesOwned",
         "legalAcceptances",
         "moderation",
+        "notificationPreferences",
+        "notifications",
         "postRevisions",
         "posts",
         "privacyRequests",

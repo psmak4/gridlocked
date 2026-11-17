@@ -82,6 +82,7 @@ describe("the sign-in-first pages (M6)", () => {
     expect(signInFirst("/team/", "", null)).toBe("/team");
     expect(signInFirst("/team/1/points", "", null)).toBe("/team/1/points");
     expect(signInFirst("/leagues", "", null)).toBe("/leagues");
+    expect(signInFirst("/notifications", "", null)).toBe("/notifications");
     expect(signInFirst("/leagues/abc", "?tab=x", null)).toBe(
       "/leagues/abc?tab=x",
     );

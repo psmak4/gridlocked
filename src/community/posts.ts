@@ -12,6 +12,7 @@ import { refuse, type CommunityRefusal } from "./errors";
 import { checkPost } from "./gate";
 import { pathLabel, writeMentions } from "./mentions";
 import { noteEdit, queueFilterHits } from "./moderation";
+import { notifyPost, threadForNotify } from "@/notifications/forum";
 
 export type ReplyInput = {
   threadId: string;
@@ -41,10 +42,18 @@ export async function reply(
   });
   if (!gate.ok) return gate;
 
-  let parent: { path: string; depth: number } | null = null;
+  let parent: {
+    path: string;
+    depth: number;
+    authorUserId: string | null;
+  } | null = null;
   if (input.parentPostId) {
     const [row] = await db
-      .select({ path: posts.path, depth: posts.depth })
+      .select({
+        path: posts.path,
+        depth: posts.depth,
+        authorUserId: posts.authorUserId,
+      })
       .from(posts)
       .where(
         and(
@@ -73,6 +82,10 @@ export async function reply(
       })
       .where(and(eq(threads.id, input.threadId), eq(threads.status, "open")))
       .returning({
+        id: threads.id,
+        title: threads.title,
+        spoilerSafeTitle: threads.spoilerSafeTitle,
+        authorUserId: threads.authorUserId,
         sessionId: threads.sessionId,
         containsSpoilers: threads.containsSpoilers,
       });
@@ -92,7 +105,16 @@ export async function reply(
       status,
       createdAt: now,
     });
-    await writeMentions(t, postId, v.userId, body);
+    const mentioned = await writeMentions(t, postId, v.userId, body);
+    if (visible) {
+      await notifyPost(t, now, {
+        actorUserId: v.userId,
+        thread,
+        postId,
+        mentioned,
+        repliedTo: parent ? parent.authorUserId : thread.authorUserId,
+      });
+    }
     await queueFilterHits(
       t,
       now,
@@ -175,7 +197,18 @@ export async function editPost(
         .set({ replyCount: sql`greatest(${threads.replyCount} - 1, 0)` })
         .where(eq(threads.id, post.threadId));
     }
-    await writeMentions(t, input.postId, v.userId, body);
+    const mentioned = await writeMentions(t, input.postId, v.userId, body);
+    if (status === "visible" && mentioned.length > 0) {
+      const thread = await threadForNotify(t, post.threadId);
+      if (thread) {
+        await notifyPost(t, now, {
+          actorUserId: v.userId,
+          thread,
+          postId: input.postId,
+          mentioned,
+        });
+      }
+    }
     // The queue keeps what was first reported; the new text joins it, and a
     // hit on the new text is queued against the post (or its thread).
     await noteEdit(t, now, {

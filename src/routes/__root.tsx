@@ -12,6 +12,7 @@ import { ThemeScript } from "@/components/theme-script";
 import { gateRedirect, signInFirst } from "@/lib/auth-gate";
 import { privateHeaders } from "@/lib/private-headers";
 import { getAccount, markPrivate } from "@/server/account";
+import { AccountContext } from "@/components/account-context";
 import appCss from "@/styles/globals.css?url";
 
 export const Route = createRootRoute({
@@ -59,12 +60,12 @@ export const Route = createRootRoute({
 function RootComponent() {
   const { account } = Route.useRouteContext();
   return (
-    <>
+    <AccountContext value={account ?? null}>
       {account?.impersonated ? (
         <ImpersonationBanner username={account.username ?? ""} />
       ) : null}
       <Outlet />
-    </>
+    </AccountContext>
   );
 }
 

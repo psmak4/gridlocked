@@ -10,6 +10,7 @@ import { newId } from "@/lib/ids";
 import { refuse, type CommunityRefusal } from "./errors";
 import { checkPost } from "./gate";
 import { pathLabel, writeMentions } from "./mentions";
+import { notifyPost } from "@/notifications/forum";
 import { queueFilterHits } from "./moderation";
 
 /** What anyone who hasn't revealed the session sees for a spoiler thread. */
@@ -91,7 +92,21 @@ export async function createThread(
       status,
       createdAt: now,
     });
-    await writeMentions(t, postId, v.userId, body);
+    const mentioned = await writeMentions(t, postId, v.userId, body);
+    if (status === "visible") {
+      await notifyPost(t, now, {
+        actorUserId: v.userId,
+        thread: {
+          id: threadId,
+          title,
+          spoilerSafeTitle: spoilers ? SPOILER_THREAD_TITLE : null,
+          containsSpoilers: spoilers,
+          sessionId: input.sessionId ?? null,
+        },
+        postId,
+        mentioned,
+      });
+    }
     await queueFilterHits(
       t,
       now,

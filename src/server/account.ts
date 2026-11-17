@@ -14,6 +14,7 @@ import { z } from "zod";
 import { discordFrom } from "@/identity/env";
 import { stopImpersonating } from "@/identity/impersonation";
 import { verifyStaffSession } from "@/identity/staff-access";
+import { unreadCount } from "@/notifications/read";
 import {
   consumeRateLimit,
   IdentityError,
@@ -70,6 +71,8 @@ export type AccountSummary = {
   emailVerified: boolean;
   /** An admin is looking through this session (the banner, ruling 51a). */
   impersonated: boolean;
+  /** The number on the bell (Task 13). */
+  unread: number;
 };
 
 async function requestViewer(): Promise<Viewer | null> {
@@ -88,11 +91,15 @@ export const getAccount = createServerFn({ method: "GET" }).handler(
     if (!viewer) return null;
     // A signed-in answer is private, whoever asked and however.
     setResponseHeader("Cache-Control", "private, no-store");
+    const unread = viewer.complete
+      ? await withRequestNow((db, now) => unreadCount(db, now, viewer))
+      : 0;
     return {
       complete: viewer.complete,
       username: viewer.displayUsername ?? viewer.username,
       emailVerified: viewer.emailVerified,
       impersonated: viewer.impersonatedBy !== null,
+      unread,
     };
   },
 );
