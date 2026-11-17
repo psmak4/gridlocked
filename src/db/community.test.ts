@@ -101,11 +101,11 @@ describe("community tables (DM 5.2–5.6)", () => {
       .orderBy(asc(categories.position));
     expect(rows.map((r) => [r.slug, r.name, r.kind])).toEqual([
       ["race-weekend", "Race Weekend", "race_weekend"],
-      ["general", "General", "general"],
       ["fantasy", "Fantasy", "fantasy"],
       ["teams-and-drivers", "Teams & Drivers", "general"],
       ["technical", "Technical", "general"],
       ["silly-season", "Silly Season", "general"],
+      ["general", "General", "general"],
       ["off-topic", "Off-topic", "general"],
     ]);
     expect(rows.map((r) => r.position)).toEqual([1, 2, 3, 4, 5, 6, 7]);
