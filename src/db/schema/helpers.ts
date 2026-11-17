@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import { timestamp, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { customType, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 // Shared by the schema files. Not re-exported from `index.ts`: these are
 // building blocks, not tables.
@@ -20,3 +20,11 @@ export const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 export const updatedAt = () =>
   timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
+
+/**
+ * Postgres `ltree` (DM 5.4: a post's materialized path). Drizzle has no type
+ * for it, so it travels as text. The migration creates the extension first.
+ */
+export const ltree = customType<{ data: string; driverData: string }>({
+  dataType: () => "ltree",
+});

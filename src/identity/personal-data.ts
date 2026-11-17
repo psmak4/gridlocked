@@ -26,6 +26,7 @@ import {
   authSessions,
   authTwoFactors,
   authVerifications,
+  categories,
   chipPlays,
   constructors,
   drivers,
@@ -39,11 +40,16 @@ import {
   lineupPicks,
   lineupVersions,
   poolAssets,
+  postMentions,
+  postRevisions,
+  postVotes,
+  posts,
   privacyRequests,
   profiles,
   sessionWatchMarks,
   sessions,
   teams,
+  threads,
   trustLevelChanges,
   usernameHistory,
   users,
@@ -520,6 +526,102 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
         .update(leagues)
         .set({ ownerUserId: null, updatedAt: now })
         .where(eq(leagues.ownerUserId, userId));
+    },
+  },
+  {
+    table: "threads",
+    userColumn: "author_user_id",
+    onDelete: "keep",
+    why: 'threads they started stay on the tombstone, which shows as "deleted user" (DM 5.1); the row holds only the id next to the text, and they can delete posts before leaving',
+    exportAs: "threads",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          id: threads.id,
+          category: categories.slug,
+          title: threads.title,
+          createdAt: threads.createdAt,
+        })
+        .from(threads)
+        .innerJoin(categories, eq(categories.id, threads.categoryId))
+        .where(eq(threads.authorUserId, userId))
+        .orderBy(asc(threads.createdAt), asc(threads.id));
+      return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt) }));
+    },
+  },
+  {
+    table: "posts",
+    userColumn: "author_user_id",
+    onDelete: "keep",
+    why: "posts stay, anonymized, so replies keep their place (DM 5.1); the row holds only the id next to the text, and they can delete posts before leaving",
+    exportAs: "posts",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          id: posts.id,
+          threadId: posts.threadId,
+          parentPostId: posts.parentPostId,
+          body: posts.body,
+          status: posts.status,
+          createdAt: posts.createdAt,
+          editedAt: posts.editedAt,
+        })
+        .from(posts)
+        .where(eq(posts.authorUserId, userId))
+        .orderBy(asc(posts.createdAt), asc(posts.id));
+      return rows.map((r) => ({
+        ...r,
+        createdAt: iso(r.createdAt),
+        editedAt: iso(r.editedAt),
+      }));
+    },
+  },
+  {
+    table: "post_revisions",
+    userColumn: "edited_by",
+    onDelete: "keep",
+    why: "earlier versions of edited posts, kept for the moderation retention period (DM 5.10) so a report can be judged on what was said",
+    exportAs: "postRevisions",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          postId: postRevisions.postId,
+          body: postRevisions.body,
+          editedAt: postRevisions.editedAt,
+        })
+        .from(postRevisions)
+        .where(eq(postRevisions.editedBy, userId))
+        .orderBy(asc(postRevisions.editedAt), asc(postRevisions.id));
+      return rows.map((r) => ({ ...r, editedAt: iso(r.editedAt) }));
+    },
+  },
+  {
+    table: "post_mentions",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "who mentioned them: it only drives notifications to the account",
+    exportAs: null,
+    async scrub(tx, { userId }) {
+      await tx.delete(postMentions).where(eq(postMentions.userId, userId));
+    },
+  },
+  {
+    table: "post_votes",
+    userColumn: "user_id",
+    onDelete: "keep",
+    why: "votes stay counted in scores and reputation but are never shown per user (DM 6.7); the row holds only the id, a post and a value",
+    exportAs: "votes",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          postId: postVotes.postId,
+          value: postVotes.value,
+          createdAt: postVotes.createdAt,
+        })
+        .from(postVotes)
+        .where(eq(postVotes.userId, userId))
+        .orderBy(asc(postVotes.createdAt), asc(postVotes.postId));
+      return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt) }));
     },
   },
   {
