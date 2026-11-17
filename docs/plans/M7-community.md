@@ -51,6 +51,8 @@ I read Part 5, HLD §7, §10 and §11, wave 4, and the M5 and M6 code M7 sits on
 11. **Trust levels already count posts.** M5's `trust_thresholds` read `posts` and `reputation`, which are zero until M7 writes them. Task 15 feeds them.
 
 ## Decisions (yours)
+**Answered 2026-11-16: every decision went the recommended way.** DM Part 5 is approved with the three changes in decision 1; search waits for after launch; Markdown uses `micromark`; Web Push uses `web-push` with a VAPID key pair you create; chat archives get a `chat-archives` bucket; the chat load test runs in M7 on staging, with your OK; held usernames hold the exact name only; and `accountAgeDays` stays (DM 6.3 and 6.5 now say so).
+
 These change what gets built. Each has my recommendation first.
 
 1. **Approve DM Part 5.**
@@ -114,7 +116,7 @@ These change what gets built. Each has my recommendation first.
 
 ## What each task needs from you
 **Tasks 1–15 need no account and no key, and no staging write.** They're built and tested against PGlite and a local build, with push tested against a fake push service. Then:
-- **Before Task 1:** decisions 1–7.
+- **Before Task 1:** decisions 1–7 (answered 2026-11-16).
 - **Task 14:** if you choose decision 4's recommendation, the VAPID key pair as two secrets (names only: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`), in the `staging` environment and in Vercel. Push stays off until they're set.
 - **Task 16:**
   - one Deploy staging run, with your OK, not on a race weekend, which applies M7's migrations and, by decision 5, creates the `chat-archives` bucket;
@@ -190,6 +192,8 @@ Tasks 1, 2 and 3 touch nothing in common and can run alongside each other. After
 
 ### Task 1: M5 carry-overs: split `auth.ts`, the export test, the trust and username rulings
 
+**Done 2026-11-16:** the split and the export test in #218, decision 7's wording in DM 6.3 and 6.5 with this plan's merge.
+
 **Files:**
 - Modify: `src/identity/auth.ts`, into `src/identity/auth/` (`index.ts` re-exports the same names, then `options.ts`, `hooks.ts`, `email-hooks.ts` and `plugins.ts`, none over about 300 lines).
 - Modify: `src/identity/export.test.ts`, `src/identity/usernames.ts` (only if decision 7 is "yes"), `src/settings/defaults.ts` (only if `accountAgeDays` goes), and DM 6.3 and 6.5.
@@ -204,6 +208,8 @@ Tasks 1, 2 and 3 touch nothing in common and can run alongside each other. After
 - [ ] **Step 5: Commit** `refactor: split auth.ts, and M5's open identity points`.
 
 ### Task 2: M5 carry-over: the scoring correction notice's open points
+
+**Done 2026-11-16 in #217.**
 
 **Files:**
 - Modify: `src/game/corrections.ts` and its tests, `src/scoring/` where the fixes land.
