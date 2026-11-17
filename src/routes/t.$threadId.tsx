@@ -2,7 +2,7 @@ import { createFileRoute, notFound, useRouter } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
-import { ChatView } from "@/components/community/chat-view";
+import { ChatReplayView, ChatView } from "@/components/community/chat-view";
 import { ReplyForm } from "@/components/community/composer";
 import {
   ForumPage,
@@ -75,7 +75,7 @@ const commentsWords = (n: number) =>
 
 /** A thread (wave 4): the opening post, then the comments as a tree. */
 function ThreadRoute() {
-  const { page, writer, nowMs, chat } = Route.useLoaderData();
+  const { page, writer, nowMs, chat, replay } = Route.useLoaderData();
   const { sort } = Route.useLoaderDeps();
   const navigate = Route.useNavigate();
   const router = useRouter();
@@ -248,6 +248,8 @@ function ThreadRoute() {
             ) : (
               <PostTree posts={replies} actions={actions} />
             )}
+
+            {replay ? <ChatReplayView replay={replay} /> : null}
           </>
         )}
       </ForumPage>

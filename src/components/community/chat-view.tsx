@@ -240,3 +240,50 @@ export function ChatView({
     </section>
   );
 }
+
+/**
+ * The chat, replayed under the discussion once it has closed (DM 5.5):
+ * folded away, as it can run to hundreds of messages.
+ */
+export function ChatReplayView({
+  replay,
+}: {
+  replay: {
+    messages: ChatMessageView[];
+    total: number;
+    unavailable: boolean;
+  };
+}) {
+  const count = new Intl.NumberFormat("en-GB").format(replay.total);
+  return (
+    <details className="rounded-radius-m bg-surface-raised px-space-3 py-space-2">
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-[16px] font-bold">
+        {`Chat replay · ${count} ${replay.total === 1 ? "message" : "messages"}`}
+      </summary>
+      {replay.unavailable ? (
+        <p className="m-0 py-space-2 text-[14px] text-ink-muted">
+          The chat replay can’t be shown right now.
+        </p>
+      ) : (
+        <>
+          <ol
+            aria-label="Chat replay"
+            className="m-0 flex list-none flex-col gap-space-2 p-0 py-space-2"
+          >
+            {replay.messages.map((m) => (
+              <li key={m.id} className="text-[16px] leading-[22px] break-words">
+                <span className="font-bold">{m.author}</span>{" "}
+                <span>{m.body}</span>
+              </li>
+            ))}
+          </ol>
+          {replay.total > replay.messages.length ? (
+            <p className="m-0 pb-space-2 text-[14px] text-ink-muted">
+              {`Showing the first ${new Intl.NumberFormat("en-GB").format(replay.messages.length)} of ${count} messages.`}
+            </p>
+          ) : null}
+        </>
+      )}
+    </details>
+  );
+}

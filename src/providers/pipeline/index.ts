@@ -1,3 +1,5 @@
+import type { ChatArchiveStore } from "@/community/archive";
+import { createCommunityDailyHandler } from "@/community/daily";
 import { createOpenThreadsHandler } from "@/community/session-threads";
 import { createIdentityDailyHandler } from "@/identity/daily";
 import type { EmailSender } from "@/identity/email/sender";
@@ -33,6 +35,8 @@ export interface PipelineDeps {
    * (the replay harnesses), any use of it throws, so a file is never lost.
    */
   exportStore?: ExportStore;
+  /** The `chat-archives` bucket (M7 decision 5). */
+  chatArchiveStore?: ChatArchiveStore;
   /** Sends the export-ready email; null leaves it queued. */
   emailSender?: EmailSender | null;
 }
@@ -47,7 +51,8 @@ export type PipelineHandlers = Record<
   | "game_checks"
   | "identity_daily"
   | "privacy_export"
-  | "open_threads",
+  | "open_threads"
+  | "community_daily",
   JobHandler
 >;
 
@@ -74,9 +79,13 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
     identity_daily: createIdentityDailyHandler({ exportStore }),
     privacy_export: createPrivacyExportHandler({
       store: exportStore,
+      chatArchives: deps.chatArchiveStore,
       sender: deps.emailSender ?? null,
     }),
-    // The forum's: database only.
+    // The forum's: the threads in the database, archives in their bucket.
     open_threads: createOpenThreadsHandler(),
+    community_daily: createCommunityDailyHandler({
+      chatArchives: deps.chatArchiveStore,
+    }),
   };
 }

@@ -2,8 +2,9 @@ import { z } from "zod";
 import { SCORING_RUN_TRIGGERS } from "@/db/schema";
 
 /**
- * The job kinds of the ingestion pipeline. `open_threads` is the forum's
- * (M7, handler in `src/community/session-threads.ts`).
+ * The job kinds of the ingestion pipeline. `open_threads` and
+ * `community_daily` are the forum's (M7, handlers in
+ * `src/community/session-threads.ts` and `src/community/daily.ts`).
  * `game_lock` and `game_open` are the game layer's (handlers in
  * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
  * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
@@ -34,6 +35,7 @@ export const JOB_KINDS = [
   "identity_daily",
   "privacy_export",
   "open_threads",
+  "community_daily",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -275,6 +277,9 @@ export const emailFlushKey = (at: Date) => {
 
 /** One identity job per UTC day, however many games there are. */
 export const identityDailyKey = (day: string) => `identity_daily:${day}`;
+
+/** One community job per UTC day: the chat archive and, later, upkeep. */
+export const communityDailyKey = (day: string) => `community_daily:${day}`;
 
 /** One data export (DM 6.7): the `privacy_requests` row it fills. */
 export const privacyExportPayload = z.object({

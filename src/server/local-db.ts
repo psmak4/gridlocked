@@ -14,6 +14,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "@/db/schema";
 import type { EmailSender } from "@/identity/email/sender";
+import type { ChatArchiveStore } from "@/community/archive";
 import type { ExportStore } from "@/identity/export";
 import type { ServerDb } from "./db";
 
@@ -49,6 +50,17 @@ export const localExportStore: ExportStore = {
   },
   async delete(key) {
     localExportFiles.delete(key);
+  },
+};
+
+/** The `chat-archives` bucket for a local run: files in memory. */
+export const localChatArchiveFiles = new Map<string, Uint8Array>();
+export const localChatArchiveStore: ChatArchiveStore = {
+  async put(key, body) {
+    localChatArchiveFiles.set(key, body);
+  },
+  async get(key) {
+    return localChatArchiveFiles.get(key) ?? null;
   },
 };
 

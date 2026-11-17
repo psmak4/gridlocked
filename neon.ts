@@ -8,6 +8,9 @@
  * - `exports` bucket: data export files (DM 6.7), written by the
  *   `privacy_export` job and downloaded through 7-day presigned links. Same
  *   injected keys as `scheduler`.
+ * - `chat-archives` bucket: each session thread's chat, 30 days on (DM 5.5,
+ *   M7 decision 5), as one gzip JSON-lines file kept for good. Written by the
+ *   `community_daily` job; same injected keys.
  * - `tick` function: bundled from the entry file by the CLI (esbuild). Neon
  *   injects DATABASE_URL. The only `env` declared is the email sender's
  *   (RESEND_API_KEY and EMAIL_FROM), read from the deploy's own environment
@@ -34,6 +37,7 @@ export default defineConfig({
   buckets: {
     scheduler: {},
     exports: {},
+    "chat-archives": {},
   },
   functions: {
     tick: {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { asc, eq, ne, sql } from "drizzle-orm";
+import { asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedWorldWithSeats } from "../../tests/helpers/ingest-2026";
 import { seedSeats2026 } from "../../tests/helpers/seats-2026";
@@ -71,15 +71,20 @@ describe("the sync_calendar handler", () => {
       maxJobs: 1,
       leaseMs: 5 * MIN,
     });
-    // The day's identity job is covered on its own below; here it would be
-    // the next job a later call claims.
-    await t.db.delete(jobs).where(eq(jobs.kind, "identity_daily"));
+    // The day's identity and community jobs are covered on their own below;
+    // here they would be the next jobs a later call claims.
+    await t.db
+      .delete(jobs)
+      .where(inArray(jobs.kind, ["identity_daily", "community_daily"]));
     return result;
   }
 
   const planned = async () =>
     (await allJobs(t.db)).filter(
-      (j) => j.kind !== "sync_calendar" && j.kind !== "identity_daily",
+      (j) =>
+        j.kind !== "sync_calendar" &&
+        j.kind !== "identity_daily" &&
+        j.kind !== "community_daily",
     );
 
   it("enqueues one job per season per day", async () => {
@@ -503,7 +508,11 @@ describe("the sync_calendar handler", () => {
       await runDue(
         t.db,
         clock,
-        { ...pipeline.handlers, identity_daily: async () => {} },
+        {
+          ...pipeline.handlers,
+          identity_daily: async () => {},
+          community_daily: async () => {},
+        },
         { maxJobs: 5, leaseMs: 5 * MIN },
       );
     }
@@ -549,6 +558,17 @@ describe("the sync_calendar handler", () => {
       expect((await daily()).map((j) => j.dedupeKey).sort()).toEqual([
         "identity_daily:2026-02-01",
         "identity_daily:2026-02-02",
+      ]);
+    });
+
+    it("sync_calendar queues one community_daily a day, after the identity job", async () => {
+      await syncKeeping(T0);
+      await syncKeeping(new Date(T0.getTime() + 2 * HOUR));
+      const community = (await allJobs(t.db)).filter(
+        (j) => j.kind === "community_daily",
+      );
+      expect(community).toMatchObject([
+        { dedupeKey: "community_daily:2026-02-01", runAt: T0, payload: {} },
       ]);
     });
   });
