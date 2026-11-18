@@ -13,7 +13,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * trust, purge, prune and export-expiry steps (handler in `src/identity/daily.ts`), and
  * `privacy_export` builds one data export (handler in `src/identity/export.ts`).
  * `lock_reminder` tells team owners a lock is near (handler in
- * `src/notifications/lock-reminder.ts`). `normalize` and `validate`
+ * `src/notifications/lock-reminder.ts`), and `push_fanout` sends Web Push
+ * for new notifications (handler in `src/notifications/push.ts`). `normalize` and `validate`
  * are reserved: the poll and finalize jobs run both steps inline, so nothing
  * enqueues them yet.
  *
@@ -39,6 +40,7 @@ export const JOB_KINDS = [
   "open_threads",
   "community_daily",
   "lock_reminder",
+  "push_fanout",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -316,3 +318,22 @@ export const lockReminderKey = (
   eventId: string,
   hours: LockReminderHours,
 ) => `lock_reminder:${gameId}:${eventId}:${hours}h`;
+
+/**
+ * One push batch: personal notifications by id, or one broadcast to every
+ * subscription, in pages after `afterId` (DM 2.10: at most 100 sends a job).
+ */
+export const pushFanoutPayload = z.union([
+  z.object({ notificationIds: z.array(z.string().min(1)).min(1).max(100) }),
+  z.object({
+    broadcastId: z.string().min(1),
+    afterId: z.string().min(1).optional(),
+  }),
+]);
+export type PushFanoutPayload = z.infer<typeof pushFanoutPayload>;
+
+/** A notification's push; `at` tells a grouped row's later counts apart. */
+export const pushNotificationKey = (notificationId: string, at: Date) =>
+  `push:n:${notificationId}:${at.toISOString()}`;
+export const pushBroadcastKey = (broadcastId: string, afterId?: string) =>
+  `push:b:${broadcastId}:${afterId ?? "start"}`;

@@ -8,7 +8,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import { requireComplete, requireWritable } from "@/identity/viewer";
-import { markReadInput } from "@/notifications/inputs";
+import {
+  markReadInput,
+  subscribeInput,
+  unsubscribeInput,
+} from "@/notifications/inputs";
+import { subscribe, unsubscribe } from "@/notifications/push";
 import { inbox, markRead, type InboxItem } from "@/notifications/read";
 import { getViewer, withRequestNow } from "./session";
 
@@ -30,5 +35,45 @@ export const markReadFn = createServerFn({ method: "POST" })
     setResponseHeader("Cache-Control", "private, no-store");
     const viewer = requireWritable(await getViewer(getRequest()));
     await withRequestNow((db, now) => markRead(db, now, viewer, data));
+    return { ok: true as const };
+  });
+
+/**
+ * The site's VAPID public key, or null until the owner sets
+ * `VAPID_PUBLIC_KEY` (then push stays off). Public by design.
+ */
+export const getPushKeyFn = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ publicKey: string | null }> => {
+    setResponseHeader("Cache-Control", "private, no-store");
+    return { publicKey: process.env.VAPID_PUBLIC_KEY || null };
+  },
+);
+
+/** "Turn on": keeps this browser's subscription. */
+export const subscribePushFn = createServerFn({ method: "POST" })
+  .validator(subscribeInput)
+  .handler(async ({ data }) => {
+    setResponseHeader("Cache-Control", "private, no-store");
+    const request = getRequest();
+    const viewer = requireWritable(await getViewer(request));
+    const userAgent = request.headers.get("user-agent")?.slice(0, 256) ?? null;
+    await withRequestNow((db, now) =>
+      subscribe(db, now, viewer, {
+        endpoint: data.endpoint,
+        p256dh: data.keys.p256dh,
+        auth: data.keys.auth,
+        userAgent,
+      }),
+    );
+    return { ok: true as const };
+  });
+
+/** "Turn off" for this browser. */
+export const unsubscribePushFn = createServerFn({ method: "POST" })
+  .validator(unsubscribeInput)
+  .handler(async ({ data }) => {
+    setResponseHeader("Cache-Control", "private, no-store");
+    const viewer = requireWritable(await getViewer(getRequest()));
+    await withRequestNow((db) => unsubscribe(db, viewer, data));
     return { ok: true as const };
   });

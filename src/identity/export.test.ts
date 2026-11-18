@@ -144,6 +144,7 @@ describe("data export (DM 6.7)", () => {
         "postRevisions",
         "posts",
         "privacyRequests",
+        "pushSubscriptions",
         "profile",
         "reports",
         "restrictions",

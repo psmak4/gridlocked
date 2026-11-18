@@ -23,11 +23,14 @@ export function NotificationsScreen({
   items,
   markAll,
   open,
+  onPush,
 }: {
   items: InboxItem[];
   markAll: () => void;
   /** Marks it read, then goes to it. */
   open: (item: InboxItem) => void;
+  /** Opens "Turn on push"; absent before hydration. */
+  onPush?: () => void;
 }) {
   const unread = items.some((i) => i.unread);
   return (
@@ -40,6 +43,26 @@ export function NotificationsScreen({
           </Button>
         ) : null}
       </div>
+      <section
+        aria-labelledby="push-card-heading"
+        className="flex flex-col gap-space-2 rounded-radius-m bg-surface-raised px-[14px] py-space-3"
+      >
+        <h2 id="push-card-heading" className={eyebrow}>
+          Push
+        </h2>
+        <p className="m-0 text-[16px] leading-[22px]">
+          Lock reminders and scores on your phone, without the results.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          className="self-start"
+          disabled={!onPush}
+          onClick={onPush}
+        >
+          Turn on push
+        </Button>
+      </section>
       {items.length === 0 ? (
         <EmptyState
           title="Nothing yet"

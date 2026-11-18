@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   BackLink,
@@ -8,7 +8,9 @@ import {
   ScreenHeader,
   Title,
 } from "@/components/account-layout";
+import { PushSheet, pushRowWords } from "@/components/push-sheet";
 import {
+  ButtonRow,
   LinkRow,
   Panel,
   saveMessage,
@@ -17,6 +19,8 @@ import {
 import { ThemeChoice } from "@/components/theme-choice";
 import { Switch } from "@/components/ui/switch";
 import { privateHeaders } from "@/lib/private-headers";
+import { loadPush, pushOff, pushOn } from "@/lib/push-actions";
+import type { PushState } from "@/lib/push-client";
 import { settingsGuard } from "@/lib/settings-guard";
 import { useHydrated } from "@/lib/use-hydrated";
 import { getSettings, saveSpoilerSetting } from "@/server/account";
@@ -30,8 +34,8 @@ export const Route = createFileRoute("/settings/")({
 });
 
 /**
- * Settings (wave 4): Spoilers, Favorites, Appearance, and Account and
- * privacy. Push notifications join in M7.
+ * Settings (wave 4): Spoilers, Favorites, Notifications (push, M7),
+ * Appearance, and Account and privacy.
  */
 function Settings() {
   const settings = Route.useLoaderData();
@@ -41,6 +45,20 @@ function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [pushOpen, setPushOpen] = useState(false);
+  const [push, setPush] = useState<PushState | "no_key" | null>(null);
+  // The row says what this browser has, once it can be asked.
+  useEffect(() => {
+    if (!hydrated) return;
+    loadPush()
+      .then(setPush)
+      .catch(() => setPush(null));
+  }, [hydrated]);
+  const track = (fn: () => Promise<PushState | "no_key">) => async () => {
+    const next = await fn();
+    setPush(next);
+    return next;
+  };
 
   async function saveSpoilers(next: boolean) {
     if (saving) return;
@@ -107,6 +125,24 @@ function Settings() {
             />
           </Panel>
         </SettingsGroup>
+
+        <SettingsGroup id="notifications-heading" title="Notifications">
+          <Panel>
+            <ButtonRow
+              label="Push notifications"
+              sub={pushRowWords(push)}
+              disabled={!hydrated}
+              onClick={() => setPushOpen(true)}
+            />
+          </Panel>
+        </SettingsGroup>
+        <PushSheet
+          open={pushOpen}
+          onClose={() => setPushOpen(false)}
+          load={loadPush}
+          turnOn={track(pushOn)}
+          turnOff={track(pushOff)}
+        />
 
         <SettingsGroup id="appearance-heading" title="Appearance">
           <ThemeChoice />
