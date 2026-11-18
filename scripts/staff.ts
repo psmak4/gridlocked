@@ -22,7 +22,10 @@
  *   STAFF_CHANGE='{"username":"ada","role":"admin"}' \
  *   STAFF_REASON='Runs the beta league' STAFF_ACTOR=<you> pnpm staff set-role
  *
- * set-role is the one command without STAFF_EVENT. It prints only the
+ *   STAFF_CHANGE='{"action":"mute","target":"user","username":"ada","until":"2026-11-20T12:00:00Z"}' \
+ *   STAFF_REASON='Abuse in the race thread' STAFF_ACTOR=<you> pnpm staff moderate
+ *
+ * set-role and moderate are the commands without STAFF_EVENT. It prints only the
  * username and the role change, never an email.
  *
  * Keys are Jolpica's. Without STAFF_DRY_RUN=false it only resolves the keys
@@ -42,7 +45,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length !== 1) {
     throw new Error(
-      "usage: pnpm staff <substitute|seats|override|insert|set-role> (inputs in STAFF_* variables)",
+      "usage: pnpm staff <substitute|seats|override|insert|set-role|moderate> (inputs in STAFF_* variables)",
     );
   }
   const cmd = parseStaffEnv(args[0], process.env);

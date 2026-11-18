@@ -77,6 +77,26 @@ export const RESTRICTION_KINDS = ["mute", "chat_ban", "thread_ban"] as const;
 export const QUEUE_SOURCES = ["reports", "filter", "auto_hide"] as const;
 export type QueueSource = (typeof QUEUE_SOURCES)[number];
 
+/** DM 5.9: the moderation log's actions. */
+export const MOD_ACTIONS = [
+  "remove",
+  "restore",
+  "lock",
+  "unlock",
+  "pin",
+  "unpin",
+  "move",
+  "retitle",
+  "warn",
+  "mute",
+  "unmute",
+  "chat_ban",
+  "ban",
+  "unban",
+  "set_trust_level",
+] as const;
+export type ModAction = (typeof MOD_ACTIONS)[number];
+
 export const QUEUE_STATUSES = ["open", "actioned", "dismissed"] as const;
 export type QueueStatus = (typeof QUEUE_STATUSES)[number];
 
@@ -461,5 +481,43 @@ export const reports = pgTable(
       .where(sql`${t.reporterUserId} is not null`),
     index("reports_queue_item_idx").on(t.queueItemId),
     index("reports_reporter_idx").on(t.reporterUserId),
+  ],
+);
+
+/**
+ * DM 5.9: the moderation log. Users see the actions taken against them; each
+ * also writes `audit_log`. `moderator_user_id` is null for the system and for
+ * the staff workflow, whose login is in the audit row.
+ */
+export const modActions = pgTable(
+  "mod_actions",
+  {
+    id: uuid("id").primaryKey(),
+    moderatorUserId: uuid("moderator_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    action: text("action", { enum: MOD_ACTIONS }).notNull(),
+    targetType: text("target_type", { enum: REPORT_TARGET_TYPES }).notNull(),
+    targetId: uuid("target_id").notNull(),
+    targetUserId: uuid("target_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    reason: text("reason").notNull(),
+    until: timestamp("until", { withTimezone: true }),
+    queueItemId: uuid("queue_item_id").references(() => modQueueItems.id, {
+      onDelete: "restrict",
+    }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("mod_actions_action_check", oneOf(t.action, MOD_ACTIONS)),
+    check(
+      "mod_actions_target_type_check",
+      oneOf(t.targetType, REPORT_TARGET_TYPES),
+    ),
+    check("mod_actions_reason_check", sql`length(btrim(${t.reason})) > 0`),
+    index("mod_actions_target_user_idx").on(t.targetUserId, t.createdAt),
+    index("mod_actions_target_idx").on(t.targetType, t.targetId),
+    index("mod_actions_moderator_idx").on(t.moderatorUserId),
   ],
 );

@@ -16,6 +16,12 @@ name: Staff action (staging)
 #   "user" | "moderator" | "admin"}. No event (leave it empty). It refuses
 #   `system` and demoting the last admin, and signs the user out everywhere.
 #   The output shows only the username and the role change.
+# - moderate: one moderation action (DM 5.9). No event. change = {"action":
+#   "remove" | "restore" | "lock" | "unlock" | "pin" | "unpin" | "move" |
+#   "retitle" | "warn" | "mute" | "unmute" | "chat_ban", "target": "post" |
+#   "thread" | "chat_message" | "user", "id": "<uuid>" (or "username" for a
+#   user), "until": "<ISO time>" (mute, chat_ban), "title" (retitle),
+#   "category": "<slug>" (move), "queueItem": "<uuid>", "version": <n>}
 # Keys are Jolpica's (`ocon`, `haas`); event is `season/round`. A dry run by
 # default. Every write is audited with the reason and the login of whoever
 # started the run. Run the deploy first: this does not migrate.
@@ -25,9 +31,9 @@ on:
       command:
         description: The action
         type: choice
-        options: [substitute, seats, override, insert, set-role]
+        options: [substitute, seats, override, insert, set-role, moderate]
       event:
-        description: Event as season/round, e.g. 2026/19 (empty for set-role)
+        description: Event as season/round, e.g. 2026/19 (empty for set-role and moderate)
         type: string
         required: false
       change:

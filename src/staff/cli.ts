@@ -5,6 +5,12 @@ import { setRole } from "@/identity/roles";
 import type { Db } from "@/db/types";
 import { resultFieldsSchema, type ResultFields } from "@/results/overrides";
 import { SCORED_KINDS } from "@/results/validate";
+import {
+  moderateChange,
+  runModerate,
+  type ModerateChange,
+  type ModerateReport,
+} from "./moderate";
 import { insertResult, overrideResult } from "./results";
 import { changeSeats, recordSubstitution, type StaffActor } from "./roster";
 import type { SessionMove, StaffDeps } from "./revalidate";
@@ -92,6 +98,13 @@ const common = {
 
 export type StaffCommand =
   | {
+      command: "moderate";
+      change: ModerateChange;
+      reason: string;
+      actor: StaffActor;
+      dryRun: boolean;
+    }
+  | {
       command: "set-role";
       change: z.infer<typeof setRoleChange>;
       reason: string;
@@ -144,6 +157,7 @@ export type StaffCommand =
 
 const COMMANDS = {
   "set-role": setRoleChange,
+  moderate: moderateChange,
   substitute: substituteChange,
   seats: seatsChange,
   override: overrideChange,
@@ -165,11 +179,12 @@ export function parseStaffEnv(
     );
   }
   const name = command as keyof typeof COMMANDS;
-  // The workflow always sends STAFF_EVENT; set-role ignores it.
+  // The workflow always sends STAFF_EVENT; set-role and moderate ignore it.
   const { STAFF_EVENT, ...rest } = common;
+  const noEvent = name === "set-role" || name === "moderate";
   const schema = z.object({
     ...rest,
-    ...(name === "set-role" ? {} : { STAFF_EVENT }),
+    ...(noEvent ? {} : { STAFF_EVENT }),
     STAFF_CHANGE: json(COMMANDS[name] as z.ZodType),
   });
   const parsed = schema.safeParse(env);
@@ -191,6 +206,15 @@ export function parseStaffEnv(
     ...(e.STAFF_REQUEST_ID ? { requestId: e.STAFF_REQUEST_ID } : {}),
   };
   const dryRun = e.STAFF_DRY_RUN !== "false";
+  if (name === "moderate") {
+    return {
+      command: name,
+      reason: e.STAFF_REASON,
+      actor,
+      dryRun,
+      change: e.STAFF_CHANGE as ModerateChange,
+    };
+  }
   if (name === "set-role") {
     return {
       command: name,
@@ -245,6 +269,7 @@ async function sessionOf(
 }
 
 export type StaffRunReport =
+  | ModerateReport
   | {
       dryRun: boolean;
       command: "set-role";
@@ -276,6 +301,7 @@ export async function runStaffCommand(
   deps: StaffDeps = {},
 ): Promise<StaffRunReport> {
   if (cmd.command === "set-role") return runSetRole(db, now, cmd);
+  if (cmd.command === "moderate") return runModerate(db, now, cmd);
   const eventId = await resolve(db, "event", cmd.event);
   if (cmd.command === "substitute") {
     const resolved = {
