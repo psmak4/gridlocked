@@ -89,7 +89,8 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
 
-      # Applies neon.ts: the `scheduler` bucket, the `tick` function (bundled
+      # Applies neon.ts: the `scheduler`, `exports` and `chat-archives`
+      # buckets (a missing one is created), the `tick` function (bundled
       # from src/jobs/functions/tick.ts) and the two schedule triggers. The
       # email secrets reach the function through neon.ts; a missing secret is
       # passed as "" and neon.ts treats it as unset.

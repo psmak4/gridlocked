@@ -9,6 +9,7 @@ import { republishIfEarlier, type DueStore } from "./due-times";
 import { planEventJobs } from "./plan-event";
 import {
   gameChecksKey,
+  communityDailyKey,
   identityDailyKey,
   syncCalendarKey,
   syncCalendarPayload,
@@ -130,6 +131,13 @@ export function createSyncCalendarHandler(
     await enqueue(db, {
       kind: "identity_daily",
       dedupeKey: identityDailyKey(started.toISOString().slice(0, 10)),
+      runAt: started,
+      payload: {},
+    });
+    // And the forum's: the chat archive (M7).
+    await enqueue(db, {
+      kind: "community_daily",
+      dedupeKey: communityDailyKey(started.toISOString().slice(0, 10)),
       runAt: started,
       payload: {},
     });

@@ -22,6 +22,7 @@
  * else gets 403. The handler is idempotent: a redelivered or overlapping
  * occurrence finds its jobs already claimed or done.
  */
+import type { ChatArchiveStore } from "@/community/archive";
 import { createDb } from "@/db/client";
 import { createGameHandlers } from "@/game/jobs";
 import { createEmailFlushHandler } from "@/identity/email/outbox";
@@ -34,6 +35,7 @@ import {
   createPipelineClients,
   createSharedLimiters,
 } from "@/providers/pipeline/clients";
+import { createChatArchiveStoreFromEnv } from "@/providers/storage/chat-archive-store";
 import { createDueStoreFromEnv } from "@/providers/storage/due-store";
 import { createExportStoreFromEnv } from "@/providers/storage/export-store";
 import type { DueStore } from "../due-times";
@@ -172,7 +174,11 @@ export function createTickHandler(
  */
 export function depsFromEnv(
   env: Record<string, string | undefined>,
-  overrides: { store?: DueStore; exportStore?: ExportStore } = {},
+  overrides: {
+    store?: DueStore;
+    exportStore?: ExportStore;
+    chatArchiveStore?: ChatArchiveStore;
+  } = {},
 ): TickHandlerDeps {
   // The direct connection, as Neon advises for multi-round-trip transactions
   // (the job queue's claims and the results writes); the pooled URL is the
@@ -185,6 +191,9 @@ export function depsFromEnv(
   const store = overrides.store ?? createDueStoreFromEnv(env);
   // The `exports` bucket, with the same injected keys (DM 6.7).
   const exportStore = overrides.exportStore ?? createExportStoreFromEnv(env);
+  // The `chat-archives` bucket, likewise (DM 5.5, M7 decision 5).
+  const chatArchiveStore =
+    overrides.chatArchiveStore ?? createChatArchiveStoreFromEnv(env);
   const database = createDb(url);
   // One limiter per provider for this isolate, re-seeded from the request log
   // at each wake, so overlapping invocations on one warm process share them.
@@ -208,6 +217,7 @@ export function depsFromEnv(
           fetch: (input, init) => fetch(input, init),
         })),
         exportStore,
+        chatArchiveStore,
         emailSender,
       }),
       // The game's lock and open jobs; they read the database only.

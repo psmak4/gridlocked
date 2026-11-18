@@ -131,6 +131,15 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // The website's read of the chat-archives bucket (M7): the one file in
+    // src/server that wires a storage adapter. Better Auth stays allowed, as
+    // for the rest of src/server.
+    files: ["src/server/chat-archive.ts"],
+    rules: {
+      "no-restricted-imports": "off",
+    },
+  },
+  {
     // The fantasy e2e harness wires the replay to the providers, as the
     // replay harness does. Local builds only (VITE_LOCAL_DB=1): the one file
     // in src/server that may import src/providers.

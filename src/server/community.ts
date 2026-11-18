@@ -20,6 +20,7 @@ import {
   threadPageInput,
   voteInput,
 } from "@/community/inputs";
+import { chatReplay, type ChatReplay } from "@/community/archive";
 import { sendChat, slowModeFor, chatState } from "@/community/chat";
 import { composerData, writerOf } from "@/community/composer";
 import { categoryList, threadList, threadPage } from "@/community/read";
@@ -30,6 +31,7 @@ import type { Viewer } from "@/identity/viewer";
 import { readerOf } from "@/play/weekend";
 import { getSetting } from "@/settings";
 import type { ServerDb } from "./db";
+import { webChatArchiveStore } from "./chat-archive";
 import { cacheFor } from "./public-cache";
 import { getViewer, withRequestNow } from "./session";
 
@@ -144,9 +146,25 @@ export const getThreadFn = createServerFn({ method: "GET" })
             : Math.max(limits.slowModeSeconds.tl0, state?.slowMode ?? 0),
         };
       }
+      // After the chat, its replay under the discussion (DM 5.5): only once
+      // the thread is shown, so a cover never sends the chat along.
+      let replay: ChatReplay | null = null;
+      if (
+        page &&
+        page.mode === "discussion" &&
+        !page.hidden &&
+        page.thread.sessionId
+      ) {
+        replay = await chatReplay(
+          db,
+          await webChatArchiveStore(),
+          data.threadId,
+        );
+      }
       return {
         page,
         chat,
+        replay,
         writer: writerOf(viewer),
         /** The request's clock, for "3 h" and the like. */
         now: now.toISOString(),

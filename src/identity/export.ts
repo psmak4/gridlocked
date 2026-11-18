@@ -9,6 +9,7 @@
  * columns by name. Logs carry counts and error names only.
  */
 import { and, eq, gt, inArray, isNotNull, lte, ne, or } from "drizzle-orm";
+import { archivedChatOf, type ChatArchiveStore } from "@/community/archive";
 import { privacyRequests, profiles, users } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { privacyExportKey, privacyExportPayload } from "@/jobs/kinds";
@@ -140,16 +141,26 @@ export async function requestExport(
 /**
  * The export: one section per registry entry with an `exportAs`, in registry
  * order. Posts, votes, chat and notification preferences join in M7 through
- * the same registry.
+ * the same registry. Chat that was archived (DM 5.5) is read from its files
+ * and joins the live messages under `chat`, marked `archived`.
  */
 export async function buildExport(
   db: Db,
   userId: string,
+  opts: { chatArchives?: ChatArchiveStore } = {},
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const entry of PERSONAL_DATA) {
     if (entry.exportAs === null || !entry.read) continue;
     out[entry.exportAs] = await entry.read(db, userId);
+  }
+  if (opts.chatArchives) {
+    const archived = await archivedChatOf(db, opts.chatArchives, userId);
+    const live = Array.isArray(out.chat) ? (out.chat as unknown[]) : [];
+    out.chat = [
+      ...live,
+      ...archived.map((line) => ({ ...line, status: "archived" })),
+    ];
   }
   return out;
 }
@@ -164,10 +175,13 @@ export async function buildExport(
  */
 export function createPrivacyExportHandler({
   store,
+  chatArchives,
   sender,
   log = console.log,
 }: {
   store: ExportStore;
+  /** The `chat-archives` bucket, for archived chat (DM 5.5). */
+  chatArchives?: ChatArchiveStore;
   sender: EmailSender | null;
   log?: (line: string) => void;
 }): JobHandler {
@@ -212,7 +226,7 @@ export function createPrivacyExportHandler({
 
     const data = {
       generatedAt: now.toISOString(),
-      ...(await buildExport(db, row.userId)),
+      ...(await buildExport(db, row.userId, { chatArchives })),
     };
     await store.put(key, JSON.stringify(data, null, 2));
     const url = await store.presign(key, EXPORT_LINK_SECONDS);
