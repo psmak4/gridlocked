@@ -4,8 +4,9 @@
  * named list of steps, each in its own try, then throws if any failed so the
  * runner retries the whole job; every step is safe to run again.
  *
- * M7 Task 9 brings the chat archive; Task 15 adds reputation, trust inputs,
- * hot rank and retention.
+ * M7 Task 9 brings the chat archive; Task 15 adds reputation, the hot-rank
+ * sweep and retention. (Trust's forum counts are read by `identity_daily`,
+ * so a day's reputation reaches trust levels the next day.)
  */
 import type { Db } from "@/db/types";
 import type { JobHandler } from "@/jobs/runner";
@@ -14,10 +15,16 @@ import {
   unconfiguredChatArchiveStore,
   type ChatArchiveStore,
 } from "./archive";
+import { pruneCommunity, recomputeReputation, refreshHotRank } from "./upkeep";
 
 type Step = (db: Db, now: Date) => Promise<string>;
 
-export const COMMUNITY_DAILY_STEPS = ["archiveChats"] as const;
+export const COMMUNITY_DAILY_STEPS = [
+  "archiveChats",
+  "reputation",
+  "hotRank",
+  "prune",
+] as const;
 export type CommunityDailyStep = (typeof COMMUNITY_DAILY_STEPS)[number];
 
 const defaultSteps = (
@@ -26,6 +33,14 @@ const defaultSteps = (
   archiveChats: async (db, now) => {
     const archived = await archiveDueChats(db, store, now);
     return `archived=${archived}`;
+  },
+  reputation: async (db) => `changed=${await recomputeReputation(db)}`,
+  hotRank: async (db, now) => `changed=${await refreshHotRank(db, now)}`,
+  prune: async (db, now) => {
+    const n = await pruneCommunity(db, now);
+    return Object.entries(n)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(" ");
   },
 });
 

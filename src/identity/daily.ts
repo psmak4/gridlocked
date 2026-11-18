@@ -26,6 +26,7 @@ import {
   type ExportStore,
 } from "./export";
 import { recomputeTrustLevels } from "./trust";
+import { forumTrustCounts } from "@/community/upkeep";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -99,7 +100,9 @@ export type DailyStep = (typeof DAILY_STEPS)[number];
 
 const defaultSteps = (store: ExportStore): Record<DailyStep, Step> => ({
   recomputeTrustLevels: async (db, now) => {
-    const { changed } = await recomputeTrustLevels(db, now);
+    const { changed } = await recomputeTrustLevels(db, now, {
+      counts: forumTrustCounts,
+    });
     return `changed=${changed}`;
   },
   purgeIncompleteAccounts: async (db, now) => {

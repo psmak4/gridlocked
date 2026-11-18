@@ -25,6 +25,7 @@ import { newId } from "@/lib/ids";
 import { SESSION_LABELS } from "@/play/weekend";
 import { broadcast } from "@/notifications/write";
 import { pathLabel } from "./mentions";
+import { hotRank } from "./upkeep";
 
 type SessionStatus = (typeof SESSION_STATUSES)[number];
 
@@ -162,6 +163,7 @@ export async function openSessionThreads(
         eventId,
         chatOpensAt: opensAt,
         chatClosesAt: closesAt,
+        hotRank: hotRank(0, now),
         lastActivityAt: now,
         createdAt: now,
       });

@@ -31,7 +31,8 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { SessionKind } from "@/reference/calendar-types";
-import { SESSION_LABELS } from "@/play/weekend";
+import type { Viewer } from "@/identity/viewer";
+import { SESSION_LABELS, readerOf } from "@/play/weekend";
 import {
   SPOILER_WINDOW_DAYS,
   isRevealed,
@@ -655,4 +656,78 @@ function layOut(
   for (const r of roots.filter((p) => p.isOpening)) walk(r);
   for (const r of roots.filter((p) => !p.isOpening).sort(bySort)) walk(r);
   return out;
+}
+
+// --- The profile's recent posts ---------------------------------------------------
+
+export type RecentPost = {
+  postId: string;
+  threadId: string;
+  /** Spoiler-safe for the viewer, like the thread list. */
+  title: string;
+  /** The first words of the post, without Markdown. */
+  excerpt: string;
+  href: string;
+  createdAt: string;
+};
+
+const EXCERPT_CHARS = 120;
+
+function excerptOf(body: string): string {
+  const plain = body
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`>#~|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > EXCERPT_CHARS
+    ? `${plain.slice(0, EXCERPT_CHARS - 1).trimEnd()}…`
+    : plain;
+}
+
+/** The viewer's newest visible posts in public threads (M7 Task 15). */
+export async function recentPosts(
+  db: Db,
+  now: Date,
+  viewer: Viewer,
+  limit = 5,
+): Promise<RecentPost[]> {
+  const reader = readerOf(viewer);
+  const rows = await db
+    .select({
+      postId: posts.id,
+      body: posts.body,
+      postedAt: posts.createdAt,
+      threadId: threads.id,
+      id: threads.id,
+      title: threads.title,
+      spoilerSafeTitle: threads.spoilerSafeTitle,
+      containsSpoilers: threads.containsSpoilers,
+      sessionId: threads.sessionId,
+      sessionKind: sessions.kind,
+      eventName: events.name,
+      createdAt: threads.createdAt,
+    })
+    .from(posts)
+    .innerJoin(threads, eq(threads.id, posts.threadId))
+    .leftJoin(sessions, eq(sessions.id, threads.sessionId))
+    .leftJoin(events, eq(events.id, sessions.eventId))
+    .where(
+      and(
+        eq(posts.authorUserId, viewer.userId),
+        eq(posts.status, "visible"),
+        inArray(threads.status, ["open", "locked", "archived"]),
+        isNull(threads.leagueId),
+      ),
+    )
+    .orderBy(desc(posts.createdAt), desc(posts.id))
+    .limit(limit);
+  const hidden = await hiddenThreads(db, now, reader, rows);
+  return rows.map((r) => ({
+    postId: r.postId,
+    threadId: r.threadId,
+    title: hidden.has(r.id) ? hiddenTitle(r).title : r.title,
+    excerpt: excerptOf(r.body),
+    href: `/t/${r.threadId}#post-${r.postId}`,
+    createdAt: r.postedAt.toISOString(),
+  }));
 }

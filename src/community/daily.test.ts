@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createCommunityDailyHandler } from "./daily";
+import { COMMUNITY_DAILY_STEPS, createCommunityDailyHandler } from "./daily";
+
+/** Every step stubbed, so no test touches a database. */
+const quiet = Object.fromEntries(
+  COMMUNITY_DAILY_STEPS.map((name) => [name, async () => "ok"]),
+);
 
 const ctx = {
   db: {},
@@ -12,9 +17,14 @@ describe("the community daily job", () => {
     const lines: string[] = [];
     await createCommunityDailyHandler({
       log: (line) => lines.push(line),
-      steps: { archiveChats: async () => "archived=2" },
+      steps: { ...quiet, archiveChats: async () => "archived=2" },
     })(job, ctx);
-    expect(lines).toEqual(["community_daily: archiveChats archived=2"]);
+    expect(lines).toEqual([
+      "community_daily: archiveChats archived=2",
+      "community_daily: reputation ok",
+      "community_daily: hotRank ok",
+      "community_daily: prune ok",
+    ]);
   });
 
   it("a failing step fails the job for the runner's retry, with no message logged", async () => {
@@ -22,6 +32,7 @@ describe("the community daily job", () => {
     const handler = createCommunityDailyHandler({
       log: (line) => lines.push(line),
       steps: {
+        ...quiet,
         archiveChats: async () => {
           throw new TypeError("fan@example.com broke it");
         },
@@ -30,6 +41,12 @@ describe("the community daily job", () => {
     await expect(handler(job, ctx)).rejects.toThrow(
       "community_daily: archiveChats failed",
     );
-    expect(lines).toEqual(["community_daily: archiveChats failed (TypeError)"]);
+    // The other steps still run.
+    expect(lines).toEqual([
+      "community_daily: archiveChats failed (TypeError)",
+      "community_daily: reputation ok",
+      "community_daily: hotRank ok",
+      "community_daily: prune ok",
+    ]);
   });
 });

@@ -14,6 +14,7 @@ import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { writeAudit } from "@/audit/log";
 import { accountActions, type AccountAction } from "@/community/moderate";
+import { recentPosts, type RecentPost } from "@/community/read";
 import {
   authAccounts,
   constructors,
@@ -145,6 +146,8 @@ export type ProfileState = {
   teams: { slot: number; name: string; status: "active" | "retired" }[];
   /** "Actions on your account" (DM 5.9), newest first. */
   actions: AccountAction[];
+  /** The viewer's newest forum posts, spoiler-safe. */
+  posts: RecentPost[];
 };
 
 const regionNames = new Intl.DisplayNames(["en"], {
@@ -201,6 +204,7 @@ async function favoriteNames(
 
 export async function profileState(
   db: Db,
+  now: Date,
   viewer: Viewer | null,
 ): Promise<ProfileState> {
   const v = requireComplete(viewer);
@@ -219,6 +223,7 @@ export async function profileState(
     favorites: await favoriteNames(db, v.profile),
     teams: await profileTeams(db, v.userId),
     actions: await accountActions(db, v.userId),
+    posts: await recentPosts(db, now, v),
   };
 }
 
