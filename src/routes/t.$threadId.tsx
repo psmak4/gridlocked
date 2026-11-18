@@ -1,5 +1,5 @@
 import { createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
 import { ChatReplayView, ChatView } from "@/components/community/chat-view";
@@ -20,6 +20,10 @@ import {
   PostTree,
   type PostActions,
 } from "@/components/community/post-tree";
+import {
+  ReportSheet,
+  type ReportTarget,
+} from "@/components/community/report-sheet";
 import { Badge } from "@/components/ui/badge";
 import { SpoilerCover } from "@/components/ui/spoiler-cover";
 import { Tabs } from "@/components/ui/tabs";
@@ -28,7 +32,13 @@ import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
 import { SHOW_ALL, shownIds, showsAll, withShown } from "@/lib/shown-ids";
 import { createRefreshChannel } from "@/realtime/refresh";
-import { getThreadFn, replyFn, sendChatFn, voteFn } from "@/server/community";
+import {
+  getThreadFn,
+  replyFn,
+  reportFn,
+  sendChatFn,
+  voteFn,
+} from "@/server/community";
 import { markSessionsWatched } from "@/server/play";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -87,6 +97,7 @@ function ThreadRoute() {
   const router = useRouter();
   const { thread } = page;
   const open = thread.status === "open";
+  const [reporting, setReporting] = useState<ReportTarget | null>(null);
 
   const actions: PostActions = {
     writer,
@@ -101,6 +112,21 @@ function ThreadRoute() {
       return result;
     },
     continueHref: (postId) => `/t/${thread.id}?post=${postId}`,
+    // The opening post stands for its thread.
+    report: (post) =>
+      setReporting(
+        post.isOpening
+          ? {
+              targetType: "thread",
+              targetId: thread.id,
+              what: "this thread",
+            }
+          : {
+              targetType: "post",
+              targetId: post.id,
+              what: `the post by ${post.author ?? "a deleted user"}`,
+            },
+      ),
   };
 
   // Chat mode (HLD §7.2): one channel for the page while it lasts. It is
@@ -215,6 +241,13 @@ function ThreadRoute() {
             phrase={thread.sessionPhrase ?? "the session"}
             signInHref={`/sign-in?next=${encodeURIComponent(`/t/${thread.id}`)}`}
             onClosed={() => void router.invalidate()}
+            onReport={(m) =>
+              setReporting({
+                targetType: "chat_message",
+                targetId: m.id,
+                what: `the message from ${m.author}`,
+              })
+            }
           />
         ) : (
           <>
@@ -284,6 +317,12 @@ function ThreadRoute() {
           </>
         )}
       </ForumPage>
+      <ReportSheet
+        target={reporting}
+        visitor={writer === null}
+        onClose={() => setReporting(null)}
+        submit={(data) => reportFn({ data })}
+      />
     </AppShell>
   );
 }

@@ -12,6 +12,7 @@ import { newId } from "@/lib/ids";
 import { getSetting } from "@/settings";
 import { refuse, type CommunityRefusal } from "./errors";
 import { checkPost, effectiveLevel } from "./gate";
+import { queueFilterHits } from "./moderation";
 import { DELETED_USER } from "./read";
 import { threadMode } from "./session-threads";
 
@@ -203,6 +204,19 @@ export async function sendChat(
       status: "visible",
       createdAt: now,
     });
+    // A flag doesn't stop a message; it queues it for a look.
+    await queueFilterHits(
+      t,
+      now,
+      {
+        type: "chat_message",
+        id,
+        authorUserId: v.userId,
+        threadId: input.threadId,
+        body,
+      },
+      gate.flags,
+    );
     const [me] = await t
       .select({
         username: users.username,

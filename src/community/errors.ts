@@ -18,6 +18,7 @@ export const COMMUNITY_ERROR_CODES = [
   "chat_closed",
   "not_found",
   "forbidden",
+  "captcha_failed",
 ] as const;
 
 export type CommunityErrorCode = (typeof COMMUNITY_ERROR_CODES)[number];

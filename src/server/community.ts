@@ -16,6 +16,7 @@ import {
   deletePostInput,
   editPostInput,
   replyInput,
+  reportInput,
   sendChatInput,
   threadPageInput,
   voteInput,
@@ -24,16 +25,17 @@ import { chatReplay, type ChatReplay } from "@/community/archive";
 import { sendChat, slowModeFor, chatState } from "@/community/chat";
 import { composerData, writerOf } from "@/community/composer";
 import { categoryList, threadList, threadPage } from "@/community/read";
+import { report } from "@/community/moderation";
 import { deleteOwnPost, editPost, reply } from "@/community/posts";
 import { createThread } from "@/community/threads";
 import { vote } from "@/community/votes";
-import type { Viewer } from "@/identity/viewer";
+import { requireWritable, type Viewer } from "@/identity/viewer";
 import { readerOf } from "@/play/weekend";
 import { getSetting } from "@/settings";
 import type { ServerDb } from "./db";
 import { webChatArchiveStore } from "./chat-archive";
 import { cacheFor } from "./public-cache";
-import { getViewer, withRequestNow } from "./session";
+import { getViewer, requestCaptchaVerifier, withRequestNow } from "./session";
 
 // Not exported: only the handlers below use it, so the client build drops it.
 async function communityAction<T>(
@@ -70,6 +72,24 @@ export const deletePostFn = createServerFn({ method: "POST" })
   .validator(deletePostInput)
   .handler(({ data }) =>
     communityAction((db, now, viewer) => deleteOwnPost(db, now, viewer, data)),
+  );
+
+/**
+ * "Report" on a post, a thread or a chat message (DM 5.8). Anyone can
+ * report: logged out, it takes a contact address and the bot check.
+ */
+export const reportFn = createServerFn({ method: "POST" })
+  .validator(reportInput)
+  .handler(({ data }) =>
+    communityAction((db, now, viewer) => {
+      const { contact, captchaToken, ...input } = data;
+      const reporter = viewer
+        ? requireWritable(viewer)
+        : { contact: contact ?? "", captchaToken: captchaToken ?? "" };
+      return report(db, now, reporter, input, {
+        verifyCaptcha: requestCaptchaVerifier(),
+      });
+    }),
   );
 
 /** A live chat message (DM 5.5). */

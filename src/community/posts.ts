@@ -11,6 +11,7 @@ import { newId } from "@/lib/ids";
 import { refuse, type CommunityRefusal } from "./errors";
 import { checkPost } from "./gate";
 import { pathLabel, writeMentions } from "./mentions";
+import { noteEdit, queueFilterHits } from "./moderation";
 
 export type ReplyInput = {
   threadId: string;
@@ -92,6 +93,18 @@ export async function reply(
       createdAt: now,
     });
     await writeMentions(t, postId, v.userId, body);
+    await queueFilterHits(
+      t,
+      now,
+      {
+        type: "post",
+        id: postId,
+        authorUserId: v.userId,
+        threadId: input.threadId,
+        body,
+      },
+      gate.flags,
+    );
     return { ok: true, postId, status };
   });
 }
@@ -163,6 +176,26 @@ export async function editPost(
         .where(eq(threads.id, post.threadId));
     }
     await writeMentions(t, input.postId, v.userId, body);
+    // The queue keeps what was first reported; the new text joins it, and a
+    // hit on the new text is queued against the post (or its thread).
+    await noteEdit(t, now, {
+      postId: input.postId,
+      threadId: post.threadId,
+      isOpening: post.isOpening,
+      body,
+    });
+    await queueFilterHits(
+      t,
+      now,
+      {
+        type: post.isOpening ? "thread" : "post",
+        id: post.isOpening ? post.threadId : input.postId,
+        authorUserId: v.userId,
+        threadId: post.threadId,
+        body,
+      },
+      gate.flags,
+    );
   });
   return { ok: true, status };
 }

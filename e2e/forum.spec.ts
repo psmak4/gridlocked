@@ -108,3 +108,95 @@ test("starting a thread needs an account", async ({ page }) => {
   await page.goto("/forum/new?category=fantasy");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
 });
+
+test('report a post from the "…" menu', async ({ page, browser }) => {
+  // The author starts a thread and comments on it.
+  const author = await createAccount(page.context().request);
+  await setTrust(page.context().request, author.email, 1);
+  await page.goto("/forum/new?category=general");
+  await pageHydrated(page);
+  await page.getByLabel("Title").fill("Who wins in Baku?");
+  await page.getByLabel("Post").fill("Street circuits are a lottery.");
+  await page.getByRole("button", { name: "Post thread" }).click();
+  await expect(page).toHaveURL(/\/t\/[0-9a-f-]{36}$/);
+  const threadUrl = page.url();
+  await page.getByLabel("Add a comment").fill("Buy cheap tickets here");
+  await page.getByRole("button", { name: "Post comment" }).click();
+  const comments = page.getByRole("list", { name: "Comments" });
+  await expect(comments).toContainText("Buy cheap tickets here");
+  // Nobody reports their own post.
+  await expect(
+    comments.getByRole("button", { name: /^More for the post/ }),
+  ).toHaveCount(0);
+
+  // A TL3 regular reports the comment: their report alone hides it.
+  const other = await browser.newContext();
+  const reader = await other.newPage();
+  const regular = await createAccount(other.request);
+  await setTrust(other.request, regular.email, 3);
+  await reader.goto(threadUrl);
+  await pageHydrated(reader);
+  const more = reader
+    .getByRole("list", { name: "Comments" })
+    .getByRole("button", { name: `More for the post by ${author.username}` });
+  await hydrated(more);
+  await more.click();
+  await reader.getByRole("menuitem", { name: "Report" }).click();
+  const sheet = reader.getByRole("dialog", { name: "Report" });
+  await expect(sheet).toContainText(
+    `Reporting the post by ${author.username}.`,
+  );
+  const send = sheet.getByRole("button", { name: "Send report" });
+  await expect(send).toBeDisabled();
+  await sheet.getByRole("radio", { name: "Spam" }).check();
+  await sheet.getByLabel("Anything else? (optional)").fill("Ticket spam.");
+  await send.click();
+  await expect(sheet.getByRole("status")).toHaveText(
+    "Thanks. A moderator will take a look.",
+  );
+  await sheet.getByRole("button", { name: "Done" }).click();
+  await expect(sheet).toHaveCount(0);
+
+  // It's hidden pending review.
+  await reader.reload();
+  await expect(reader.getByRole("list", { name: "Comments" })).toHaveCount(0);
+  await expect(reader.getByText("Buy cheap tickets here")).toHaveCount(0);
+  await other.close();
+});
+
+test("a logged-out visitor reports with an email address", async ({
+  page,
+  browser,
+}) => {
+  const author = await createAccount(page.context().request);
+  await setTrust(page.context().request, author.email, 1);
+  await page.goto("/forum/new?category=general");
+  await pageHydrated(page);
+  await page.getByLabel("Title").fill("Pit stop records");
+  await page.getByLabel("Post").fill("Under two seconds now.");
+  await page.getByRole("button", { name: "Post thread" }).click();
+  await expect(page).toHaveURL(/\/t\/[0-9a-f-]{36}$/);
+  const threadUrl = page.url();
+
+  const visitor = await browser.newContext();
+  const reader = await visitor.newPage();
+  await reader.goto(threadUrl);
+  await pageHydrated(reader);
+  const more = reader.getByRole("button", {
+    name: `More for the post by ${author.username}`,
+  });
+  await hydrated(more);
+  await more.click();
+  await reader.getByRole("menuitem", { name: "Report" }).click();
+  const sheet = reader.getByRole("dialog", { name: "Report" });
+  await expect(sheet).toContainText("Reporting this thread.");
+  await sheet.getByRole("radio", { name: "Copyright infringement" }).check();
+  const send = sheet.getByRole("button", { name: "Send report" });
+  await expect(send).toBeDisabled();
+  await sheet.getByLabel("Your email").fill("reporter@example.test");
+  await send.click();
+  await expect(sheet.getByRole("status")).toHaveText(
+    "Thanks. A moderator will take a look.",
+  );
+  await visitor.close();
+});

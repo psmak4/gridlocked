@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { systemTimer } from "@/lib/clock";
 import type { ChatMessageView, RealtimeChannel } from "@/realtime/channel";
 import { CHAT_BODY_MAX } from "@/community/limits";
+import { MoreMenu } from "./more-menu";
 import { FAILED, refusalWords } from "./forum-words";
 
 const time = new Intl.DateTimeFormat(undefined, {
@@ -44,6 +45,7 @@ export function ChatView({
   phrase,
   signInHref,
   onClosed,
+  onReport,
 }: {
   threadId: string;
   channel: RealtimeChannel;
@@ -54,6 +56,8 @@ export function ChatView({
   signInHref: string;
   /** Chat closed under the viewer: show the discussion instead. */
   onClosed: () => void;
+  /** "Report" in a message's "…" menu. */
+  onReport?: (message: ChatMessageView) => void;
 }) {
   const id = useId();
   const [messages, setMessages] = useState<ChatMessageView[] | null>(null);
@@ -153,16 +157,24 @@ export function ChatView({
             <li
               key={m.id}
               data-chat={m.id}
-              className="text-[16px] leading-[22px] break-words"
+              className="flex items-start gap-space-1 text-[16px] leading-[22px]"
             >
-              <span className="font-bold">{m.author}</span>{" "}
-              <span>{m.body}</span>{" "}
-              <time
-                dateTime={m.createdAt}
-                className="text-[12px] text-ink-muted"
-              >
-                {time.format(Date.parse(m.createdAt))}
-              </time>
+              <p className="m-0 min-w-0 flex-1 py-[11px] break-words">
+                <span className="font-bold">{m.author}</span>{" "}
+                <span>{m.body}</span>{" "}
+                <time
+                  dateTime={m.createdAt}
+                  className="text-[12px] text-ink-muted"
+                >
+                  {time.format(Date.parse(m.createdAt))}
+                </time>
+              </p>
+              {onReport ? (
+                <MoreMenu
+                  label={`More for the message from ${m.author}`}
+                  onReport={() => onReport(m)}
+                />
+              ) : null}
             </li>
           ))}
         </ol>

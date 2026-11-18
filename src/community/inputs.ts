@@ -5,6 +5,11 @@
  */
 import { z } from "zod";
 import { CHAT_BODY_MAX, POST_BODY_MAX, THREAD_TITLE_MAX } from "./limits";
+import {
+  REPORT_NOTE_MAX,
+  REPORT_REASONS,
+  REPORTABLE_TYPES,
+} from "./report-values";
 
 const body = z.string().trim().min(1).max(POST_BODY_MAX);
 
@@ -25,6 +30,19 @@ export const replyInput = z.object({
 export const sendChatInput = z.object({
   threadId: z.uuid(),
   body: z.string().trim().min(1).max(CHAT_BODY_MAX),
+});
+
+/**
+ * "Report" (DM 5.8). Signed in, the reporter is the viewer; logged out, a
+ * contact address and a Turnstile token come with it.
+ */
+export const reportInput = z.object({
+  targetType: z.enum(REPORTABLE_TYPES),
+  targetId: z.uuid(),
+  reason: z.enum(REPORT_REASONS),
+  note: z.string().trim().max(REPORT_NOTE_MAX).optional(),
+  contact: z.email().max(254).optional(),
+  captchaToken: z.string().max(4096).optional(),
 });
 
 export const editPostInput = z.object({ postId: z.uuid(), body });
