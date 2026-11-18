@@ -7,8 +7,11 @@ const dbTests = [
   "src/db/**/*.test.{ts,tsx}",
   "src/identity/**/*.test.{ts,tsx}",
   "src/server/**/*.test.{ts,tsx}",
-  "src/game/score-jobs.test.ts",
-  "src/game/scoring-invariants.test.ts",
+  // The game and play tests mostly build a game (some replay a season), so
+  // they need the database limits too; a 10 s hook timed out on CI.
+  "src/game/**/*.test.{ts,tsx}",
+  "src/play/**/*.test.{ts,tsx}",
+  "src/lib/resolve-clock.test.ts",
   "src/audit/**/*.test.{ts,tsx}",
   "src/staff/**/*.test.{ts,tsx}",
   "src/jobs/**/*.test.{ts,tsx}",
