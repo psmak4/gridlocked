@@ -143,3 +143,25 @@ export const notificationPreferences = pgTable(
     ),
   ],
 );
+
+/**
+ * DM 5.11: a browser that said yes to push. One row per endpoint; a 404 or
+ * 410 from the push service deletes it, and other failures count up.
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: createdAt(),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    failureCount: integer("failure_count").notNull().default(0),
+  },
+  (t) => [index("push_subscriptions_user_idx").on(t.userId)],
+);

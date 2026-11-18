@@ -41,6 +41,7 @@ import {
   lineupPicks,
   modActions,
   notificationPreferences,
+  pushSubscriptions,
   notifications,
   lineupVersions,
   poolAssets,
@@ -817,6 +818,30 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
       await tx
         .delete(notificationPreferences)
         .where(eq(notificationPreferences.userId, userId));
+    },
+  },
+  {
+    table: "push_subscriptions",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "the browsers they turned push on for (DM 5.11): a device's address, meaningless without the account",
+    exportAs: "pushSubscriptions",
+    async read(db, userId) {
+      // The device and dates; never the endpoint or its keys.
+      return db
+        .select({
+          device: pushSubscriptions.userAgent,
+          createdAt: pushSubscriptions.createdAt,
+          lastSuccessAt: pushSubscriptions.lastSuccessAt,
+        })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId))
+        .orderBy(asc(pushSubscriptions.createdAt), asc(pushSubscriptions.id));
+    },
+    async scrub(tx, { userId }) {
+      await tx
+        .delete(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId));
     },
   },
   {

@@ -1,6 +1,10 @@
+import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
 import { NotificationsScreen } from "@/components/notifications-screen";
+import { PushSheet } from "@/components/push-sheet";
+import { loadPush, pushOff, pushOn } from "@/lib/push-actions";
+import { useHydrated } from "@/lib/use-hydrated";
 import { privateHeaders } from "@/lib/private-headers";
 import { getNotificationsFn, markReadFn } from "@/server/notifications";
 
@@ -17,6 +21,8 @@ export const Route = createFileRoute("/notifications")({
 function NotificationsRoute() {
   const { items } = Route.useLoaderData();
   const router = useRouter();
+  const hydrated = useHydrated();
+  const [pushOpen, setPushOpen] = useState(false);
   return (
     <AppShell active="notifications">
       <NotificationsScreen
@@ -29,6 +35,14 @@ function NotificationsRoute() {
           if (item.unread) await markReadFn({ data: { ids: [item.id] } });
           window.location.assign(item.href);
         }}
+        onPush={hydrated ? () => setPushOpen(true) : undefined}
+      />
+      <PushSheet
+        open={pushOpen}
+        onClose={() => setPushOpen(false)}
+        load={loadPush}
+        turnOn={pushOn}
+        turnOff={pushOff}
       />
     </AppShell>
   );

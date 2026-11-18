@@ -118,3 +118,20 @@ test("a logged-out visitor is sent to sign in first", async ({ page }) => {
   await page.goto("/notifications");
   await expect(page).toHaveURL(/\/sign-in\?next=(%2F|\/)notifications$/);
 });
+
+test("Settings has a push row, and with no key the sheet says so", async ({
+  page,
+}) => {
+  await createAccount(page.context().request);
+  await page.goto("/settings");
+  await pageHydrated(page);
+  const row = page.getByRole("button", { name: /Push notifications/ });
+  await expect(row).toBeEnabled();
+  await row.click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("status")).toHaveText(
+    "Push isn't available yet.",
+  );
+  await expect(sheet.getByRole("button", { name: "Turn on" })).toHaveCount(0);
+  await expectNoSeriousAxeViolations(page);
+});

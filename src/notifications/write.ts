@@ -10,9 +10,12 @@ import {
   notificationPreferences,
   notifications,
   profiles,
+  pushSubscriptions,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { SYSTEM_USER_ID } from "@/identity/system";
+import { pushBroadcastKey, pushNotificationKey } from "@/jobs/kinds";
+import { enqueue } from "@/jobs/queue";
 import { newId } from "@/lib/ids";
 import type {
   BroadcastKind,
@@ -118,6 +121,7 @@ export async function notify(
   };
   if (!input.groupKey) {
     await db.insert(notifications).values(values);
+    await queuePush(db, now, input.userId, values.id);
     return values.id;
   }
   // One unread row per group: a new one counts into it and moves it to the top.
@@ -136,7 +140,33 @@ export async function notify(
       },
     })
     .returning({ id: notifications.id });
+  await queuePush(db, now, input.userId, row!.id);
   return row!.id;
+}
+
+/**
+ * A `push_fanout` job for a notification, if its person has a device: the
+ * job decides the rest (their push setting, the keys), outside this
+ * transaction's hurry.
+ */
+async function queuePush(
+  db: Db,
+  now: Date,
+  userId: string,
+  notificationId: string,
+): Promise<void> {
+  const [device] = await db
+    .select({ id: pushSubscriptions.id })
+    .from(pushSubscriptions)
+    .where(eq(pushSubscriptions.userId, userId))
+    .limit(1);
+  if (!device) return;
+  await enqueue(db, {
+    kind: "push_fanout",
+    dedupeKey: pushNotificationKey(notificationId, now),
+    runAt: now,
+    payload: { notificationIds: [notificationId] },
+  });
 }
 
 export type BroadcastInput = {
@@ -170,5 +200,18 @@ export async function broadcast(
     })
     .onConflictDoNothing()
     .returning({ id: broadcasts.id });
-  return written.length > 0 ? id : null;
+  if (written.length === 0) return null;
+  // Its push, if anyone has a device at all.
+  const [device] = await db
+    .select({ id: pushSubscriptions.id })
+    .from(pushSubscriptions)
+    .limit(1);
+  if (!device) return id;
+  await enqueue(db, {
+    kind: "push_fanout",
+    dedupeKey: pushBroadcastKey(id),
+    runAt: now,
+    payload: { broadcastId: id },
+  });
+  return id;
 }

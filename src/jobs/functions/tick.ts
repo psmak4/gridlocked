@@ -47,6 +47,8 @@ import {
   type TickOptions,
   type TickResult,
 } from "../tick";
+import { createPushFanoutHandler } from "@/notifications/push";
+import { pushSenderFromEnv } from "@/notifications/web-push-sender";
 
 /**
  * A wake is bounded in real time, because handlers have no heartbeat and
@@ -201,6 +203,9 @@ export function depsFromEnv(
   // Null until RESEND_API_KEY and EMAIL_FROM are set (neon.ts declares them
   // only then); the flush job then leaves the outbox rows queued.
   const emailSender = senderFromEnv(env, (input, init) => fetch(input, init));
+  // Null until VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set (neon.ts
+  // declares them only then); `push_fanout` then sends nothing.
+  const pushSender = pushSenderFromEnv(env);
   return {
     db: () => database.db(),
     store,
@@ -223,6 +228,7 @@ export function depsFromEnv(
       // The game's lock and open jobs; they read the database only.
       ...createGameHandlers(),
       email_flush: createEmailFlushHandler(emailSender),
+      push_fanout: createPushFanoutHandler(pushSender),
     }),
   };
 }
