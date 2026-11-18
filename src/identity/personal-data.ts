@@ -40,6 +40,9 @@ import {
   legalDocuments,
   lineupPicks,
   modActions,
+  notificationPreferences,
+  pushSubscriptions,
+  notifications,
   lineupVersions,
   poolAssets,
   postMentions,
@@ -749,6 +752,97 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
     onDelete: "keep",
     why: `queue items a moderator resolved: ${KEEP_STAFF}`,
     exportAs: null,
+  },
+  {
+    table: "notifications",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "the person's inbox (DM 5.11): means nothing without the account, and kept only 90 days anyway",
+    exportAs: "notifications",
+    async read(db, userId) {
+      const rows = await db
+        .select({
+          kind: notifications.kind,
+          count: notifications.count,
+          data: notifications.data,
+          createdAt: notifications.createdAt,
+          readAt: notifications.readAt,
+        })
+        .from(notifications)
+        .where(eq(notifications.userId, userId))
+        .orderBy(asc(notifications.createdAt), asc(notifications.id));
+      return rows.map((r) => ({
+        ...r,
+        createdAt: iso(r.createdAt),
+        readAt: iso(r.readAt),
+      }));
+    },
+    async scrub(tx, { userId }) {
+      await tx.delete(notifications).where(eq(notifications.userId, userId));
+    },
+  },
+  {
+    table: "notifications",
+    userColumn: "actor_user_id",
+    onDelete: "scrub",
+    why: "who replied or mentioned: cleared, so another person's inbox no longer points at the account (names are read when shown, never stored)",
+    exportAs: null,
+    async scrub(tx, { userId }) {
+      await tx
+        .update(notifications)
+        .set({ actorUserId: null })
+        .where(eq(notifications.actorUserId, userId));
+    },
+  },
+  {
+    table: "notification_preferences",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "which notifications they turned on or off (DM 5.11): settings that mean nothing without the account",
+    exportAs: "notificationPreferences",
+    async read(db, userId) {
+      return db
+        .select({
+          kind: notificationPreferences.kind,
+          channel: notificationPreferences.channel,
+          enabled: notificationPreferences.enabled,
+        })
+        .from(notificationPreferences)
+        .where(eq(notificationPreferences.userId, userId))
+        .orderBy(
+          asc(notificationPreferences.kind),
+          asc(notificationPreferences.channel),
+        );
+    },
+    async scrub(tx, { userId }) {
+      await tx
+        .delete(notificationPreferences)
+        .where(eq(notificationPreferences.userId, userId));
+    },
+  },
+  {
+    table: "push_subscriptions",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "the browsers they turned push on for (DM 5.11): a device's address, meaningless without the account",
+    exportAs: "pushSubscriptions",
+    async read(db, userId) {
+      // The device and dates; never the endpoint or its keys.
+      return db
+        .select({
+          device: pushSubscriptions.userAgent,
+          createdAt: pushSubscriptions.createdAt,
+          lastSuccessAt: pushSubscriptions.lastSuccessAt,
+        })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId))
+        .orderBy(asc(pushSubscriptions.createdAt), asc(pushSubscriptions.id));
+    },
+    async scrub(tx, { userId }) {
+      await tx
+        .delete(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId));
+    },
   },
   {
     table: "session_watch_marks",

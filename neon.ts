@@ -13,11 +13,12 @@
  *   `community_daily` job; same injected keys.
  * - `tick` function: bundled from the entry file by the CLI (esbuild). Neon
  *   injects DATABASE_URL. The only `env` declared is the email sender's
- *   (RESEND_API_KEY and EMAIL_FROM), read from the deploy's own environment
- *   (the staging workflow passes them from the `staging` secrets). When
- *   either is unset or empty (GitHub passes a missing secret as ""), no `env`
- *   is declared and the function leaves queued emails queued. No value is
- *   ever written in this file.
+ *   (RESEND_API_KEY and EMAIL_FROM) and Web Push's (VAPID_PUBLIC_KEY and
+ *   VAPID_PRIVATE_KEY), read from the deploy's own environment (the staging
+ *   workflow passes them from the `staging` secrets). Each pair is declared
+ *   only when both are set and not empty (GitHub passes a missing secret as
+ *   ""); without it the function leaves queued emails queued, or sends no
+ *   push. No value is ever written in this file.
  * - two schedule triggers (UTC), both on the `tick` function: a tick every
  *   minute, and the safety tick at minute 7 of every sixth hour (M1 result).
  *
@@ -32,6 +33,15 @@ const emailEnv =
   resendApiKey && emailFrom
     ? { RESEND_API_KEY: resendApiKey, EMAIL_FROM: emailFrom }
     : undefined;
+// Web Push (M7 decision 4): the owner's VAPID pair, both or neither.
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+const pushEnv =
+  vapidPublicKey && vapidPrivateKey
+    ? { VAPID_PUBLIC_KEY: vapidPublicKey, VAPID_PRIVATE_KEY: vapidPrivateKey }
+    : undefined;
+const functionEnv =
+  emailEnv || pushEnv ? { ...emailEnv, ...pushEnv } : undefined;
 
 export default defineConfig({
   buckets: {
@@ -43,7 +53,7 @@ export default defineConfig({
     tick: {
       name: "Scheduler tick",
       source: "./src/jobs/functions/tick.ts",
-      ...(emailEnv ? { env: emailEnv } : {}),
+      ...(functionEnv ? { env: functionEnv } : {}),
     },
   },
   triggers: {

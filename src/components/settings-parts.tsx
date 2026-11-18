@@ -116,6 +116,34 @@ export function LinkRow({
   );
 }
 
+/** A row like `LinkRow` that opens something on this page (a sheet). */
+export function ButtonRow({
+  label,
+  sub,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  sub?: string | null;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex min-h-[52px] w-full items-center justify-between gap-space-3 border-b border-line bg-transparent px-[14px] py-[4px] text-left text-ink outline-none last:border-b-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
+    >
+      <span className="flex min-w-0 flex-col">
+        <span className="text-[16px] font-bold">{label}</span>
+        {sub ? <span className="text-[14px] text-ink-muted">{sub}</span> : null}
+      </span>
+      {chevron}
+    </button>
+  );
+}
+
 /** A line of help under a heading or field. */
 export function Help({ children }: { children: ReactNode }) {
   return (

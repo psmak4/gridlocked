@@ -10,6 +10,7 @@ import {
 import type { Db } from "@/db/types";
 import { GameError, isUniqueViolation, refusal } from "@/game/errors";
 import { newId } from "@/lib/ids";
+import { notify } from "@/notifications/write";
 
 // Leagues and their members (DM 4.5, 4.6). `public` and `private` leagues are
 // made and joined by users; the `auto_*` ones follow a profile; the `global`
@@ -228,6 +229,19 @@ export async function joinLeague(
         leftAt: null,
         source: "user",
       });
+      if (league.ownerUserId) {
+        await notify(tx, now, {
+          userId: league.ownerUserId,
+          kind: "league_activity",
+          actorUserId: input.userId,
+          refs: { leagueId: league.id, teamId: team.id },
+          data: {
+            team: team.name,
+            league: league.name,
+            leagueSlug: league.slug,
+          },
+        });
+      }
       return { leagueId: league.id, membershipId };
     });
   } catch (error) {

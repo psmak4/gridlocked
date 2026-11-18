@@ -11,6 +11,7 @@ import {
   assetPrices,
   events,
   gameEvents,
+  jobs,
   poolAssets,
   rulesetVersions,
   sessions,
@@ -66,8 +67,12 @@ describe("the game jobs (HLD §3.3)", () => {
     clock.set(instant);
     await setSimulatedClock(t.db, instant);
   }
-  const run = (maxJobs = 20, handlers = createGameHandlers()) =>
-    runDue(t.db, clock, handlers, { maxJobs, leaseMs: LEASE });
+  // The lock reminders (`src/notifications`) have tests of their own; here
+  // they'd run ahead of the lock jobs these count.
+  const run = async (maxJobs = 20, handlers = createGameHandlers()) => {
+    await t.db.delete(jobs).where(eq(jobs.kind, "lock_reminder"));
+    return runDue(t.db, clock, handlers, { maxJobs, leaseMs: LEASE });
+  };
   const gameJobs = async () =>
     (await allJobs(t.db)).filter((j) => j.kind.startsWith("game_"));
   const jobByKey = async (key: string) =>
