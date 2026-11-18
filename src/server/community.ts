@@ -117,6 +117,7 @@ export const getCategoryFn = createServerFn({ method: "GET" })
         sort: data.sort,
         cursor: data.cursor,
         show: data.show,
+        showAll: data.showAll,
       }),
       writer: writerOf(viewer),
       /** The request's clock, for "3 h" and the like. */

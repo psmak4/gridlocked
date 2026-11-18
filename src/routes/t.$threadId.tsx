@@ -3,6 +3,10 @@ import { useMemo } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
 import { ChatReplayView, ChatView } from "@/components/community/chat-view";
+import {
+  DeviceRevealSwitch,
+  useDeviceReveal,
+} from "@/components/community/device-reveal";
 import { ReplyForm } from "@/components/community/composer";
 import {
   ForumPage,
@@ -22,7 +26,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { systemTimer } from "@/lib/clock";
 import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
-import { shownIds, withShown } from "@/lib/shown-ids";
+import { SHOW_ALL, shownIds, showsAll, withShown } from "@/lib/shown-ids";
 import { createRefreshChannel } from "@/realtime/refresh";
 import { getThreadFn, replyFn, sendChatFn, voteFn } from "@/server/community";
 import { markSessionsWatched } from "@/server/play";
@@ -49,6 +53,7 @@ export const Route = createFileRoute("/t/$threadId")({
     post: search.post,
     sort: search.sort ?? "best",
     show: shownIds(search.show),
+    showAll: showsAll(search.show),
   }),
   loader: async ({ params, deps }) => {
     if (!UUID.test(params.threadId)) throw notFound();
@@ -58,6 +63,7 @@ export const Route = createFileRoute("/t/$threadId")({
         postId: deps.post ?? null,
         sort: deps.sort,
         ...(deps.show.length > 0 ? { show: deps.show } : {}),
+        ...(deps.showAll ? { showAll: true } : {}),
       },
     });
     if (!result.page) throw notFound();
@@ -76,7 +82,7 @@ const commentsWords = (n: number) =>
 /** A thread (wave 4): the opening post, then the comments as a tree. */
 function ThreadRoute() {
   const { page, writer, nowMs, chat, replay } = Route.useLoaderData();
-  const { sort } = Route.useLoaderDeps();
+  const { sort, showAll } = Route.useLoaderDeps();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const { thread } = page;
@@ -118,6 +124,29 @@ function ThreadRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [thread.id, chatting, chat?.windowSeconds],
   );
+
+  // A visitor's device choice (HLD §7.3): "all" asks for `?show=all`.
+  const visitor = writer === null;
+  const setShow = (show: string | undefined) =>
+    void navigate({
+      search: (prev) => ({ ...prev, show }),
+      replace: true,
+      resetScroll: false,
+    });
+  useDeviceReveal({
+    visitor,
+    hasHidden: page.hidden,
+    showAll,
+    showEverything: () => setShow(SHOW_ALL),
+  });
+  const deviceSwitch =
+    visitor && (page.hidden || showAll) ? (
+      <DeviceRevealSwitch
+        on={showAll}
+        onShowAll={() => setShow(SHOW_ALL)}
+        onShowSafe={() => setShow(undefined)}
+      />
+    ) : null;
 
   const opening = page.posts.find((p) => p.isOpening);
   const replies = page.posts.filter((p) => !p.isOpening);
@@ -175,7 +204,9 @@ function ThreadRoute() {
                 : undefined
             }
           />
-        ) : chatting && channel ? (
+        ) : null}
+        {deviceSwitch}
+        {page.hidden ? null : chatting && channel ? (
           <ChatView
             threadId={thread.id}
             channel={channel}

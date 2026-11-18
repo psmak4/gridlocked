@@ -167,6 +167,29 @@ describe("forum read models", () => {
     expect(JSON.stringify(page)).not.toMatch(/Ferrari|Leclerc|Forza/);
   });
 
+  it("a visitor's ?show=all reveals every thread on the page, and only that page", async () => {
+    const { threadId } = await spoilerThread();
+    const list = await threadList(t.db, at(1), null, {
+      categorySlug: "race-weekend",
+      sort: "new",
+      showAll: true,
+    });
+    expect(list?.threads[0]).toMatchObject({
+      hidden: false,
+      title: "What a win for Ferrari",
+    });
+    const page = await threadPage(t.db, at(1), null, {
+      threadId,
+      showAll: true,
+    });
+    expect(page?.hidden).toBe(false);
+    expect(page?.posts.map((p) => p.html)).toEqual(["<p>Leclerc at home!</p>"]);
+    // The default page is still the safe one.
+    expect((await threadPage(t.db, at(1), null, { threadId }))?.hidden).toBe(
+      true,
+    );
+  });
+
   it("a reveal returns them", async () => {
     const { threadId } = await spoilerThread();
     await answer(bea, threadId, "Forza!", 1);
