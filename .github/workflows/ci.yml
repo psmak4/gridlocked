@@ -15,10 +15,11 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    # The database tests take 13-17 min on a 2-core runner, depending on the
-    # runner, and the e2e suites about 5 more. One job, since "checks" is the
+    # The unit and database tests take 15-20 min on a 2-core runner,
+    # depending on the runner, and the e2e suites 6-8 more: green runs took
+    # 24-28 min by M7, so 30 cut one off. One job, since "checks" is the
     # check the ruleset requires.
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
