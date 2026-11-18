@@ -16,6 +16,7 @@ import {
   signInButton,
   verifyByEmail,
 } from "./helpers/accounts";
+import { setTrust } from "./helpers/forum";
 
 test.beforeEach(async ({ page }) => {
   await ownAddress(page);
@@ -38,6 +39,32 @@ test.describe("profile", () => {
     await expect(page.getByText("JOINED")).toBeVisible();
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(heading(page)).toHaveText("Settings");
+  });
+
+  test("recent posts link to what I wrote, and start empty", async ({
+    page,
+  }) => {
+    const account = await createAccount(page.context().request);
+    await setTrust(page.context().request, account.email, 1);
+    await page.goto("/profile");
+    await expect(page.getByText("No posts yet.")).toBeVisible();
+
+    await page.goto("/forum/new?category=general");
+    await pageHydrated(page);
+    await page.getByLabel("Title").fill("Undercut or overcut at Monza");
+    await page.getByLabel("Post").fill("The **undercut**, every time.");
+    await page.getByRole("button", { name: "Post thread" }).click();
+    await expect(page).toHaveURL(/\/t\/[0-9a-f-]{36}$/);
+
+    await page.goto("/profile");
+    const posts = page.getByRole("region", { name: "RECENT POSTS" });
+    const link = posts.getByRole("link", {
+      name: /Undercut or overcut at Monza/,
+    });
+    await expect(link).toContainText("The undercut, every time.");
+    await expectNoSeriousAxeViolations(page);
+    await link.click();
+    await expect(page).toHaveURL(/\/t\/[0-9a-f-]{36}#post-/);
   });
 
   test("a logged-out visitor is sent to sign in", async ({ page, request }) => {

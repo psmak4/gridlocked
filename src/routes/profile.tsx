@@ -71,7 +71,7 @@ function initials(username: string): string {
 
 /**
  * The profile (wave 4): the username, the trust level in plain words,
- * favorites, the join date and the teams (M6). Recent posts join in M7.
+ * favorites, the join date, the teams (M6) and recent posts (M7).
  */
 function Profile() {
   const profile = Route.useLoaderData();
@@ -223,6 +223,46 @@ function Profile() {
                 className="font-bold text-heat-text underline-offset-2 hover:underline"
               >
                 Create a team
+              </a>
+              .
+            </p>
+          )}
+        </section>
+
+        <section
+          aria-labelledby="profile-posts"
+          className="flex flex-col gap-space-2"
+        >
+          <h2
+            id="profile-posts"
+            className="m-0 text-[12px] font-bold tracking-[0.12em] text-ink-muted"
+          >
+            RECENT POSTS
+          </h2>
+          {profile.posts.length > 0 ? (
+            <ul className="m-0 flex list-none flex-col gap-space-2 p-0">
+              {profile.posts.map((p) => (
+                <li key={p.postId}>
+                  <a
+                    href={p.href}
+                    className="flex min-h-[44px] flex-col gap-[2px] rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                  >
+                    <span className="font-bold break-words">{p.title}</span>
+                    <span className="text-[14px] leading-[20px] break-words text-ink-muted">
+                      {p.excerpt} · {dateWords.format(Date.parse(p.createdAt))}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[14px] leading-[20px] text-ink-muted">
+              No posts yet.{" "}
+              <a
+                href="/forum"
+                className="font-bold text-heat-text underline-offset-2 hover:underline"
+              >
+                Visit the forum
               </a>
               .
             </p>

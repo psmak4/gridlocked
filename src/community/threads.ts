@@ -12,6 +12,7 @@ import { checkPost } from "./gate";
 import { pathLabel, writeMentions } from "./mentions";
 import { notifyPost } from "@/notifications/forum";
 import { queueFilterHits } from "./moderation";
+import { hotRank } from "./upkeep";
 
 /** What anyone who hasn't revealed the session sees for a spoiler thread. */
 export const SPOILER_THREAD_TITLE = "Spoiler thread";
@@ -76,6 +77,7 @@ export async function createThread(
       authorUserId: v.userId,
       sessionId: input.sessionId ?? null,
       eventId,
+      hotRank: hotRank(0, now),
       lastActivityAt: now,
       createdAt: now,
     });

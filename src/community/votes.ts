@@ -8,6 +8,7 @@ import { posts, postVotes, threads } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { requireWritable, type Viewer } from "@/identity/viewer";
 import { refuse, type CommunityRefusal } from "./errors";
+import { hotRankSql } from "./upkeep";
 
 export type VoteValue = 1 | -1 | 0;
 
@@ -90,7 +91,13 @@ export async function vote(
     if (post.isOpening) {
       await t
         .update(threads)
-        .set({ score: sql`${threads.score} + ${delta}` })
+        .set({
+          score: sql`${threads.score} + ${delta}`,
+          hotRank: hotRankSql(
+            sql`${threads.score} + ${delta}`,
+            threads.createdAt,
+          ),
+        })
         .where(eq(threads.id, post.threadId));
     }
     return { ok: true as const, score: updated!.score };

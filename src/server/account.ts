@@ -218,7 +218,7 @@ export const getProfile = createServerFn({ method: "GET" }).handler(
   async () => {
     privately();
     const viewer = await requestViewer();
-    return withRequestNow((db) => profileState(db, viewer));
+    return withRequestNow((db, now) => profileState(db, now, viewer));
   },
 );
 

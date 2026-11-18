@@ -101,7 +101,7 @@ describe("settings actions (M5 task 13)", () => {
         .update(profiles)
         .set({ trustLevel: 2, countryCode: "IT", reputation: 12 })
         .where(eq(profiles.userId, userId));
-      const state = await profileState(db, await viewerOf(userId));
+      const state = await profileState(db, NOW, await viewerOf(userId));
       expect(state).toMatchObject({
         username: "Late_Braker",
         trust: { name: "Member" },
@@ -122,7 +122,7 @@ describe("settings actions (M5 task 13)", () => {
           favoriteDriverId: seeded.driverIds[0]!,
         })
         .where(eq(profiles.userId, userId));
-      const state = await profileState(db, await viewerOf(userId));
+      const state = await profileState(db, NOW, await viewerOf(userId));
       expect(state.favorites.team?.name).toEqual(expect.any(String));
       expect(state.favorites.team?.color).toMatch(/^#/);
       expect(state.favorites.driver).toEqual(expect.any(String));
@@ -131,9 +131,9 @@ describe("settings actions (M5 task 13)", () => {
     it("lists the teams in the current game by slot", async () => {
       const seeded = await seedLeagueGames(db, NOW);
       const userId = await seedUser(db);
-      expect((await profileState(db, await viewerOf(userId))).teams).toEqual(
-        [],
-      );
+      expect(
+        (await profileState(db, NOW, await viewerOf(userId))).teams,
+      ).toEqual([]);
       await createTeam(db, NOW, {
         gameId: seeded.gameId,
         userId,
@@ -151,7 +151,9 @@ describe("settings actions (M5 task 13)", () => {
         userId,
         name: "Last year",
       });
-      expect((await profileState(db, await viewerOf(userId))).teams).toEqual([
+      expect(
+        (await profileState(db, NOW, await viewerOf(userId))).teams,
+      ).toEqual([
         { slot: 1, name: "First", status: "active" },
         { slot: 2, name: "Second", status: "active" },
       ]);
@@ -161,6 +163,7 @@ describe("settings actions (M5 task 13)", () => {
       const userId = await seedUser(db);
       const state = await profileState(
         db,
+        NOW,
         impersonated(await viewerOf(userId)),
       );
       expect(state.username).toEqual(expect.any(String));
