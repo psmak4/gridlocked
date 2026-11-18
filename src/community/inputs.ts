@@ -4,7 +4,7 @@
  * database code.
  */
 import { z } from "zod";
-import { POST_BODY_MAX, THREAD_TITLE_MAX } from "./limits";
+import { CHAT_BODY_MAX, POST_BODY_MAX, THREAD_TITLE_MAX } from "./limits";
 
 const body = z.string().trim().min(1).max(POST_BODY_MAX);
 
@@ -20,6 +20,11 @@ export const replyInput = z.object({
   threadId: z.uuid(),
   parentPostId: z.uuid().nullish(),
   body,
+});
+
+export const sendChatInput = z.object({
+  threadId: z.uuid(),
+  body: z.string().trim().min(1).max(CHAT_BODY_MAX),
 });
 
 export const editPostInput = z.object({ postId: z.uuid(), body });

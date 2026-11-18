@@ -316,6 +316,13 @@
       "when": 1794890988925,
       "tag": "0044_worried_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794894706766,
+      "tag": "0045_chat_archives",
+      "breakpoints": true
     }
   ]
 }

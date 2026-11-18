@@ -16,9 +16,11 @@ import {
   deletePostInput,
   editPostInput,
   replyInput,
+  sendChatInput,
   threadPageInput,
   voteInput,
 } from "@/community/inputs";
+import { sendChat, slowModeFor, chatState } from "@/community/chat";
 import { composerData, writerOf } from "@/community/composer";
 import { categoryList, threadList, threadPage } from "@/community/read";
 import { deleteOwnPost, editPost, reply } from "@/community/posts";
@@ -26,6 +28,7 @@ import { createThread } from "@/community/threads";
 import { vote } from "@/community/votes";
 import type { Viewer } from "@/identity/viewer";
 import { readerOf } from "@/play/weekend";
+import { getSetting } from "@/settings";
 import type { ServerDb } from "./db";
 import { cacheFor } from "./public-cache";
 import { getViewer, withRequestNow } from "./session";
@@ -65,6 +68,13 @@ export const deletePostFn = createServerFn({ method: "POST" })
   .validator(deletePostInput)
   .handler(({ data }) =>
     communityAction((db, now, viewer) => deleteOwnPost(db, now, viewer, data)),
+  );
+
+/** A live chat message (DM 5.5). */
+export const sendChatFn = createServerFn({ method: "POST" })
+  .validator(sendChatInput)
+  .handler(({ data }) =>
+    communityAction((db, now, viewer) => sendChat(db, now, viewer, data)),
   );
 
 /** Up, down, or 0 to take a vote back. */
@@ -118,12 +128,30 @@ export const getThreadFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const viewer = await getViewer(getRequest());
     cacheFor(viewer);
-    return withRequestNow(async (db, now) => ({
-      page: await threadPage(db, now, readerOf(viewer), data),
-      writer: writerOf(viewer),
-      /** The request's clock, for "3 h" and the like. */
-      now: now.toISOString(),
-    }));
+    return withRequestNow(async (db, now) => {
+      const page = await threadPage(db, now, readerOf(viewer), data);
+      let chat: { windowSeconds: number; slowSeconds: number } | null = null;
+      if (page?.mode === "chat") {
+        const [limits, state] = await Promise.all([
+          getSetting(db, "chat_limits"),
+          chatState(db, data.threadId),
+        ]);
+        chat = {
+          windowSeconds: limits.windowSeconds,
+          // A visitor sees the thread's own; a signed-in one, theirs.
+          slowSeconds: viewer
+            ? await slowModeFor(db, viewer, state?.slowMode ?? null)
+            : Math.max(limits.slowModeSeconds.tl0, state?.slowMode ?? 0),
+        };
+      }
+      return {
+        page,
+        chat,
+        writer: writerOf(viewer),
+        /** The request's clock, for "3 h" and the like. */
+        now: now.toISOString(),
+      };
+    });
   });
 
 /** "New thread": where the viewer may start one, and the spoiler check. */

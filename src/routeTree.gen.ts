@@ -42,6 +42,7 @@ import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
 import { Route as WelcomeFavoritesRouteImport } from './routes/welcome.favorites'
 import { Route as WelcomeSpoilersRouteImport } from './routes/welcome.spoilers'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
+import { Route as ApiChatThreadIdRouteImport } from './routes/api/chat.$threadId'
 import { Route as ApiTestBanRouteImport } from './routes/api/test.ban'
 import { Route as ApiTestClearAcceptancesRouteImport } from './routes/api/test.clear-acceptances'
 import { Route as ApiTestClockRouteImport } from './routes/api/test.clock'
@@ -221,6 +222,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChatThreadIdRoute = ApiChatThreadIdRouteImport.update({
+  id: '/api/chat/$threadId',
+  path: '/api/chat/$threadId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTestBanRoute = ApiTestBanRouteImport.update({
   id: '/api/test/ban',
   path: '/api/test/ban',
@@ -321,6 +327,7 @@ export interface FileRoutesByFullPath {
   '/team/': typeof TeamIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/$threadId': typeof ApiChatThreadIdRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/clock': typeof ApiTestClockRoute
@@ -369,6 +376,7 @@ export interface FileRoutesByTo {
   '/team': typeof TeamIndexRoute
   '/welcome': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/$threadId': typeof ApiChatThreadIdRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/clock': typeof ApiTestClockRoute
@@ -418,6 +426,7 @@ export interface FileRoutesById {
   '/team/': typeof TeamIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/$threadId': typeof ApiChatThreadIdRoute
   '/api/test/ban': typeof ApiTestBanRoute
   '/api/test/clear-acceptances': typeof ApiTestClearAcceptancesRoute
   '/api/test/clock': typeof ApiTestClockRoute
@@ -468,6 +477,7 @@ export interface FileRouteTypes {
     | '/team/'
     | '/welcome/'
     | '/api/auth/$'
+    | '/api/chat/$threadId'
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
     | '/api/test/clock'
@@ -516,6 +526,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/welcome'
     | '/api/auth/$'
+    | '/api/chat/$threadId'
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
     | '/api/test/clock'
@@ -564,6 +575,7 @@ export interface FileRouteTypes {
     | '/team/'
     | '/welcome/'
     | '/api/auth/$'
+    | '/api/chat/$threadId'
     | '/api/test/ban'
     | '/api/test/clear-acceptances'
     | '/api/test/clock'
@@ -613,6 +625,7 @@ export interface RootRouteChildren {
   TeamIndexRoute: typeof TeamIndexRoute
   WelcomeIndexRoute: typeof WelcomeIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiChatThreadIdRoute: typeof ApiChatThreadIdRoute
   ApiTestBanRoute: typeof ApiTestBanRoute
   ApiTestClearAcceptancesRoute: typeof ApiTestClearAcceptancesRoute
   ApiTestClockRoute: typeof ApiTestClockRoute
@@ -861,6 +874,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/chat/$threadId': {
+      id: '/api/chat/$threadId'
+      path: '/api/chat/$threadId'
+      fullPath: '/api/chat/$threadId'
+      preLoaderRoute: typeof ApiChatThreadIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/test/ban': {
       id: '/api/test/ban'
       path: '/api/test/ban'
@@ -989,6 +1009,7 @@ const rootRouteChildren: RootRouteChildren = {
   TeamIndexRoute: TeamIndexRoute,
   WelcomeIndexRoute: WelcomeIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiChatThreadIdRoute: ApiChatThreadIdRoute,
   ApiTestBanRoute: ApiTestBanRoute,
   ApiTestClearAcceptancesRoute: ApiTestClearAcceptancesRoute,
   ApiTestClockRoute: ApiTestClockRoute,
