@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { useAccount } from "./account-context";
-import { bellCount, bellLabel, NotificationBell } from "./notification-bell";
+import { bellCount, NotificationBell } from "./notification-bell";
 import { BottomNav, type BottomNavItem } from "./ui/bottom-nav";
 import { EmptyState } from "./ui/empty-state";
 import { Icon } from "./ui/icons";
@@ -79,7 +79,6 @@ function SideMenu({
           <li>
             <a
               href="/notifications"
-              aria-label={bellLabel(unread)}
               aria-current={bellCurrent ? "page" : undefined}
               className={cn(
                 "flex min-h-[44px] items-center gap-space-3 rounded-radius-m px-space-2 font-sans text-[16px] no-underline",
@@ -90,7 +89,12 @@ function SideMenu({
               )}
             >
               <Icon name="bell" />
+              {/* Named by its words, not an aria-label: the visible text
+                  stays the start of the name (axe label-content-name). */}
               Notifications
+              {unread > 0 ? (
+                <span className="sr-only">{`, ${unread} unread`}</span>
+              ) : null}
               {unread > 0 ? (
                 <span
                   aria-hidden="true"
