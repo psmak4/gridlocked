@@ -44,7 +44,11 @@ import { setSimulatedClock } from "@/replay/clock-loop";
 import { startLiveReplay, type LiveReplay } from "@/providers/replay/live-game";
 import { seedGame2026 } from "@/providers/replay/seed-2026";
 import { withDb } from "./db";
-import { resetLocalDb } from "./local-db";
+import {
+  localChatArchiveFiles,
+  localChatArchiveStore,
+  resetLocalDb,
+} from "./local-db";
 
 export const TEST_GAME_HOOK = "test-hook-game";
 
@@ -67,12 +71,14 @@ export function seedTestGame(at: Date): Promise<{ gameId: string }> {
     withDb(async (db) => {
       live = undefined;
       await resetLocalDb(db);
+      localChatArchiveFiles.clear();
       const { gameId, assetId } = await seedGame2026(db, at, fixturesDir());
       const replay = await startLiveReplay(db, {
         gameId,
         at,
         fixturesDir: fixturesDir(),
         assetId,
+        chatArchiveStore: localChatArchiveStore,
       });
       live = { gameId, replay };
       return { gameId };

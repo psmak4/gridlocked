@@ -148,36 +148,36 @@ export function ChatView({
       ) : messages.length === 0 ? (
         <p className="m-0 text-[16px] text-ink-muted">No messages yet.</p>
       ) : (
-        <ol
-          role="log"
-          aria-label="Chat messages"
-          className="m-0 flex list-none flex-col gap-space-2 p-0"
-        >
-          {messages.map((m) => (
-            <li
-              key={m.id}
-              data-chat={m.id}
-              className="flex items-start gap-space-1 text-[16px] leading-[22px]"
-            >
-              <p className="m-0 min-w-0 flex-1 py-[11px] break-words">
-                <span className="font-bold">{m.author}</span>{" "}
-                <span>{m.body}</span>{" "}
-                <time
-                  dateTime={m.createdAt}
-                  className="text-[12px] text-ink-muted"
-                >
-                  {time.format(Date.parse(m.createdAt))}
-                </time>
-              </p>
-              {onReport ? (
-                <MoreMenu
-                  label={`More for the message from ${m.author}`}
-                  onReport={() => onReport(m)}
-                />
-              ) : null}
-            </li>
-          ))}
-        </ol>
+        // The log role on its own element: on the <ol> it would take away
+        // the list's role, and its items would be outside any list.
+        <div role="log" aria-label="Chat messages">
+          <ol className="m-0 flex list-none flex-col gap-space-2 p-0">
+            {messages.map((m) => (
+              <li
+                key={m.id}
+                data-chat={m.id}
+                className="flex items-start gap-space-1 text-[16px] leading-[22px]"
+              >
+                <p className="m-0 min-w-0 flex-1 py-[11px] break-words">
+                  <span className="font-bold">{m.author}</span>{" "}
+                  <span>{m.body}</span>{" "}
+                  <time
+                    dateTime={m.createdAt}
+                    className="text-[12px] text-ink-muted"
+                  >
+                    {time.format(Date.parse(m.createdAt))}
+                  </time>
+                </p>
+                {onReport ? (
+                  <MoreMenu
+                    label={`More for the message from ${m.author}`}
+                    onReport={() => onReport(m)}
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
       <div ref={end} />
 

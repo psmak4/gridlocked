@@ -12,13 +12,15 @@ async function runExports(): Promise<Response> {
     return withNoStore(new Response("Not found", { status: 404 }));
   }
   const { withRequestNow } = await import("@/server/session");
-  const { localExportStore, memorySender } = await import("@/server/local-db");
+  const { localChatArchiveStore, localExportStore, memorySender } =
+    await import("@/server/local-db");
   const { createPrivacyExportHandler } = await import("@/identity/export");
   const { complete } = await import("@/jobs/queue");
   const { fixedClock } = await import("@/lib/clock");
   const handler = createPrivacyExportHandler({
     store: localExportStore,
     sender: memorySender,
+    chatArchives: localChatArchiveStore,
     log: () => {},
   });
   const ran = await withRequestNow(async (db, now) => {

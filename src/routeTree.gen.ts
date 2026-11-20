@@ -54,6 +54,7 @@ import { Route as ApiTestGameRouteImport } from './routes/api/test.game'
 import { Route as ApiTestImpersonateRouteImport } from './routes/api/test.impersonate'
 import { Route as ApiTestMakeAdminRouteImport } from './routes/api/test.make-admin'
 import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exports'
+import { Route as ApiTestStaffRouteImport } from './routes/api/test.staff'
 import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
 import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
 import { Route as TeamSlotPointsRouteImport } from './routes/team.$slot.points'
@@ -283,6 +284,11 @@ const ApiTestRunExportsRoute = ApiTestRunExportsRouteImport.update({
   path: '/api/test/run-exports',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTestStaffRoute = ApiTestStaffRouteImport.update({
+  id: '/api/test/staff',
+  path: '/api/test/staff',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsDeleteConfirmRoute = SettingsDeleteConfirmRouteImport.update({
   id: '/settings/delete_/confirm',
   path: '/settings/delete/confirm',
@@ -345,6 +351,7 @@ export interface FileRoutesByFullPath {
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
+  '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
@@ -395,6 +402,7 @@ export interface FileRoutesByTo {
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
+  '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot': typeof TeamSlotIndexRoute
@@ -446,6 +454,7 @@ export interface FileRoutesById {
   '/api/test/impersonate': typeof ApiTestImpersonateRoute
   '/api/test/make-admin': typeof ApiTestMakeAdminRoute
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
+  '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
@@ -498,6 +507,7 @@ export interface FileRouteTypes {
     | '/api/test/impersonate'
     | '/api/test/make-admin'
     | '/api/test/run-exports'
+    | '/api/test/staff'
     | '/settings/delete/confirm'
     | '/team/$slot/points'
     | '/team/$slot/'
@@ -548,6 +558,7 @@ export interface FileRouteTypes {
     | '/api/test/impersonate'
     | '/api/test/make-admin'
     | '/api/test/run-exports'
+    | '/api/test/staff'
     | '/settings/delete/confirm'
     | '/team/$slot/points'
     | '/team/$slot'
@@ -598,6 +609,7 @@ export interface FileRouteTypes {
     | '/api/test/impersonate'
     | '/api/test/make-admin'
     | '/api/test/run-exports'
+    | '/api/test/staff'
     | '/settings/delete_/confirm'
     | '/team/$slot/points'
     | '/team/$slot/'
@@ -649,6 +661,7 @@ export interface RootRouteChildren {
   ApiTestImpersonateRoute: typeof ApiTestImpersonateRoute
   ApiTestMakeAdminRoute: typeof ApiTestMakeAdminRoute
   ApiTestRunExportsRoute: typeof ApiTestRunExportsRoute
+  ApiTestStaffRoute: typeof ApiTestStaffRoute
   SettingsDeleteConfirmRoute: typeof SettingsDeleteConfirmRoute
   TeamSlotPointsRoute: typeof TeamSlotPointsRoute
   TeamSlotIndexRoute: typeof TeamSlotIndexRoute
@@ -971,6 +984,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTestRunExportsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/test/staff': {
+      id: '/api/test/staff'
+      path: '/api/test/staff'
+      fullPath: '/api/test/staff'
+      preLoaderRoute: typeof ApiTestStaffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/delete_/confirm': {
       id: '/settings/delete_/confirm'
       path: '/settings/delete/confirm'
@@ -1041,6 +1061,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTestImpersonateRoute: ApiTestImpersonateRoute,
   ApiTestMakeAdminRoute: ApiTestMakeAdminRoute,
   ApiTestRunExportsRoute: ApiTestRunExportsRoute,
+  ApiTestStaffRoute: ApiTestStaffRoute,
   SettingsDeleteConfirmRoute: SettingsDeleteConfirmRoute,
   TeamSlotPointsRoute: TeamSlotPointsRoute,
   TeamSlotIndexRoute: TeamSlotIndexRoute,

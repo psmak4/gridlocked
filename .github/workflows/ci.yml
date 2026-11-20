@@ -83,11 +83,12 @@ jobs:
           # Task 13's hooks: make an admin, start an impersonation, run the
           # export jobs, serve an export file from memory, and forget which
           # documents an account accepted. M6's: seed the fantasy game and
-          # move its simulated clock. M7's: set an account's trust level.
+          # move its simulated clock. M7's: set an account's trust level, and
+          # run a staff command.
           for marker in test-hook-make-admin test-hook-impersonate \
             test-hook-run-exports test-hook-export-file \
             test-hook-clear-acceptances test-hook-game test-hook-clock \
-            test-hook-community; do
+            test-hook-community test-hook-staff; do
             if grep -rq "$marker" .output/server; then
               echo "::error::.output/server contains the test hook $marker"
               exit 1
