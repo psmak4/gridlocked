@@ -317,6 +317,13 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - ~~a missing staff reason refuses with an `IdentityError`~~: done early (2026-11-16), as `reason_required`.
 - **Carried from M6:**
   - standings' "See more" can join two different tables if an event is scored between page loads. Pin the page to the standings' version, or start again when it changes.
+- **Carried from M7** (the final review):
+  - **Session status.** Nothing sets a session `suspended` or `cancelled` yet, so a cancelled session's chat opens on schedule. The calendar screen sets both. A long red flag is covered meanwhile: chat waits up to an hour past its window for the results post.
+  - **Moderation:**
+    - unmute also lifts a chat ban; give chat bans their own lift;
+    - restoring a removed thread always reopens it, even one that was locked; restore the status it had;
+    - an action can close a queue item about a different target; check that they match;
+    - a reported chat message archived before anyone acts on it can't be acted on, and its item stays open; close it when the archive runs.
 
 ### M9 — Hardening and closed beta (beta 15 Feb – 5 Mar)
 - **Goal:** prove it on real people with replayed 2026 weekends.
@@ -351,6 +358,23 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Carried from M6:**
   - **CDN caching for the public pages** (decision 3). Vercel's CDN doesn't cache a response with `Vary: Cookie`, so the weekend hub, Prices and How prices work run the function on every request. Pick a way to cache the logged-out answer without serving it to a signed-in reader, such as a low-cardinality signed-in header set before the cache. Then measure it in the budget run.
   - Once that cache works, a logged-out countdown can be up to about 6 minutes slow on a stale copy (`s-maxage=60` plus `stale-while-revalidate=300`). Shorten the stale window near a lock.
+- **Carried from M7** (the final review):
+  - **Shared reveals.** `?show=` holds a page's "Show it" on every page since M5, so copying or sharing a revealed address passes the reveal on. (A site link in a post already drops it.) Keep the reveal where the address doesn't carry it, such as history state, across all pages at once.
+  - **Chat:**
+    - clients can settle up to a window late, because they take the clock from a cached answer;
+    - more than 50 messages in one window, or the ones missed while a phone sleeps, are skipped; `chatSince` can fill the gap;
+    - every client asks at the window's start; spread them if the load test shows a herd.
+  - **Notifications:**
+    - times show in UTC;
+    - a failed mark-read stops the notification from opening;
+    - the lock reminder writes every owner in one transaction; batch it like `game_lock`;
+    - signing out leaves the browser's push on the account;
+    - a spoiler thread with no session keeps its safe title in notifications for good.
+  - **Forum:**
+    - the results post shares the scoring transaction, so a forum failure blocks scores; guard it;
+    - a thread page loads every post, and session threads are the big ones; measure it in the budget run;
+    - a session added after its event's threads opened gets no thread;
+    - "You're muted for now" doesn't say until when.
 - **Approval needed:**
   - the production Neon project;
   - the production Vercel project and domain;
