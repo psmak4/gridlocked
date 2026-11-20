@@ -53,9 +53,13 @@ export type SubscribeInput = {
   userAgent?: string | null;
 };
 
+/** The most devices one account pushes to; a new one drops the oldest. */
+export const MAX_DEVICES = 10;
+
 /**
  * Keeps a browser's subscription. The same endpoint again (a new key, or
- * someone else signed in on that browser) replaces the row.
+ * someone else signed in on that browser) replaces the row. An account keeps
+ * its `MAX_DEVICES` newest, so one account can't multiply every broadcast.
  */
 export async function subscribe(
   db: Db,
@@ -85,6 +89,15 @@ export async function subscribe(
         failureCount: 0,
       },
     });
+  await db.execute(sql`
+    delete from ${pushSubscriptions}
+    where ${pushSubscriptions.userId} = ${viewer.userId}
+      and ${pushSubscriptions.id} not in (
+        select ${pushSubscriptions.id} from ${pushSubscriptions}
+        where ${pushSubscriptions.userId} = ${viewer.userId}
+        order by ${pushSubscriptions.createdAt} desc, ${pushSubscriptions.id} desc
+        limit ${MAX_DEVICES}
+      )`);
 }
 
 /** Turns push off for this browser: only the viewer's own row goes. */

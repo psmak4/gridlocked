@@ -110,6 +110,8 @@ export const settingSchemas = {
    * Report weight by the reporter's trust level (HLD §7.4, M7's call): when
    * an item's weights reach `threshold`, the content hides pending review.
    * Moderators and admins use `tl3`; a logged-out report weighs `visitor`.
+   * That is 0: one person can file any number of logged-out reports, so
+   * they reach a moderator without counting toward auto-hide.
    */
   report_weights: z.object({
     tl0: z.number().nonnegative(),
@@ -176,7 +178,7 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     tl1: 1,
     tl2: 2,
     tl3: 5,
-    visitor: 1,
+    visitor: 0,
     threshold: 5,
   },
 };

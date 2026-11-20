@@ -242,7 +242,15 @@ export async function chatReplay(
   if (archive) {
     if (!store)
       return { messages: [], total: archive.count, unavailable: true };
-    const file = await archivedChat(store, threadId);
+    // A failed read (the network, wrong keys) shows the note, not an error
+    // page: the rest of the thread doesn't need the bucket.
+    const file = await archivedChat(store, threadId).catch((error) => {
+      console.error(
+        "chat replay: the archive can't be read:",
+        error instanceof Error ? error.name : "unknown error",
+      );
+      return null;
+    });
     if (!file) return { messages: [], total: archive.count, unavailable: true };
     total = file.length;
     lines = file.slice(0, limit).map((l) => ({

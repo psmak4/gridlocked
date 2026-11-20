@@ -70,8 +70,9 @@ describe("session chat (DM 5.5)", () => {
     expect(
       await sendChat(t.db, before, tl2, { threadId, body: "too soon" }),
     ).toEqual({ ok: false, error: "chat_closed" });
-    // The race runs two hours in the helper; chat closes 15 minutes later.
-    const after = new Date(RACE.getTime() + 136 * 60_000);
+    // The race runs two hours in the helper; chat closes 15 minutes later,
+    // or up to an hour after that while there's no results post.
+    const after = new Date(RACE.getTime() + 196 * 60_000);
     expect(
       await sendChat(t.db, after, tl2, { threadId, body: "too late" }),
     ).toEqual({ ok: false, error: "chat_closed" });

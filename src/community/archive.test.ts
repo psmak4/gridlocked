@@ -202,6 +202,18 @@ describe("the chat archive (DM 5.5)", () => {
       total: 3,
       unavailable: true,
     });
+    // So does one whose bucket read fails, rather than failing the page.
+    const failing = {
+      ...memory.store,
+      get: async () => {
+        throw new Error("bucket unreachable");
+      },
+    };
+    expect(await chatReplay(t.db, failing, threadId)).toEqual({
+      messages: [],
+      total: 3,
+      unavailable: true,
+    });
     // Past the limit, the first ones and the count.
     const first = await chatReplay(t.db, memory.store, threadId, 2);
     expect(first?.messages).toHaveLength(2);

@@ -3,14 +3,19 @@ import { Menu } from "@base-ui/react/menu";
 const trigger =
   "flex size-[44px] shrink-0 items-center justify-center rounded-radius-m border-0 bg-transparent text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
-/** The "…" on a post or a chat message (wave 4): for now, "Report". */
+export type MoreItem = { label: string; onSelect: () => void };
+
+/**
+ * The "…" on a post or a chat message (wave 4): "Report" on someone else's,
+ * "Edit" and "Delete" on your own post.
+ */
 export function MoreMenu({
   label,
-  onReport,
+  items,
 }: {
   /** The trigger's name: "More for the post by late_braker". */
   label: string;
-  onReport: () => void;
+  items: MoreItem[];
 }) {
   return (
     <Menu.Root>
@@ -22,12 +27,15 @@ export function MoreMenu({
       <Menu.Portal>
         <Menu.Positioner sideOffset={4} align="end" className="z-40">
           <Menu.Popup className="min-w-[160px] rounded-radius-m bg-surface-raised p-space-1 text-ink shadow-[var(--shadow-sheet)] outline-none">
-            <Menu.Item
-              onClick={onReport}
-              className="flex min-h-[44px] cursor-pointer items-center rounded-radius-s px-space-3 text-[16px] outline-none data-highlighted:bg-surface"
-            >
-              Report
-            </Menu.Item>
+            {items.map((item) => (
+              <Menu.Item
+                key={item.label}
+                onClick={item.onSelect}
+                className="flex min-h-[44px] cursor-pointer items-center rounded-radius-s px-space-3 text-[16px] outline-none data-highlighted:bg-surface"
+              >
+                {item.label}
+              </Menu.Item>
+            ))}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

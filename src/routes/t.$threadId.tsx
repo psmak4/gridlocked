@@ -1,5 +1,5 @@
 import { createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
 import { ChatReplayView, ChatView } from "@/components/community/chat-view";
@@ -28,11 +28,14 @@ import { Badge } from "@/components/ui/badge";
 import { SpoilerCover } from "@/components/ui/spoiler-cover";
 import { Tabs } from "@/components/ui/tabs";
 import { systemTimer } from "@/lib/clock";
+import { msUntil } from "@/lib/reload-at";
 import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
 import { SHOW_ALL, shownIds, showsAll, withShown } from "@/lib/shown-ids";
 import { createRefreshChannel } from "@/realtime/refresh";
 import {
+  deletePostFn,
+  editPostFn,
   getThreadFn,
   replyFn,
   reportFn,
@@ -112,6 +115,16 @@ function ThreadRoute() {
       return result;
     },
     continueHref: (postId) => `/t/${thread.id}?post=${postId}`,
+    edit: async (postId, body) => {
+      const result = await editPostFn({ data: { postId, body } });
+      if (result.ok) await router.invalidate();
+      return result;
+    },
+    remove: async (postId) => {
+      const result = await deletePostFn({ data: { postId } });
+      if (result.ok) await router.invalidate();
+      return result;
+    },
     // The opening post stands for its thread.
     report: (post) =>
       setReporting(
@@ -150,6 +163,21 @@ function ThreadRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [thread.id, chatting, chat?.windowSeconds],
   );
+
+  // Reload when the page changes on its own: chat opens, or at the
+  // session's start the page hides for a reader who hasn't watched it, so
+  // the cover shows and the chat stops (HLD §7.3).
+  const reloadAt =
+    [page.opensChatAt, page.hidesAt]
+      .filter((at): at is string => at !== null)
+      .sort()[0] ?? null;
+  useEffect(() => {
+    const loadedAt = systemTimer.now();
+    const wait = msUntil(reloadAt, nowMs, loadedAt, loadedAt);
+    if (wait === null) return;
+    const timer = setTimeout(() => void router.invalidate(), wait);
+    return () => clearTimeout(timer);
+  }, [reloadAt, nowMs, router]);
 
   // A visitor's device choice (HLD §7.3): "all" asks for `?show=all`.
   const visitor = writer === null;

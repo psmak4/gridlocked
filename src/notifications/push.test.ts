@@ -5,6 +5,7 @@ import { seedViewer } from "../../tests/helpers/community";
 import { seedEventSessions } from "../../tests/helpers/sessions";
 import { jobs, notificationPreferences, pushSubscriptions } from "@/db/schema";
 import type { Viewer } from "@/identity/viewer";
+import { newId } from "@/lib/ids";
 import {
   fanOut,
   subscribe,
@@ -179,8 +180,33 @@ describe("Web Push (DM 5.11)", () => {
     expect(await subs()).toHaveLength(0);
   });
 
+  it("an account keeps its ten newest devices", async () => {
+    for (let n = 1; n <= 12; n++) {
+      await subscribe(t.db, new Date(NOW.getTime() + n * 1000), fan, {
+        endpoint: `https://push.example/fan/${n}`,
+        p256dh: `key${n}`,
+        auth: `auth${n}`,
+      });
+    }
+    const kept = (await subs()).map((r) => r.endpoint).sort();
+    expect(kept).toHaveLength(10);
+    expect(kept).not.toContain("https://push.example/fan/1");
+    expect(kept).not.toContain("https://push.example/fan/2");
+  });
+
   it("a broadcast to many devices goes 100 a job", async () => {
-    for (let i = 0; i < 101; i++) await device(i);
+    // Straight into the table: `subscribe` keeps ten a person, and this is
+    // about the batches.
+    await t.db.insert(pushSubscriptions).values(
+      Array.from({ length: 101 }, (_, i) => ({
+        id: newId(),
+        userId: fan.userId,
+        endpoint: `https://push.example/fan/${i}`,
+        p256dh: `key${i}`,
+        auth: `auth${i}`,
+        createdAt: NOW,
+      })),
+    );
     const broadcastId = await broadcast(t.db, NOW, {
       kind: "announcement",
       data: { text: "Welcome." },

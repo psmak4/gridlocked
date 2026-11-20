@@ -6,7 +6,7 @@ import { seedEventSessions } from "../../tests/helpers/sessions";
 import { posts, profiles, threads } from "@/db/schema";
 import type { Viewer } from "@/identity/viewer";
 import { markWatched, type Reader } from "@/spoilers/reveal";
-import { reply } from "./posts";
+import { deleteOwnPost, reply } from "./posts";
 import { categoryList, threadList, threadPage } from "./read";
 import { createThread } from "./threads";
 import { vote } from "./votes";
@@ -217,6 +217,78 @@ describe("forum read models", () => {
     expect(
       (await threadPage(t.db, at(3), shielded, { threadId }))?.hidden,
     ).toBe(false);
+  });
+
+  it("a page read before its session starts says when it hides", async () => {
+    const r = await createThread(
+      t.db,
+      new Date(RACE.getTime() - 60 * 60_000),
+      ada,
+      {
+        categoryId: await categoryId(t.db, "race-weekend"),
+        title: "Lights out soon",
+        body: "Who gets the jump?",
+        sessionId: raceId,
+        containsSpoilers: true,
+      },
+    );
+    if (!r.ok) throw new Error(r.error);
+    const before = new Date(RACE.getTime() - 10 * 60_000);
+    const page = await threadPage(t.db, before, shielded, {
+      threadId: r.threadId,
+    });
+    expect(page).toMatchObject({ hidden: false, hidesAt: RACE.toISOString() });
+
+    // Nothing to wait for: protection off, or this page shown.
+    const open = { userId: bea.userId, spoilerProtection: false };
+    expect(
+      (await threadPage(t.db, before, open, { threadId: r.threadId }))?.hidesAt,
+    ).toBeNull();
+    expect(
+      (
+        await threadPage(t.db, before, shielded, {
+          threadId: r.threadId,
+          show: [raceId],
+        })
+      )?.hidesAt,
+    ).toBeNull();
+    // Or watched already (marked before the start).
+    await markWatched(t.db, before, {
+      userId: bea.userId,
+      sessionIds: [raceId],
+    });
+    expect(
+      (await threadPage(t.db, before, shielded, { threadId: r.threadId }))
+        ?.hidesAt,
+    ).toBeNull();
+  });
+
+  it("an opening post its author deleted leaves the thread and its replies", async () => {
+    const { threadId, postId } = await start();
+    await answer(bea, threadId, "One stop", 1);
+    const deleted = await deleteOwnPost(t.db, at(2), ada, { postId });
+    expect(deleted.ok).toBe(true);
+    const list = await threadList(t.db, at(3), null, {
+      categorySlug: "general",
+      sort: "new",
+    });
+    expect(list?.threads.map((r) => r.id)).toEqual([threadId]);
+    const page = await threadPage(t.db, at(3), null, { threadId });
+    expect(page?.posts.map((p) => [p.state, p.html])).toEqual([
+      ["deleted", null],
+      ["visible", "<p>One stop</p>"],
+    ]);
+  });
+
+  it("only your own post carries its Markdown, for Edit", async () => {
+    const { threadId } = await start({ body: "Two **stops**" });
+    await answer(bea, threadId, "One stop", 1);
+    const asAda = { userId: ada.userId, spoilerProtection: false };
+    const page = await threadPage(t.db, at(2), asAda, { threadId });
+    expect(page?.posts.map((p) => [p.mine, p.source])).toEqual([
+      [true, "Two **stops**"],
+      [false, null],
+    ]);
   });
 
   it('a deleted author shows as "deleted user"', async () => {

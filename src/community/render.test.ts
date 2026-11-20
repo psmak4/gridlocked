@@ -86,4 +86,13 @@ describe("renderPost (DM 5.4: Markdown through a strict sanitizer)", () => {
       'href="/%5Cevil.example"',
     );
   });
+
+  it("a site link drops its ?show=, so a pasted address reveals nothing", () => {
+    expect(renderPost("[x](/t/abc?show=all)", tl0)).toBe(
+      '<p><a href="/t/abc">x</a></p>',
+    );
+    expect(renderPost("[x](/t/abc?post=p1&show=s1#c)", tl0)).toBe(
+      '<p><a href="/t/abc?post=p1#c">x</a></p>',
+    );
+  });
 });

@@ -217,15 +217,34 @@ async function changeThread(db: Db, input: ModerateInput): Promise<Change> {
 
   let set: Partial<typeof threads.$inferInsert> = {};
   let before: Record<string, unknown> = {};
+  let alsoAfter: Record<string, unknown> = {};
   switch (input.action) {
     case "remove":
       if (thread.status !== "removed") set = { status: "removed" };
       before = { status: thread.status };
       break;
-    case "restore":
+    case "restore": {
       if (thread.status === "removed") set = { status: "open" };
       before = { status: thread.status };
+      // A thread report hides the thread by hiding its opening post: "Keep
+      // it" shows that post again.
+      const shown = await db
+        .update(posts)
+        .set({ status: "visible" })
+        .where(
+          and(
+            eq(posts.threadId, input.targetId),
+            eq(posts.isOpening, true),
+            eq(posts.status, "hidden_by_flags"),
+          ),
+        )
+        .returning({ id: posts.id });
+      if (shown.length > 0) {
+        before = { ...before, openingPost: "hidden_by_flags" };
+        alsoAfter = { openingPost: "visible" };
+      }
       break;
+    }
     case "lock":
       if (thread.status === "open") set = { status: "locked" };
       before = { status: thread.status };
@@ -267,10 +286,12 @@ async function changeThread(db: Db, input: ModerateInput): Promise<Change> {
       throw new Refused(refused("invalid"));
   }
   const base = { targetUserId: thread.authorUserId };
-  if (Object.keys(set).length === 0)
+  const after = { ...set, ...alsoAfter };
+  if (Object.keys(after).length === 0)
     return { ...base, changed: false, before: null, after: null };
-  await db.update(threads).set(set).where(eq(threads.id, input.targetId));
-  return { ...base, changed: true, before, after: set };
+  if (Object.keys(set).length > 0)
+    await db.update(threads).set(set).where(eq(threads.id, input.targetId));
+  return { ...base, changed: true, before, after };
 }
 
 const RESTRICTS: Partial<Record<M7ModAction, RestrictionKind>> = {

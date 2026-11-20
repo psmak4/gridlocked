@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import type { Writer } from "@/community/writer";
 import type { CommunityRefusal } from "@/community/errors";
 import type { PostView } from "@/community/read";
@@ -21,6 +22,9 @@ type PostActions = {
   continueHref: (postId: string) => string;
   /** "Report" in a post's "…" menu; anyone can, but not on their own post. */
   report?: (post: PostView) => void;
+  /** "Edit" and "Delete" in your own post's "…" menu. */
+  edit?: (postId: string, body: string) => Promise<ReplyResult>;
+  remove?: (postId: string) => Promise<ReplyResult>;
 };
 
 const iconButton =
@@ -119,7 +123,20 @@ export function PostItem({
   heading?: boolean;
 }) {
   const [replying, setReplying] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const readable = post.html !== null;
+  const own = post.mine && post.source !== null;
+  const menu =
+    own && actions.edit && actions.remove
+      ? [
+          { label: "Edit", onSelect: () => setEditing(true) },
+          { label: "Delete", onSelect: () => setDeleting(true) },
+        ]
+      : actions.report && !post.mine
+        ? [{ label: "Report", onSelect: () => actions.report?.(post) }]
+        : null;
   const canReply =
     !post.isOpening &&
     readable &&
@@ -154,12 +171,69 @@ export function PostItem({
               <span>· Waiting for a moderator</span>
             ) : null}
           </p>
-          <div
-            className="post-body text-[16px] leading-[24px] break-words [&_a]:font-semibold [&_a]:text-ink [&_a]:underline [&_p]:my-space-1"
-            // Rendered by `renderPost`: Markdown through micromark with raw
-            // HTML escaped, and only allowed links kept (DM 5.4).
-            dangerouslySetInnerHTML={{ __html: post.html! }}
-          />
+          {editing ? (
+            <ReplyForm
+              label="Edit your post"
+              submitLabel="Save"
+              initial={post.source ?? ""}
+              onSubmit={async (body) => {
+                const result = await actions.edit!(post.id, body);
+                if (result.ok) setEditing(false);
+                return result;
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <div
+              className="post-body text-[16px] leading-[24px] break-words [&_a]:font-semibold [&_a]:text-ink [&_a]:underline [&_p]:my-space-1"
+              // Rendered by `renderPost`: Markdown through micromark with raw
+              // HTML escaped, and only allowed links kept (DM 5.4).
+              dangerouslySetInnerHTML={{ __html: post.html! }}
+            />
+          )}
+          {deleting ? (
+            <div
+              role="group"
+              aria-label="Delete this post?"
+              className="flex flex-col gap-space-2 rounded-radius-m bg-surface p-space-3"
+            >
+              <p className="m-0 text-[14px]">
+                Delete this post? Replies to it stay, under “[deleted]”.
+              </p>
+              {deleteError ? (
+                <p
+                  role="alert"
+                  className="m-0 text-[14px] font-semibold text-fall"
+                >
+                  {deleteError}
+                </p>
+              ) : null}
+              <div className="flex gap-space-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setDeleteError(null);
+                    void actions.remove!(post.id).then(
+                      (result) => {
+                        if (result.ok) setDeleting(false);
+                        else setDeleteError(refusalWords(result));
+                      },
+                      () => setDeleteError(FAILED),
+                    );
+                  }}
+                >
+                  Delete post
+                </Button>
+                <Button
+                  type="button"
+                  variant="quiet"
+                  onClick={() => setDeleting(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <p className="m-0 text-[16px] text-ink-muted italic">
@@ -179,10 +253,14 @@ export function PostItem({
               Reply
             </button>
           ) : null}
-          {actions.report && !post.mine ? (
+          {menu ? (
             <MoreMenu
-              label={`More for the post by ${post.author ?? "a deleted user"}`}
-              onReport={() => actions.report?.(post)}
+              label={
+                own
+                  ? "More for your post"
+                  : `More for the post by ${post.author ?? "a deleted user"}`
+              }
+              items={menu}
             />
           ) : null}
         </div>

@@ -58,16 +58,19 @@ async function attempt(
 export function ReplyForm({
   label = "Reply",
   submitLabel = "Post reply",
+  initial = "",
   onSubmit,
   onCancel,
 }: {
   label?: string;
   submitLabel?: string;
+  /** The text the box starts with: a post's own, for "Edit". */
+  initial?: string;
   onSubmit: (body: string) => Promise<WriteResult>;
   onCancel?: () => void;
 }) {
   const id = useId();
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (

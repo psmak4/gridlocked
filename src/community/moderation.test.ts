@@ -124,6 +124,44 @@ describe("reports, the queue and auto-hide (DM 5.8, 5.9)", () => {
     expect(item).toMatchObject({ reportCount: 5, weightSum: 5 });
   });
 
+  it("logged-out reports queue the post but never hide it", async () => {
+    // One person can file any number of these (no account to tie them to),
+    // so they reach a moderator without counting toward auto-hide.
+    for (let i = 0; i < 6; i++) {
+      const result = await report(
+        t.db,
+        at(2),
+        { contact: "same@example.test", captchaToken: "good-token" },
+        { targetType: "post", targetId: postId, reason: "abuse" },
+        { verifyCaptcha: passes },
+      );
+      expect(result).toMatchObject({ ok: true, hidden: false });
+    }
+    expect((await postRow(postId)).status).toBe("visible");
+    const [item] = await items();
+    expect(item).toMatchObject({ reportCount: 6, weightSum: 0 });
+  });
+
+  it("the system account's posts are queued but never auto-hidden", async () => {
+    const replied = await reply(
+      t.db,
+      at(1),
+      { ...author, userId: SYSTEM_USER_ID },
+      { threadId, body: "Results are in." },
+    );
+    if (!replied.ok) throw new Error(replied.error);
+    const regular = await seedViewer(t.db, { trustLevel: 3, username: "reg" });
+    const result = await report(
+      t.db,
+      at(2),
+      regular,
+      { targetType: "post", targetId: replied.postId, reason: "spam" },
+      { verifyCaptcha: passes },
+    );
+    expect(result).toMatchObject({ ok: true, hidden: false });
+    expect((await postRow(replied.postId)).status).toBe("visible");
+  });
+
   it("the snapshot keeps the text after the author edits it", async () => {
     const fan = await seedViewer(t.db, { trustLevel: 2, username: "fan" });
     await reportPost(fan);
@@ -154,13 +192,14 @@ describe("reports, the queue and auto-hide (DM 5.8, 5.9)", () => {
       error: "captcha_failed",
     });
     expect(await items()).toHaveLength(0);
-    // With one it's taken, weighs 1 and keeps the address.
+    // With one it's taken, weighs nothing toward auto-hide and keeps the
+    // address.
     expect(await visitor("good-token")).toMatchObject({ ok: true });
     const [row] = await t.db.select().from(reports);
     expect(row).toMatchObject({
       reporterUserId: null,
       reporterContact: "someone@example.test",
-      weight: 1,
+      weight: 0,
     });
   });
 

@@ -171,7 +171,7 @@ export function ChatView({
                 {onReport ? (
                   <MoreMenu
                     label={`More for the message from ${m.author}`}
-                    onReport={() => onReport(m)}
+                    items={[{ label: "Report", onSelect: () => onReport(m) }]}
                   />
                 ) : null}
               </li>
