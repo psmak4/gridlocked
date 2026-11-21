@@ -12,6 +12,8 @@ import { withNoStore } from "@/server/no-store";
 //   staff would: the pool changing under an open builder.
 // - PATCH `{ crowd: 60, joinCode? }` adds 60 accounts with saved teams (and
 //   puts them in that league): a table long enough to page.
+// - PATCH `{ stale: "ALB" }` disqualifies that driver from the latest scored
+//   race with nothing re-scored: something for a scoring dry run to show.
 // The flag is replaced at build time, so a normal build keeps the 404 and
 // drops the rest. `test-hook-game` marks this handler for the CI build check.
 const notFound = () => withNoStore(new Response("Not found", { status: 404 }));
@@ -67,7 +69,23 @@ async function change(request: Request): Promise<Response> {
     withdraw?: unknown;
     crowd?: unknown;
     joinCode?: unknown;
+    stale?: unknown;
   };
+  if (typeof body.stale === "string") {
+    const { staleTestOverride, HarnessError } =
+      await import("@/server/test-game");
+    try {
+      const done = await staleTestOverride(body.stale);
+      return withNoStore(Response.json({ ...done, hook: "test-hook-game" }));
+    } catch (error) {
+      if (error instanceof HarnessError) {
+        return withNoStore(
+          new Response(error.message, { status: error.status }),
+        );
+      }
+      throw error;
+    }
+  }
   if (typeof body.crowd === "number") {
     if (
       !Number.isInteger(body.crowd) ||

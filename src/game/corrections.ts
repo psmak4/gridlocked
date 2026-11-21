@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, lt, max, sql } from "drizzle-orm";
 import { z } from "zod";
 import { writeAudit } from "@/audit/log";
 import {
+  auditLog,
   events,
   gameEvents,
   games,
@@ -219,6 +220,8 @@ export async function dryRunGame(
   actor: StaffActor,
   input: { gameId: string; reason: string; batchSize?: number },
 ): Promise<{
+  /** The `game.dry_run` audit row: what an approval names. */
+  dryRunId: string;
   runIds: string[];
   sessions: number;
   assetsChanged: number;
@@ -229,7 +232,7 @@ export async function dryRunGame(
   const meta = audit(actor, requireReason(input.reason));
 
   const byEvent = new Map<string, { runId: string; sessionId: string }[]>();
-  const runIds = await db.transaction(async (tx) => {
+  const { dryRunId, runIds } = await db.transaction(async (tx) => {
     const ids: string[] = [];
     for (const { sessionId, eventId } of await scoredSessions(tx, gameId)) {
       const started = await startRun(tx, now, {
@@ -246,7 +249,7 @@ export async function dryRunGame(
       runs.push({ runId: started.runId, sessionId });
       byEvent.set(eventId, runs);
     }
-    await writeAudit(tx, now, {
+    const auditId = await writeAudit(tx, now, {
       ...meta,
       action: "game.dry_run",
       entityType: "game",
@@ -254,7 +257,7 @@ export async function dryRunGame(
       before: null,
       after: { engineVersion: ENGINE_VERSION, runIds: ids },
     });
-    return ids;
+    return { dryRunId: auditId, runIds: ids };
   });
 
   const assets = new Set<string>();
@@ -280,6 +283,7 @@ export async function dryRunGame(
     throw error;
   }
   return {
+    dryRunId,
     runIds,
     sessions: runIds.length,
     assetsChanged: assets.size,
@@ -294,18 +298,29 @@ export async function dryRunGame(
  * `r:<auditId>`), forced, so it runs even where the inputs haven't changed.
  * Audited in the same transaction, and returns how many jobs it queued.
  *
- * Refuses, writing nothing: a blank reason, and a game with no `dry_run` run
- * that succeeded at the current `ENGINE_VERSION` (`dry_run_required`).
+ * With `dryRunId` (the `game.dry_run` audit row the screen read), the approval
+ * is of that dry run: it is recorded in the audit row, and one that was
+ * approved already, or that a newer dry run has replaced, is `stale`. The game
+ * row is held, so two approvals at once can't both pass.
+ *
+ * Refuses, writing nothing: a blank reason, a game with no `dry_run` run that
+ * succeeded at the current `ENGINE_VERSION` (`dry_run_required`, also after a
+ * discard), and a stale approval.
  */
 export async function approveRescore(
   db: Db,
   now: Date,
   actor: StaffActor,
-  input: { gameId: string; reason: string },
+  input: { gameId: string; reason: string; dryRunId?: string },
 ): Promise<{ queued: number }> {
-  const { gameId } = input;
+  const { gameId, dryRunId } = input;
   const meta = audit(actor, requireReason(input.reason));
   return db.transaction(async (tx) => {
+    await tx
+      .select({ id: games.id })
+      .from(games)
+      .where(eq(games.id, gameId))
+      .for("update");
     const [dryRun] = await tx
       .select({ id: scoringRuns.id })
       .from(scoringRuns)
@@ -324,13 +339,47 @@ export async function approveRescore(
         `run a dry run of game ${gameId} on engine ${ENGINE_VERSION} first`,
       );
     }
+    if (dryRunId !== undefined) {
+      const [latest] = await tx
+        .select({ id: auditLog.id })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.action, "game.dry_run"),
+            eq(auditLog.entityType, "game"),
+            eq(auditLog.entityId, gameId),
+          ),
+        )
+        .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
+        .limit(1);
+      const [approved] = await tx
+        .select({ id: auditLog.id })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.action, "game.rescore_approved"),
+            eq(auditLog.entityId, gameId),
+            sql`${auditLog.after} ->> 'dryRunId' = ${dryRunId}`,
+          ),
+        )
+        .limit(1);
+      if (latest?.id !== dryRunId || approved) {
+        throw new GameError(
+          "stale",
+          `dry run ${dryRunId} of game ${gameId} was approved or replaced`,
+        );
+      }
+    }
     const auditId = await writeAudit(tx, now, {
       ...meta,
       action: "game.rescore_approved",
       entityType: "game",
       entityId: gameId,
       before: null,
-      after: { engineVersion: ENGINE_VERSION },
+      after: {
+        engineVersion: ENGINE_VERSION,
+        ...(dryRunId !== undefined ? { dryRunId } : {}),
+      },
     });
     let queued = 0;
     for (const { sessionId } of await scoredSessions(tx, gameId)) {
@@ -343,6 +392,53 @@ export async function approveRescore(
       });
     }
     return { queued };
+  });
+}
+
+/**
+ * Discards the game's dry run (M8 Task 8): every `dry_run` run still
+ * `running` or `succeeded` becomes `superseded`, so `approveRescore` is
+ * refused (`dry_run_required`) until a new one runs. Audited in the same
+ * transaction, with the runs. Nothing was ever written by a dry run, so
+ * nothing else changes. Refuses a blank reason, and a game with no dry run to
+ * discard (`dry_run_required`), writing nothing.
+ */
+export async function discardDryRun(
+  db: Db,
+  now: Date,
+  actor: StaffActor,
+  input: { gameId: string; reason: string },
+): Promise<{ discarded: number }> {
+  const { gameId } = input;
+  const meta = audit(actor, requireReason(input.reason));
+  return db.transaction(async (tx) => {
+    const discarded = await tx
+      .update(scoringRuns)
+      .set({ status: "superseded", finishedAt: now })
+      .where(
+        and(
+          eq(scoringRuns.gameId, gameId),
+          eq(scoringRuns.mode, "dry_run"),
+          inArray(scoringRuns.status, ["running", "succeeded"]),
+        ),
+      )
+      .returning({ id: scoringRuns.id });
+    if (discarded.length === 0) {
+      throw new GameError(
+        "dry_run_required",
+        `game ${gameId} has no dry run to discard`,
+      );
+    }
+    const runIds = discarded.map((r) => r.id).sort();
+    await writeAudit(tx, now, {
+      ...meta,
+      action: "game.dry_run_discard",
+      entityType: "game",
+      entityId: gameId,
+      before: null,
+      after: { runIds },
+    });
+    return { discarded: runIds.length };
   });
 }
 

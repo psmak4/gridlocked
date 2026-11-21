@@ -34,6 +34,8 @@ import {
   teams,
   users,
 } from "@/db/schema";
+import { SYSTEM_USER_ID } from "@/identity/system";
+import { addOverride } from "@/results/overrides";
 import { saveLineup } from "@/game/lineups";
 import { withdrawPoolAsset } from "@/game/pool";
 import { createTeam } from "@/game/teams";
@@ -151,6 +153,45 @@ export function withdrawTestDriver(code: string): Promise<{ assetId: string }> {
         actor: { kind: "admin", label: "e2e" },
       });
       return { assetId: asset.id };
+    }),
+  );
+}
+
+/**
+ * Disqualifies the driver with `code` from the latest race that has results,
+ * as a `patch` override with nothing re-scored (M8 Task 8): the stored lines
+ * are then stale, so a scoring dry run has a change to show. A staff
+ * correction would queue its own re-score.
+ */
+export function staleTestOverride(
+  code: string,
+): Promise<{ sessionId: string }> {
+  return oneAtATime(() =>
+    withDb(async (db) => {
+      if (!live) throw new HarnessError(409, "Seed the game first");
+      const now = (await resolveClock({ mode: "replay", db })).now();
+      const [race] = await db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .innerJoin(scoringRuns, eq(scoringRuns.sessionId, sessions.id))
+        .where(and(eq(sessions.kind, "race"), eq(scoringRuns.isCurrent, true)))
+        .orderBy(desc(sessions.scheduledStart))
+        .limit(1);
+      if (!race) throw new HarnessError(409, "No race is scored yet");
+      const [driver] = await db
+        .select({ id: drivers.id })
+        .from(drivers)
+        .where(eq(drivers.code, code));
+      if (!driver) throw new HarnessError(400, `No driver ${code}`);
+      await addOverride(db, now, {
+        sessionId: race.id,
+        driverId: driver.id,
+        kind: "patch",
+        fields: { classification: "disqualified", position: null },
+        reason: "Fantasy e2e: a result change nothing has re-scored",
+        createdBy: SYSTEM_USER_ID,
+      });
+      return { sessionId: race.id };
     }),
   );
 }

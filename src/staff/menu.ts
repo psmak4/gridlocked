@@ -25,6 +25,13 @@ export type StaffScreen = {
 
 export const STAFF_SCREENS: StaffScreen[] = [
   {
+    id: "scoring",
+    label: "Scoring",
+    href: "/staff/scoring",
+    group: "results",
+    role: "admin",
+  },
+  {
     id: "calendar",
     label: "Calendar",
     href: "/staff/calendar",

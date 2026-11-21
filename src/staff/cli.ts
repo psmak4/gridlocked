@@ -1,10 +1,19 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { CLASSIFICATIONS, providerIds, sessions, users } from "@/db/schema";
+import {
+  CLASSIFICATIONS,
+  games,
+  providerIds,
+  sessions,
+  users,
+} from "@/db/schema";
+import { publishCorrectionVersion } from "@/game/corrections";
+import { rulesetParamsSchema, type RulesetParams } from "@/game/ruleset";
 import { setRoleAs } from "@/identity/roles";
 import type { Db } from "@/db/types";
 import { resultFieldsSchema, type ResultFields } from "@/results/overrides";
 import { SCORED_KINDS } from "@/results/validate";
+import { scoringRuleSchema, type ScoringRule } from "@/scoring/rules";
 import {
   moderateChange,
   runModerate,
@@ -14,6 +23,7 @@ import {
 import { insertResult, overrideResult } from "./results";
 import { changeSeats, recordSubstitution, type StaffActor } from "./roster";
 import type { SessionMove, StaffDeps } from "./revalidate";
+import { scoringGame } from "./scoring";
 
 // `pnpm staff` (scripts/staff.ts): the staff roster actions from the command
 // line, until M8's screens. Everything but the command comes from the
@@ -79,6 +89,20 @@ const insertChange = z.strictObject({
   classification: z.enum(CLASSIFICATIONS),
 });
 
+// A ruleset correction (DM 4.9, M8 decision 3): the full params and rules of
+// the new version, the events it re-points (season/round) and its notes. The
+// game is the running one unless `game` names its slug.
+const correctRulesetChange = z.strictObject({
+  game: z.string().trim().min(1).max(64).optional(),
+  events: z
+    .array(z.string().regex(/^\d{4}\/\d{1,2}$/, "events are season/round"))
+    .min(1)
+    .max(30),
+  notes: z.string().trim().min(1).max(500),
+  params: rulesetParamsSchema,
+  rules: z.array(scoringRuleSchema).min(1),
+});
+
 const setRoleChange = z.strictObject({
   username: z.string().trim().min(1).max(64),
   // Never `system` (DM 6.1): that role is the reserved user's alone.
@@ -100,6 +124,19 @@ export type StaffCommand =
   | {
       command: "moderate";
       change: ModerateChange;
+      reason: string;
+      actor: StaffActor;
+      dryRun: boolean;
+    }
+  | {
+      command: "correct-ruleset";
+      change: {
+        game?: string;
+        events: string[];
+        notes: string;
+        params: RulesetParams;
+        rules: ScoringRule[];
+      };
       reason: string;
       actor: StaffActor;
       dryRun: boolean;
@@ -157,6 +194,7 @@ export type StaffCommand =
 
 const COMMANDS = {
   "set-role": setRoleChange,
+  "correct-ruleset": correctRulesetChange,
   moderate: moderateChange,
   substitute: substituteChange,
   seats: seatsChange,
@@ -179,9 +217,11 @@ export function parseStaffEnv(
     );
   }
   const name = command as keyof typeof COMMANDS;
-  // The workflow always sends STAFF_EVENT; set-role and moderate ignore it.
+  // The workflow always sends STAFF_EVENT; set-role, moderate and
+  // correct-ruleset (whose events are in the change) ignore it.
   const { STAFF_EVENT, ...rest } = common;
-  const noEvent = name === "set-role" || name === "moderate";
+  const noEvent =
+    name === "set-role" || name === "moderate" || name === "correct-ruleset";
   const schema = z.object({
     ...rest,
     ...(noEvent ? {} : { STAFF_EVENT }),
@@ -222,6 +262,15 @@ export function parseStaffEnv(
       actor,
       dryRun,
       change: e.STAFF_CHANGE as z.infer<typeof setRoleChange>,
+    };
+  }
+  if (name === "correct-ruleset") {
+    return {
+      command: name,
+      reason: e.STAFF_REASON,
+      actor,
+      dryRun,
+      change: e.STAFF_CHANGE as z.infer<typeof correctRulesetChange>,
     };
   }
   const base = { event: e.STAFF_EVENT, reason: e.STAFF_REASON, actor, dryRun };
@@ -277,6 +326,12 @@ export type StaffRunReport =
       resolved: { username: string; role: { from: string; to: string } };
     }
   | {
+      dryRun: false;
+      command: "correct-ruleset";
+      resolved: Record<string, unknown>;
+      rulesetVersionId: string;
+    }
+  | {
       dryRun: true;
       command: StaffCommand["command"];
       resolved: Record<string, unknown>;
@@ -302,6 +357,9 @@ export async function runStaffCommand(
 ): Promise<StaffRunReport> {
   if (cmd.command === "set-role") return runSetRole(db, now, cmd);
   if (cmd.command === "moderate") return runModerate(db, now, cmd);
+  if (cmd.command === "correct-ruleset") {
+    return runCorrectRuleset(db, now, cmd);
+  }
   const eventId = await resolve(db, "event", cmd.event);
   if (cmd.command === "substitute") {
     const resolved = {
@@ -383,6 +441,56 @@ export async function runStaffCommand(
     deps,
   );
   return { dryRun: false, command: cmd.command, resolved, ...result };
+}
+
+/**
+ * `correct-ruleset`: the game and the events resolved, then
+ * `publishCorrectionVersion` unless a dry run, which re-points the events and
+ * re-scores them (points change, prices don't).
+ */
+async function runCorrectRuleset(
+  db: Db,
+  now: Date,
+  cmd: Extract<StaffCommand, { command: "correct-ruleset" }>,
+): Promise<StaffRunReport> {
+  const { change } = cmd;
+  let gameId: string;
+  if (change.game) {
+    const [game] = await db
+      .select({ id: games.id })
+      .from(games)
+      .where(eq(games.slug, change.game));
+    if (!game) throw new Error(`no game ${change.game}`);
+    gameId = game.id;
+  } else {
+    const game = await scoringGame(db);
+    if (!game) throw new Error("no game to correct");
+    gameId = game.id;
+  }
+  const eventIds: string[] = [];
+  for (const key of change.events)
+    eventIds.push(await resolve(db, "event", key));
+  const resolved = {
+    gameId,
+    eventIds,
+    notes: change.notes,
+    rules: change.rules.length,
+  };
+  if (cmd.dryRun) return { dryRun: true, command: cmd.command, resolved };
+  const { rulesetVersionId } = await publishCorrectionVersion(
+    db,
+    now,
+    cmd.actor,
+    {
+      gameId,
+      params: change.params,
+      rules: change.rules,
+      notes: change.notes,
+      eventIds,
+      reason: cmd.reason,
+    },
+  );
+  return { dryRun: false, command: cmd.command, resolved, rulesetVersionId };
 }
 
 /** `set-role`: the user by username, then `setRoleAs` unless a dry run. */

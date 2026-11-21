@@ -162,6 +162,20 @@ export async function withdrawDriver(
 }
 
 /**
+ * Disqualifies the driver with `code` from the latest scored race with
+ * nothing re-scored, so a scoring dry run has a change to show.
+ */
+export async function staleOverride(
+  request: APIRequestContext,
+  code: string,
+): Promise<void> {
+  const response = await request.patch("/api/test/game", {
+    data: { stale: code },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}
+
+/**
  * Adds `count` accounts with saved teams copied from the latest saved one
  * (the Boost moved round its drivers, so totals differ), in the league with `joinCode`
  * when given: a table long enough to page.
