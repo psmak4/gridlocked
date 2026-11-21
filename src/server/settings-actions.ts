@@ -148,6 +148,8 @@ export type ProfileState = {
   actions: AccountAction[];
   /** The viewer's newest forum posts, spoiler-safe. */
   posts: RecentPost[];
+  /** A moderator or admin, in their own session: the "Staff tools" link. */
+  staff: boolean;
 };
 
 const regionNames = new Intl.DisplayNames(["en"], {
@@ -224,6 +226,7 @@ export async function profileState(
     teams: await profileTeams(db, v.userId),
     actions: await accountActions(db, v.userId),
     posts: await recentPosts(db, now, v),
+    staff: v.impersonatedBy === null && hasStaffRole(v.role, "moderator"),
   };
 }
 

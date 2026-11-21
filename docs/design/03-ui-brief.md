@@ -389,3 +389,11 @@ The screens are on the canvas [Gridlocked wave 5](https://claude.ai/artifact/1jE
 
 **Not designed (left to build time):** the rulesets editor, user lookup, and league admin. They reuse these same patterns: a table, a detail panel, a reason, and the audit log.
 
+**As built (M8):**
+- **One staff area, `/staff`,** with wave 5's side menu: "GRIDLOCKED · STAFF", the screens grouped by the board's rows, each queue's waiting count, and "Signed in as <username> · <role> · 2-step on" at the foot. Under 1024 px the menu sits above the page, and the page is one column. There's no bottom nav, and no public page links in.
+- **The way in** is a "Staff tools" link on the profile, for a moderator or admin in their own session. `/staff` opens the first screen the person may use.
+- **The guard:** a staff session without two-step sign-in, or not unlocked this session, goes to Password and security; anyone else goes home, and someone signed out to sign in. Every staff server function checks the session again itself.
+- **Who sees what:** a moderator's menu has Moderation and Users only; everything else, the audit log included, is admin-only.
+- **Reasons:** every staff write takes one, required, at most 500 characters. The label says who sees it: "Reason (saved in the audit log)", or "Reason (players see this)" for corrections and availability notes.
+- **Two staff at once:** a resolve that lost the race says "Someone else dealt with this first." and shows the item as it now stands.
+
