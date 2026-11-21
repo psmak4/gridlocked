@@ -11,6 +11,7 @@ import {
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import { localDate, syncEventEntries } from "@/reference/sync-event-entries";
+import { StaffError } from "./errors";
 import {
   revalidateEvent,
   type SessionMove,
@@ -55,7 +56,9 @@ function changes(
 
 export function requireReason(reason: string): string {
   const trimmed = reason.trim();
-  if (!trimmed) throw new Error("a staff action needs a reason");
+  if (!trimmed) {
+    throw new StaffError("reason_required", "a staff action needs a reason");
+  }
   return trimmed;
 }
 
@@ -103,7 +106,7 @@ export async function recordSubstitution(
       .select({ id: events.id })
       .from(events)
       .where(eq(events.id, eventId));
-    if (!event) throw new Error(`no event ${eventId}`);
+    if (!event) throw new StaffError("not_found", `no event ${eventId}`);
 
     const entries = await tx
       .select()
@@ -112,7 +115,8 @@ export async function recordSubstitution(
     if (outDriverId) {
       const out = entries.find((e) => e.driverId === outDriverId);
       if (!out || out.constructorId !== constructorId) {
-        throw new Error(
+        throw new StaffError(
+          "invalid",
           `driver ${outDriverId} is not entered for constructor ${constructorId} at this event`,
         );
       }
@@ -124,7 +128,8 @@ export async function recordSubstitution(
         e.driverId !== inDriverId,
     );
     if (clash) {
-      throw new Error(
+      throw new StaffError(
+        "invalid",
         `car ${carNumber} is already entered for constructor ${clash.constructorId} at this event`,
       );
     }
@@ -312,9 +317,16 @@ export async function changeSeats(
       .select({ seasonId: events.seasonId })
       .from(events)
       .where(eq(events.id, input.fromEventId));
-    if (!from) throw new Error(`no event ${input.fromEventId}`);
+    if (!from) {
+      throw new StaffError("not_found", `no event ${input.fromEventId}`);
+    }
     const day = await firstDay(tx, input.fromEventId);
-    if (!day) throw new Error(`event ${input.fromEventId} has no sessions`);
+    if (!day) {
+      throw new StaffError(
+        "invalid",
+        `event ${input.fromEventId} has no sessions`,
+      );
+    }
 
     // Every close first, so a car number or a driver freed here can be taken.
     for (const change of input.changes) {
@@ -335,7 +347,8 @@ export async function changeSeats(
       for (const seat of active) {
         if (alreadyOpen(seat, change, day)) continue;
         if (seat.validFrom >= day) {
-          throw new Error(
+          throw new StaffError(
+            "invalid",
             `driver ${change.driverId}'s race seat starts on or after ${day}; changing a future seat is not supported`,
           );
         }
@@ -357,7 +370,8 @@ export async function changeSeats(
     for (const change of input.changes) {
       if (!change.constructorId) continue;
       if (change.carNumber === undefined) {
-        throw new Error(
+        throw new StaffError(
+          "invalid",
           `a new seat for driver ${change.driverId} needs a car number`,
         );
       }

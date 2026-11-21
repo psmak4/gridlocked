@@ -28,12 +28,25 @@ export const REASON_MAX = 500;
 export type StaffResult<T> =
   { ok: true; value: T } | { ok: false; error: StaffErrorCode };
 
-/** A staff function's own refusal. Carries only its code. */
+/** A staff function's own refusal: its code, and a detail for the workflow. */
 export class StaffError extends Error {
-  constructor(readonly code: StaffErrorCode) {
-    super(code);
+  /** `detail` is for logs and the staff workflow; a screen shows the code's words. */
+  constructor(
+    readonly code: StaffErrorCode,
+    detail?: string,
+  ) {
+    super(detail ?? code);
     this.name = "StaffError";
   }
+}
+
+/** A staff write's reason, trimmed; blank or over 500 is `reason_required`. */
+export function staffReason(reason: string): string {
+  const trimmed = reason.trim();
+  if (!trimmed || trimmed.length > REASON_MAX) {
+    throw new StaffError("reason_required");
+  }
+  return trimmed;
 }
 
 export function isStaffErrorCode(code: string): code is StaffErrorCode {
