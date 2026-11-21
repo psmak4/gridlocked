@@ -291,6 +291,30 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - ~~whether `accountAgeDays` still earns its place in the trust rules~~: it stays (decided 2026-11-16, DM 6.5);
   - ~~a test of `expireExports`' `failed` branch~~: done early (2026-11-16, #218).
 - **Plan:** [plans/M7-community.md](../plans/M7-community.md), written 2026-11-16. **Decisions 1–7 made 2026-11-16**, all as recommended: DM Part 5 approved with the plan's changes, search after launch, `micromark` for Markdown, `web-push` with a VAPID key pair you create, a `chat-archives` bucket, and the chat load test in M7 on staging with your OK.
+- **Result (2026-11-21): met, with one finding for M9.**
+  - **The tasks:** all 16 tasks are merged (PRs #240–#253). #253 holds Task 16's exit test, the load-test script and the final review's fixes.
+  - **The exit:** `e2e/fantasy/community-weekend.spec.ts` runs one race weekend at phone size on the replay-mode build:
+    - the event week's threads opening;
+    - a spoiler thread and its spoiler-safe reply notification;
+    - Mark as watched;
+    - a report that hides a reply, and a moderator's restore through the staff command;
+    - a logged-out visitor's safe view and the device switch;
+    - the results link;
+    - race chat in slow mode;
+    - 30 days on, the archive, its replay and the export's archived chat.
+  - **The staging deploy:** Deploy staging run 44871253222 (main at 25e448d), on the Las Vegas weekend with your OK (you waived the plan's "not on a race weekend"). It applied M7's migrations, redeployed the `tick` and deployed the site to https://gridlocked-staging.vercel.app. The 06:00 UTC calendar sync then opened the five Las Vegas session threads.
+  - **The chat load test:** `pnpm chat-load` against the Las Vegas Race thread, with 50 readers, staggered 3-second windows, for 10 minutes:
+    - 10,036 requests in 201 windows, all `200`; that's the plan's estimate of about 10,000 of Hobby's 1M monthly CDN requests;
+    - 9,502 were `x-vercel-cache: HIT` and 534 were `MISS`, so at most 534 function invocations, or 2.7 a window against the plan's expected 1;
+    - latency: p50 48 ms, p95 137 ms, max 1.1 s.
+
+    **The cache holds, but not to one invocation a window.** In almost every window, a reader or two arrived while the first MISS was still being answered, before the CDN had the copy. Even so, 50 people in chat for 8 hours a weekend is about 25,000 invocations a weekend, well inside Hobby. Carried to M9's load tests below.
+  - **Tests:** `pnpm test` runs 2,549 tests, and `pnpm e2e` runs 155 (88 `chromium`, 67 `fantasy`).
+  - **The final whole-milestone review** found 1 Critical, 5 Important and 21 Minor issues:
+    - **the Critical:** a logged-out visitor could hide any post, the race thread included, with five reports;
+    - **the five Important:** live chat running on past the session start; shared `?show=` addresses; threads vanishing with their opening post; no way to edit or delete your own post; chat closing during a long red flag;
+    - all were fixed in #253, two of them in part, along with four Minors re-graded up by their effect;
+    - what's left is carried into M8 and M9 below.
 
 ### M8 — Staff tools (target 12 Feb)
 - **Goal:** a normal weekend needs no staff, and an abnormal one is quick to fix.
@@ -358,7 +382,8 @@ Target dates assume steady work and are yours to move. The ordering is what matt
 - **Carried from M6:**
   - **CDN caching for the public pages** (decision 3). Vercel's CDN doesn't cache a response with `Vary: Cookie`, so the weekend hub, Prices and How prices work run the function on every request. Pick a way to cache the logged-out answer without serving it to a signed-in reader, such as a low-cardinality signed-in header set before the cache. Then measure it in the budget run.
   - Once that cache works, a logged-out countdown can be up to about 6 minutes slow on a stale copy (`s-maxage=60` plus `stale-while-revalidate=300`). Shorten the stale window near a lock.
-- **Carried from M7** (the final review):
+- **Carried from M7** (the final review and the load test):
+  - **Chat cache fills.** The load test saw 2.7 MISSes a 3-second window, not 1, because readers who arrive during the first MISS miss too. Measure it again in the chat-mode load test, and if it matters at beta numbers, ask the next window's address a moment early or collapse requests some other way.
   - **Shared reveals.** `?show=` holds a page's "Show it" on every page since M5, so copying or sharing a revealed address passes the reveal on. (A site link in a post already drops it.) Keep the reveal where the address doesn't carry it, such as history state, across all pages at once.
   - **Chat:**
     - clients can settle up to a window late, because they take the clock from a cached answer;
