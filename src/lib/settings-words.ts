@@ -37,7 +37,7 @@ export function trustWords(level: number): TrustWords {
   return TRUST_WORDS[level] ?? TRUST_WORDS[0]!;
 }
 
-function zoneOrUtc(timeZone: string): string {
+export function zoneOrUtc(timeZone: string): string {
   try {
     new Intl.DateTimeFormat("en-GB", { timeZone });
     return timeZone;

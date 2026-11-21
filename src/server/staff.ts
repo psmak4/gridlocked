@@ -7,8 +7,13 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
+import { z } from "zod";
+import { AUDIT_GROUPS, type AuditGroup } from "@/audit/actions";
+import { auditActors, auditPage } from "@/audit/read";
 import { staffArea, type StaffArea } from "@/staff/area";
+import { staffTime } from "@/staff/time";
 import { getViewer } from "./session";
+import { staffFn, staffInput } from "./staff-fn";
 
 /**
  * Who is in the staff area, for the layout's guard and the menu. Not a
@@ -21,3 +26,39 @@ export const getStaffArea = createServerFn({ method: "GET" }).handler(
     return staffArea(await getViewer(getRequest()));
   },
 );
+
+// --- The audit log (Task 4) --------------------------------------------------
+
+export const auditInput = z.strictObject({
+  who: z.union([z.literal("jobs"), z.uuid()]).optional(),
+  group: z
+    .enum(Object.keys(AUDIT_GROUPS) as [AuditGroup, ...AuditGroup[]])
+    .optional(),
+  before: z.uuid().optional(),
+});
+export type AuditInput = z.infer<typeof auditInput>;
+
+/** A page of the audit log, with each row's time in the viewer's zone. */
+export const getAuditLog = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: auditInput,
+      handler: async ({ db, now, viewer }, input) => {
+        const page = await auditPage(db, input);
+        return {
+          rows: page.rows.map((row) => ({
+            ...row,
+            whenLabel: staffTime(
+              new Date(row.when),
+              viewer.profile.timezone,
+              now,
+            ),
+          })),
+          next: page.next,
+          actors: await auditActors(db),
+        };
+      },
+    }),
+  );

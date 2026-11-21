@@ -23,7 +23,15 @@ export type StaffScreen = {
   role: "moderator" | "admin";
 };
 
-export const STAFF_SCREENS: StaffScreen[] = [];
+export const STAFF_SCREENS: StaffScreen[] = [
+  {
+    id: "audit",
+    label: "Audit log",
+    href: "/staff/audit",
+    group: "history",
+    role: "admin",
+  },
+];
 
 export type StaffMenuItem = StaffScreen & {
   /** Waiting items (Tasks 10 and 11), when there are any. */

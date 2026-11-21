@@ -162,7 +162,7 @@ describe("account deletion (DM 6.7)", () => {
         actorUserId: userId,
         actorKind: "user",
         actorLabel: null,
-        action: "profile.update",
+        action: "user.email.update",
         entityType: "user",
         entityId: userId,
         before: null,

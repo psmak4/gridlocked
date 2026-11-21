@@ -1,6 +1,7 @@
 import { auditLog } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import type { AuditAction } from "./actions";
 
 /** One `audit_log` row (DM 6.6), less its id and timestamp. */
 export interface AuditEntry {
@@ -10,7 +11,8 @@ export interface AuditEntry {
   impersonatingUserId?: string | null;
   actorKind: "admin" | "moderator" | "user" | "system" | "job";
   actorLabel: string | null;
-  action: string;
+  /** One of `AUDIT_ACTIONS`, so the audit screen can name it. */
+  action: AuditAction;
   entityType: string;
   entityId: string;
   before: Record<string, unknown> | null;
