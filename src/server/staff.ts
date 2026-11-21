@@ -45,6 +45,7 @@ import {
   scoringGame,
   startDryRun,
 } from "@/staff/scoring";
+import { nextPrices, setAdminPrice } from "@/staff/prices";
 import { checkProviderAgain, sessionResults } from "@/staff/session-results";
 import { staffTime } from "@/staff/time";
 import { webDueStore } from "./due-store";
@@ -559,5 +560,43 @@ export const discardScoring = createServerFn({ method: "POST" })
       input: gameReason,
       handler: async ({ db, now, viewer, requestId }, input) =>
         discardGameDryRun(db, now, staffActor(viewer, requestId), input),
+    }),
+  );
+
+// --- Prices: the next event's list, and one price set by hand (Task 9) -------
+
+/** The prices screen: the next event's list with each asset's inputs. */
+export const getPrices = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({}),
+      handler: async ({ db }) => {
+        const game = await scoringGame(db);
+        if (!game) return { game: null, prices: null };
+        return { game, prices: await nextPrices(db, game.id) };
+      },
+    }),
+  );
+
+/** **Change one by hand**: the new price in $M, to one decimal place. */
+export const savePrice = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        gameId: z.uuid(),
+        eventId: z.uuid(),
+        assetId: z.uuid(),
+        price: z.string().regex(/^\d{1,3}(\.\d)?$/),
+        reason: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) =>
+        setAdminPrice(db, now, staffActor(viewer, requestId), {
+          ...input,
+          price: Math.round(Number(input.price) * 10),
+        }),
     }),
   );
