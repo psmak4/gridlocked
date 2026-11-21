@@ -34,7 +34,10 @@ import {
   setAvailability,
 } from "@/staff/availability";
 import { REASON_MAX, StaffError } from "@/staff/errors";
+import { correctResult, revokeOverride } from "@/staff/results";
+import { CORRECTION_FIELDS, correctionSummary } from "@/staff/result-words";
 import { changeSeats, recordSubstitution } from "@/staff/roster";
+import { checkProviderAgain, sessionResults } from "@/staff/session-results";
 import { staffTime } from "@/staff/time";
 import { webDueStore } from "./due-store";
 import { getViewer } from "./session";
@@ -366,5 +369,99 @@ export const saveAvailability = createServerFn({ method: "POST" })
           ...input,
           reason: input.note,
         }),
+    }),
+  );
+
+// --- Session results and corrections (Task 7) -------------------------------
+
+/** One session's results board, its times in the viewer's zone. */
+export const getSessionResults = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({ sessionId: z.uuid() }),
+      handler: async ({ db, now, viewer }, input) => {
+        const view = await sessionResults(db, input.sessionId);
+        if (!view) throw new StaffError("not_found");
+        const zone = viewer.profile.timezone;
+        return {
+          ...view,
+          source: view.source && {
+            kind: view.source.kind,
+            provider: view.source.provider,
+            lastCheckedLabel: view.source.lastCheckedAt
+              ? staffTime(view.source.lastCheckedAt, zone, now)
+              : null,
+          },
+          changes: view.changes.map((c) => ({
+            id: c.id,
+            driverId: c.driverId,
+            what: c.what,
+            whenLabel: staffTime(c.detectedAt, zone, now),
+          })),
+          overrides: view.overrides.map((o) => ({
+            id: o.id,
+            driverId: o.driverId,
+            driver: o.driver,
+            kind: o.kind,
+            summary: correctionSummary(o.kind, o.fields),
+            reason: o.reason,
+            active: o.active,
+            whenLabel: staffTime(o.createdAt, zone, now),
+            revokedLabel: o.revokedAt
+              ? staffTime(o.revokedAt, zone, now)
+              : null,
+          })),
+        };
+      },
+    }),
+  );
+
+/** Add a correction: one change to one driver's row, re-scoring the session. */
+export const saveCorrection = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        sessionId: z.uuid(),
+        driverId: z.uuid(),
+        what: z.enum(CORRECTION_FIELDS),
+        value: z.string().max(40),
+        reason: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) => {
+        await correctResult(db, now, staffActor(viewer, requestId), input);
+        return {};
+      },
+    }),
+  );
+
+/** Revoke a correction, so the driver goes back to the provider's row. */
+export const revokeCorrection = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({ overrideId: z.uuid(), reason: reasonText }),
+      handler: async ({ db, now, viewer, requestId }, input) => {
+        await revokeOverride(db, now, staffActor(viewer, requestId), input);
+        return {};
+      },
+    }),
+  );
+
+/** Check provider again: the session's next poll, due at once. */
+export const checkProvider = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({ sessionId: z.uuid() }),
+      handler: async ({ db, now }, input) => {
+        const store = await webDueStore();
+        return checkProviderAgain(db, now, input, store ?? undefined);
+      },
     }),
   );

@@ -20,6 +20,7 @@ import {
 import { planGameEvents } from "@/game/games";
 import { planGameJobs } from "@/game/jobs";
 import { type DueStore, publishDueTimes } from "@/jobs/due-times";
+import { POLLED_KINDS } from "@/jobs/kinds";
 import { planEventJobs } from "@/jobs/plan-event";
 import type { TickDb } from "@/jobs/tick";
 import { SESSION_LABELS } from "@/play/weekend";
@@ -507,6 +508,8 @@ export type CalendarSession = {
   end: string;
   timeSource: "provider" | "admin";
   status: string;
+  /** Polled kinds have a results board (Task 7). */
+  hasResults: boolean;
 };
 
 export type EventDetail = {
@@ -572,6 +575,7 @@ export async function eventDetail(
       end: s.scheduledEnd.toISOString(),
       timeSource: s.timeSource,
       status: s.status,
+      hasResults: (POLLED_KINDS as readonly string[]).includes(s.kind),
     })),
     history: history.rows,
   };

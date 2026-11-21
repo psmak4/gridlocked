@@ -17,7 +17,13 @@ import {
 } from "@/db/schema";
 import { SessionFinalError } from "@/results/overrides";
 import { advanceStatus } from "@/results/status";
-import { insertResult } from "./results";
+import {
+  correctResult,
+  insertResult,
+  overrideResult,
+  revokeOverride,
+  suppressResult,
+} from "./results";
 import type { StaffActor } from "./roster";
 
 const T0 = new Date("2026-08-01T15:00:00.000Z");
@@ -281,5 +287,207 @@ describe("insertResult", () => {
       );
       await unchanged();
     });
+  });
+});
+
+// M8 Task 7: going back to the provider, and hiding a row it should not have.
+describe("revokeOverride and suppressResult", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let sessionId: string;
+  let norris: string;
+
+  const row = async (driverId: string) =>
+    (
+      await t.db
+        .select()
+        .from(effectiveResults)
+        .where(
+          and(
+            eq(effectiveResults.sessionId, sessionId),
+            eq(effectiveResults.driverId, driverId),
+          ),
+        )
+    )[0];
+  const state = async () =>
+    (
+      await t.db
+        .select()
+        .from(sessionResultState)
+        .where(eq(sessionResultState.sessionId, sessionId))
+    )[0]!;
+  const correct = async () => {
+    await overrideResult(t.db, T1, {
+      sessionId,
+      driverId: norris,
+      fields: { position: 2 },
+      reason: "Lap time deleted",
+      actor: ACTOR,
+    });
+    const [active] = await t.db
+      .select()
+      .from(resultOverrides)
+      .where(eq(resultOverrides.driverId, norris));
+    return active!.id;
+  };
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    await seedWorldWithSeats(t.db);
+    sessionId = await sessionIdFor(t.db, 14, "qualifying");
+    await seedEntriesFor(t.db, sessionId);
+    await ingest(
+      t.db,
+      T0,
+      sessionId,
+      "qualifying",
+      loadBody("jolpica/2026/r14-qualifying.json"),
+    );
+    await advanceStatus(t.db, T0, sessionId);
+    norris = await idFor(t.db, "driver", "norris");
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("revokeOverride brings back the provider value and re-scores the session", async () => {
+    const overrideId = await correct();
+    expect(await row(norris)).toMatchObject({ position: 2, overridden: true });
+    const before = (await state()).version;
+
+    const result = await revokeOverride(t.db, T2, ACTOR, {
+      overrideId,
+      reason: "The stewards reinstated the lap",
+    });
+
+    expect(await row(norris)).toMatchObject({ position: 1, overridden: false });
+    expect((await state()).version).toBe(before + 1);
+    expect(result.sessions.map((s) => s.sessionId)).toContain(sessionId);
+    const audits = await t.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "result_override.revoke"));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      entityType: "result_override",
+      entityId: overrideId,
+      reason: "The stewards reinstated the lap",
+      requestId: "r1",
+    });
+  });
+
+  it("revokeOverride on a revoked override is refused with not_found", async () => {
+    const overrideId = await correct();
+    await revokeOverride(t.db, T2, ACTOR, { overrideId, reason: "Undo" });
+    const audits = (await t.db.select().from(auditLog)).length;
+    await expect(
+      revokeOverride(t.db, T2, ACTOR, { overrideId, reason: "Undo again" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      revokeOverride(t.db, T2, ACTOR, {
+        overrideId: "00000000-0000-7000-8000-000000000000",
+        reason: "Undo",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(await t.db.select().from(auditLog)).toHaveLength(audits);
+  });
+
+  it("suppressResult hides a bogus provider row and audits result_override.create", async () => {
+    await suppressResult(t.db, T1, ACTOR, {
+      sessionId,
+      driverId: norris,
+      reason: "The provider listed a driver who didn't run",
+    });
+    expect(await row(norris)).toBeUndefined();
+    const [override] = await t.db
+      .select()
+      .from(resultOverrides)
+      .where(eq(resultOverrides.driverId, norris));
+    expect(override).toMatchObject({ kind: "suppress", revokedAt: null });
+    const [entry] = await t.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "result_override.create"));
+    expect(entry).toMatchObject({
+      entityId: override!.id,
+      after: { sessionId, driverId: norris, kind: "suppress", fields: {} },
+    });
+  });
+
+  it("suppressResult refuses a driver with no row in the session", async () => {
+    const bearman = await idFor(t.db, "driver", "bearman");
+    await expect(
+      suppressResult(t.db, T1, ACTOR, {
+        sessionId,
+        driverId: bearman,
+        reason: "Nothing to hide",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(await t.db.select().from(resultOverrides)).toEqual([]);
+  });
+
+  it("a correction to a final session keeps it final, re-scores it and counts a reopen", async () => {
+    const overrideId = await correct();
+    await t.db
+      .update(sessionResultState)
+      .set({ status: "final" })
+      .where(eq(sessionResultState.sessionId, sessionId));
+    const before = await state();
+
+    await revokeOverride(t.db, T2, ACTOR, {
+      overrideId,
+      reason: "Overturned on appeal",
+    });
+
+    const after = await state();
+    expect(after).toMatchObject({
+      status: "final",
+      version: before.version + 1,
+      reopenedCount: before.reopenedCount + 1,
+    });
+    expect(await row(norris)).toMatchObject({ position: 1 });
+  });
+
+  it("correctResult keeps a driver's earlier correction beside the new one", async () => {
+    await correctResult(t.db, T1, ACTOR, {
+      sessionId,
+      driverId: norris,
+      what: "position",
+      value: "2",
+      reason: "Lap time deleted",
+    });
+    await correctResult(t.db, T2, ACTOR, {
+      sessionId,
+      driverId: norris,
+      what: "classification",
+      value: "disqualified",
+      reason: "Car under the weight limit",
+    });
+    expect(await row(norris)).toMatchObject({
+      position: 2,
+      classification: "disqualified",
+      providerStatus: "Disqualified",
+      overridden: true,
+      overrideReason: "Car under the weight limit",
+    });
+  });
+
+  it("correctResult refuses a value that doesn't fit what it changes", async () => {
+    for (const [what, value] of [
+      ["position", "first"],
+      ["position", "0"],
+      ["classification", "winner"],
+      ["grid", "-1"],
+    ] as const) {
+      await expect(
+        correctResult(t.db, T1, ACTOR, {
+          sessionId,
+          driverId: norris,
+          what,
+          value,
+          reason: "Bad value",
+        }),
+      ).rejects.toMatchObject({ code: "invalid" });
+    }
+    expect(await t.db.select().from(resultOverrides)).toEqual([]);
   });
 });
