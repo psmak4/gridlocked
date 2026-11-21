@@ -5,19 +5,9 @@
  */
 import { requireStaff } from "@/identity/staff-roles";
 import { IdentityError, type Viewer } from "@/identity/viewer";
+import type { StaffArea } from "./area-redirect";
 
-export type StaffArea =
-  | { state: "signed_out" }
-  | { state: "not_staff" }
-  /** Staff, without two-step sign-in or not unlocked this session. */
-  | { state: "locked" }
-  | {
-      state: "open";
-      username: string;
-      role: "moderator" | "admin";
-      /** Waiting items by menu screen (Tasks 10 and 11). */
-      counts: Record<string, number>;
-    };
+export { type StaffArea, staffAreaRedirect } from "./area-redirect";
 
 export function staffArea(viewer: Viewer | null): StaffArea {
   try {
@@ -39,19 +29,5 @@ export function staffArea(viewer: Viewer | null): StaffArea {
       default:
         return { state: "not_staff" };
     }
-  }
-}
-
-/** Where the layout sends this visitor, or null to let them in. */
-export function staffAreaRedirect(area: StaffArea): string | null {
-  switch (area.state) {
-    case "open":
-      return null;
-    case "locked":
-      return "/settings/security";
-    case "signed_out":
-      return "/sign-in";
-    case "not_staff":
-      return "/";
   }
 }
