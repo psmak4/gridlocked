@@ -175,6 +175,18 @@ export async function staleOverride(
   expect(response.status(), await response.text()).toBe(200);
 }
 
+/** Opens a team change in the review queue: `code` seen at `team`. */
+export async function teamChangeReview(
+  request: APIRequestContext,
+  code: string,
+  team: string,
+): Promise<void> {
+  const response = await request.patch("/api/test/game", {
+    data: { teamChange: { code, team } },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}
+
 /**
  * Adds `count` accounts with saved teams copied from the latest saved one
  * (the Boost moved round its drivers, so totals differ), in the league with `joinCode`

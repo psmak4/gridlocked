@@ -527,7 +527,7 @@ describe("advanceStatus", () => {
       const id = await ingestRecorded(t.db, T0, 18, "race", "r18-results.json");
       const ctx = await getSessionContext(t.db, id);
       await openReviewItem(t.db, T0, {
-        kind: "provider_mismatch",
+        kind: "normalize_after_final",
         seasonId: ctx.seasonId,
         sessionId: id,
         details: {},

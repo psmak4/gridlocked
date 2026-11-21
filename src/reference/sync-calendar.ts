@@ -13,6 +13,7 @@ import type {
   SessionKind,
   SyncReport,
 } from "./calendar-types";
+import type { ReviewKind } from "@/staff/review-kinds";
 import { openReviewItem } from "./review";
 import { ensureSeason } from "./season";
 import { kebab, normalizeEventName, uniqueSlug } from "./slugs";
@@ -279,7 +280,7 @@ export async function syncCalendar(
     // --- Review items ----------------------------------------------------
     let reviewCount = 0;
     const openReview = async (item: {
-      kind: string;
+      kind: ReviewKind;
       eventId?: string | null;
       sessionId?: string | null;
       details: Record<string, unknown>;

@@ -3,6 +3,7 @@ import { reviewItems } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { ReviewKind } from "@/staff/review-kinds";
 
 /**
  * What `openReviewItem` needs: any Drizzle Postgres database or transaction.
@@ -21,7 +22,8 @@ export async function openReviewItem(
   db: AnyPgDb,
   now: Date,
   item: {
-    kind: string;
+    /** One of `REVIEW_KINDS`, so the queue has words and actions for it. */
+    kind: ReviewKind;
     severity?: "warning" | "blocking";
     /** Null for an item that belongs to no season (a dead job). */
     seasonId: string | null;
@@ -66,7 +68,7 @@ export function canonical(value: unknown): string {
 export const AUTO_RESOLUTION = "auto: no longer detected";
 
 export interface Finding {
-  kind: string;
+  kind: ReviewKind;
   seasonId: string;
   eventId: string;
   sessionId?: string | null;

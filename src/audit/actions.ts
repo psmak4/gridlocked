@@ -27,6 +27,8 @@ export const AUDIT_ACTIONS = {
     group: "results",
   },
   "game.rescore_approved": { label: "Re-score approved", group: "results" },
+  "review_item.resolve": { label: "Review item resolved", group: "results" },
+  "review_item.dismiss": { label: "Review item dismissed", group: "results" },
   "ruleset_version.correct": { label: "Ruleset corrected", group: "results" },
   "game_session_exception.set": {
     label: "Session left out of scoring",
