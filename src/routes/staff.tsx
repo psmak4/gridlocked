@@ -8,7 +8,7 @@ import { StaffShell } from "@/components/staff/staff-shell";
 import { privateHeaders } from "@/lib/private-headers";
 import { markPrivate } from "@/server/account";
 import { getStaffArea } from "@/server/staff";
-import { staffAreaRedirect } from "@/staff/area";
+import { staffAreaRedirect } from "@/staff/area-redirect";
 import { STAFF_SCREENS, staffMenu } from "@/staff/menu";
 
 /**
