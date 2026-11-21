@@ -5,7 +5,13 @@ import { createTestDb } from "../../tests/helpers/test-db";
 import { seedViewer } from "../../tests/helpers/community";
 import { seedEventSessions } from "../../tests/helpers/sessions";
 import { createMemoryChatArchiveStore } from "../../tests/helpers/memory-chat-archive-store";
-import { chatArchives, chatMessages, sessions, threads } from "@/db/schema";
+import {
+  chatArchives,
+  chatMessages,
+  modQueueItems,
+  sessions,
+  threads,
+} from "@/db/schema";
 import { buildExport } from "@/identity/export";
 import type { Viewer } from "@/identity/viewer";
 import {
@@ -16,6 +22,7 @@ import {
   type ChatArchiveStore,
 } from "./archive";
 import { sendChat } from "./chat";
+import { report } from "./moderation";
 import { openSessionThreads } from "./session-threads";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
@@ -120,6 +127,44 @@ describe("the chat archive (DM 5.5)", () => {
     });
     // And again: nothing more.
     expect(await archiveDueChats(t.db, memory.store, daysAfter(31))).toBe(0);
+  });
+
+  it("the chat archive closes an open queue item about a message it archives, as dismissed, and keeps its snapshot", async () => {
+    const [message] = await rows();
+    const reporter = await seedViewer(t.db, {
+      trustLevel: 1,
+      username: "reporter",
+    });
+    const filed = await report(
+      t.db,
+      LIVE,
+      reporter,
+      { targetType: "chat_message", targetId: message!.id, reason: "abuse" },
+      { verifyCaptcha: async () => true },
+    );
+    if (!filed.ok) throw new Error(filed.error);
+    const before = (
+      await t.db
+        .select()
+        .from(modQueueItems)
+        .where(eq(modQueueItems.id, filed.queueItemId))
+    )[0]!;
+
+    expect(
+      await archiveThreadChat(t.db, memory.store, daysAfter(30), threadId),
+    ).toBe("archived");
+    const [after] = await t.db
+      .select()
+      .from(modQueueItems)
+      .where(eq(modQueueItems.id, filed.queueItemId));
+    expect(after).toMatchObject({
+      status: "dismissed",
+      resolution: "archived before review",
+      resolvedAt: daysAfter(30),
+      resolvedBy: null,
+      version: before.version + 1,
+    });
+    expect(after!.contentSnapshot).toEqual(before.contentSnapshot);
   });
 
   it("removed messages aren't archived", async () => {

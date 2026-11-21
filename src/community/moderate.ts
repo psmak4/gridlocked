@@ -8,9 +8,10 @@
  * `ban` and `unban` stay with Better Auth's admin plugin; `set_trust_level`
  * has its own path (identity/trust). Neither is taken here.
  */
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
 import {
+  auditLog,
   categories,
   chatMessages,
   modActions,
@@ -45,6 +46,7 @@ const ACTS_ON = {
   mute: ["user"],
   unmute: ["user"],
   chat_ban: ["user"],
+  chat_unban: ["user"],
 } as const satisfies Partial<Record<ModAction, readonly string[]>>;
 
 export type M7ModAction = keyof typeof ACTS_ON;
@@ -86,7 +88,7 @@ export type ModerateInput = {
 
 export type ModerateRefusal = {
   ok: false;
-  error: "not_found" | "invalid" | "version_conflict";
+  error: "not_found" | "invalid" | "version_conflict" | "item_mismatch";
 };
 
 export type ModerateResult =
@@ -201,6 +203,51 @@ async function changeChat(
   };
 }
 
+/**
+ * What a removed thread was before its latest removal, read from that
+ * removal's audit row: `open` or `locked`, and `open` when nothing says.
+ */
+async function statusBeforeRemoval(
+  db: Db,
+  threadId: string,
+): Promise<"open" | "locked"> {
+  const [removal] = await db
+    .select({ before: auditLog.before })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.action, "moderation.remove"),
+        eq(auditLog.entityType, "thread"),
+        eq(auditLog.entityId, threadId),
+      ),
+    )
+    .orderBy(desc(auditLog.id))
+    .limit(1);
+  const status = (removal?.before as { status?: unknown } | null)?.status;
+  return status === "locked" ? "locked" : "open";
+}
+
+/**
+ * Refuses an action that names a queue item about something else. A user
+ * action may name the item about that user's content ("remove and mute").
+ */
+async function checkItemTarget(db: Db, input: ModerateInput): Promise<void> {
+  const [item] = await db
+    .select({
+      targetType: modQueueItems.targetType,
+      targetId: modQueueItems.targetId,
+      targetUserId: modQueueItems.targetUserId,
+    })
+    .from(modQueueItems)
+    .where(eq(modQueueItems.id, input.queueItemId!));
+  if (!item) throw new Refused(refused("not_found"));
+  const same =
+    item.targetType === input.targetType && item.targetId === input.targetId;
+  const theirs =
+    input.targetType === "user" && item.targetUserId === input.targetId;
+  if (!same && !theirs) throw new Refused(refused("item_mismatch"));
+}
+
 async function changeThread(db: Db, input: ModerateInput): Promise<Change> {
   const [thread] = await db
     .select({
@@ -224,7 +271,8 @@ async function changeThread(db: Db, input: ModerateInput): Promise<Change> {
       before = { status: thread.status };
       break;
     case "restore": {
-      if (thread.status === "removed") set = { status: "open" };
+      if (thread.status === "removed")
+        set = { status: await statusBeforeRemoval(db, input.targetId) };
       before = { status: thread.status };
       // A thread report hides the thread by hiding its opening post: "Keep
       // it" shows that post again.
@@ -299,6 +347,12 @@ const RESTRICTS: Partial<Record<M7ModAction, RestrictionKind>> = {
   chat_ban: "chat_ban",
 };
 
+/** The restriction each lift ends. */
+const LIFTS: Partial<Record<M7ModAction, RestrictionKind>> = {
+  unmute: "mute",
+  chat_unban: "chat_ban",
+};
+
 async function changeUser(
   db: Db,
   now: Date,
@@ -333,15 +387,16 @@ async function changeUser(
       after: { kind, until: input.until?.toISOString() ?? null },
     };
   }
-  if (input.action === "unmute") {
-    // Lifts what keeps them quiet: a mute and a chat ban.
+  const lifts = LIFTS[input.action];
+  if (lifts) {
+    // Each lift ends only its own kind: unmute a mute, chat_unban a chat ban.
     const lifted = await db
       .update(userRestrictions)
       .set({ liftedAt: now })
       .where(
         and(
           eq(userRestrictions.userId, user.id),
-          inArray(userRestrictions.kind, ["mute", "chat_ban"]),
+          eq(userRestrictions.kind, lifts),
           isNull(userRestrictions.liftedAt),
         ),
       )
@@ -372,6 +427,7 @@ const NOTIFIED = new Set<string>([
   "mute",
   "chat_ban",
   "unmute",
+  "chat_unban",
 ]);
 
 export async function moderate(
@@ -390,6 +446,7 @@ export async function moderate(
   try {
     return await db.transaction(async (tx): Promise<ModerateResult> => {
       const t = tx as unknown as Db;
+      if (input.queueItemId !== undefined) await checkItemTarget(t, input);
       let change: Change;
       if (input.targetType === "user") {
         change = await changeUser(t, now, actor, input);

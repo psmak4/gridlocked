@@ -20,9 +20,10 @@ type Result = { ok: true } | { ok: false; error: GameErrorCode };
 
 type StandingsScreenProps = {
   page: StandingsPage;
-  /** The page after `afterRank` (See more). */
+  /** The page after `afterRank` (See more), of the table `version` names. */
   more: (
     afterRank: number,
+    version: string,
   ) => Promise<StandingsPage | { ok: false; error: GameErrorCode }>;
   /** "Show it": these sessions, on this page only. */
   show: (sessionIds: string[]) => void;
@@ -326,19 +327,32 @@ export function StandingsScreen({
 }: StandingsScreenProps) {
   // Pages read with See more belong to the page they followed: a reload
   // (Mark as watched) starts again from its first page.
-  const [loaded, setLoaded] = useState<{
+  // A See more that finds the table changed replaces the first page too
+  // (`top`), and says so (`changed`).
+  type Loaded = {
     after: StandingsPage;
+    top: StandingRow[] | null;
     rows: StandingRow[];
     next: number | null;
-  }>({ after: page, rows: [], next: page.next });
-  const current =
-    loaded.after === page ? loaded : { after: page, rows: [], next: page.next };
+    version: string;
+    changed: boolean;
+  };
+  const fresh = (p: StandingsPage): Loaded => ({
+    after: p,
+    top: null,
+    rows: [],
+    next: p.next,
+    version: p.version,
+    changed: false,
+  });
+  const [loaded, setLoaded] = useState<Loaded>(() => fresh(page));
+  const current = loaded.after === page ? loaded : fresh(page);
   const extra = current.rows;
   const next = current.next;
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const { league, through } = page;
-  const rows = [...page.rows, ...extra];
+  const rows = [...(current.top ?? page.rows), ...extra];
   const canLeave =
     (league.kind === "public" || league.kind === "private") &&
     league.myTeams.length > 0;
@@ -356,12 +370,21 @@ export function StandingsScreen({
     setLoading(true);
     setFailed(false);
     try {
-      const result = await more(next);
+      const result = await more(next, current.version);
       if ("ok" in result) {
         setFailed(true);
-      } else {
+      } else if (result.restarted) {
         setLoaded({
           after: page,
+          top: result.rows,
+          rows: [],
+          next: result.next,
+          version: result.version,
+          changed: true,
+        });
+      } else {
+        setLoaded({
+          ...current,
           rows: [...extra, ...result.rows],
           next: result.next,
         });
@@ -415,6 +438,11 @@ export function StandingsScreen({
               {page.status === "provisional" ? (
                 <p className="m-0 text-[14px] text-ink-muted">
                   {`Provisional until round ${through.round}'s results are final.`}
+                </p>
+              ) : null}
+              {current.changed ? (
+                <p role="status" className="m-0 text-[16px] font-semibold">
+                  {"The table changed. Here's the new one."}
                 </p>
               ) : null}
               <StandingsList rows={rows} />

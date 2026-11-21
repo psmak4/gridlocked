@@ -1553,7 +1553,11 @@ A user can report a given target only once.
 
 **`mod_actions`:** the moderation log. Users can see actions taken against them.
 - Columns: `moderator_user_id` (null for the system), `action`, `target_type`, `target_id`, `target_user_id`, `reason`, `until`, `queue_item_id`, `created_at`.
-- `action` values: `remove`, `restore`, `lock`, `unlock`, `pin`, `unpin`, `move`, `retitle`, `warn`, `mute`, `unmute`, `chat_ban`, `ban`, `unban`, `set_trust_level`.
+- `action` values: `remove`, `restore`, `lock`, `unlock`, `pin`, `unpin`, `move`, `retitle`, `warn`, `mute`, `unmute`, `chat_ban`, `chat_unban`, `ban`, `unban`, `set_trust_level`.
+- **Each lift ends only its own restriction** (M8): `unmute` lifts a mute and `chat_unban` a chat ban.
+- **Restoring a removed thread** puts back the status it had before its latest removal (`open` or `locked`), read from that removal's audit row.
+- **An action that names a queue item must be about that item's target,** or about the user whose content it is ("remove and mute"). Anything else is refused (`item_mismatch`).
+- **A reported chat message archived before anyone acts on it** closes its queue item as `dismissed`, resolution "archived before review", with nobody as the resolver. The snapshot stays as evidence.
 - Every action also writes the general `audit_log` (Part 6).
 
 **`user_restrictions`:** active limits on a user.

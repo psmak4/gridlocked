@@ -14,7 +14,9 @@ import { and, asc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   chatArchives,
   chatMessages,
+  modQueueItems,
   profiles,
+  reports,
   sessions,
   threads,
   users,
@@ -69,6 +71,51 @@ function decode(body: Uint8Array): ArchivedLine[] {
 export type ArchiveOutcome =
   "not_due" | "not_found" | "empty" | "archived" | "already";
 
+/** What closes a report about a chat message that's archived first. */
+export const ARCHIVED_BEFORE_REVIEW = "archived before review";
+
+/**
+ * Closes the open queue items about the thread's chat messages, before they
+ * go: dismissed, with nobody as the resolver, keeping the snapshot. A
+ * message that's archived can't be acted on, so its item would stay open
+ * for good. Logged-out reporters' addresses go too, as at any resolution
+ * (DM 5.10).
+ */
+async function closeArchivedItems(db: Db, now: Date, threadId: string) {
+  const messages = db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(eq(chatMessages.threadId, threadId));
+  const closed = await db
+    .update(modQueueItems)
+    .set({
+      status: "dismissed",
+      resolvedBy: null,
+      resolvedAt: now,
+      resolution: ARCHIVED_BEFORE_REVIEW,
+      version: sql`${modQueueItems.version} + 1`,
+    })
+    .where(
+      and(
+        eq(modQueueItems.status, "open"),
+        eq(modQueueItems.targetType, "chat_message"),
+        inArray(modQueueItems.targetId, messages),
+      ),
+    )
+    .returning({ id: modQueueItems.id });
+  if (closed.length > 0) {
+    await db
+      .update(reports)
+      .set({ reporterContact: null })
+      .where(
+        inArray(
+          reports.queueItemId,
+          closed.map((c) => c.id),
+        ),
+      );
+  }
+}
+
 /**
  * Archives one session thread's chat, once its session ended 30 or more
  * days ago. The order makes a crash at any point safe to run again: upload,
@@ -98,6 +145,7 @@ export async function archiveThreadChat(
     // A run that recorded the file and died before the delete committed
     // can't happen (they share a transaction), but rows sent since can't
     // either: chat closed a month ago. Clear anything left all the same.
+    await closeArchivedItems(db, now, threadId);
     await db.delete(chatMessages).where(eq(chatMessages.threadId, threadId));
     return "already";
   }
@@ -119,6 +167,7 @@ export async function archiveThreadChat(
     .orderBy(asc(chatMessages.id));
   if (rows.length === 0) {
     // Nothing to keep: removed messages only, or no chat at all.
+    await closeArchivedItems(db, now, threadId);
     await db.delete(chatMessages).where(eq(chatMessages.threadId, threadId));
     return "empty";
   }
@@ -156,6 +205,7 @@ export async function archiveThreadChat(
         archivedAt: now,
       })
       .onConflictDoNothing();
+    await closeArchivedItems(t, now, threadId);
     await t.delete(chatMessages).where(eq(chatMessages.threadId, threadId));
   });
   return "archived";

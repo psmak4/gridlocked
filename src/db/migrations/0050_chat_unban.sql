@@ -1,0 +1,2 @@
+ALTER TABLE "mod_actions" DROP CONSTRAINT "mod_actions_action_check";--> statement-breakpoint
+ALTER TABLE "mod_actions" ADD CONSTRAINT "mod_actions_action_check" CHECK ("mod_actions"."action" in ('remove', 'restore', 'lock', 'unlock', 'pin', 'unpin', 'move', 'retitle', 'warn', 'mute', 'unmute', 'chat_ban', 'chat_unban', 'ban', 'unban', 'set_trust_level'));

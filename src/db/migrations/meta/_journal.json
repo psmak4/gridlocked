@@ -351,6 +351,13 @@
       "when": 1794958847023,
       "tag": "0049_push_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795251753979,
+      "tag": "0050_chat_unban",
+      "breakpoints": true
     }
   ]
 }
