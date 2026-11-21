@@ -49,6 +49,9 @@ const driverName = (d: { displayName: string | null; familyName: string }) =>
  * Refuses, writing nothing: a blank reason, an event or driver that isn't
  * there, a cancelled or completed event (`invalid`), and one that has locked
  * (`event_locked`). The same status and note again writes nothing.
+ * `afterLock` is the review queue's "Mark unavailable" for a driver missing
+ * from results: it records the status on a locked or completed event too,
+ * and tells nobody, since the event is past.
  */
 export async function setAvailability(
   db: Db,
@@ -61,6 +64,7 @@ export async function setAvailability(
     note: string;
     reason: string;
   },
+  options: { afterLock?: boolean } = {},
 ): Promise<{ owners: number }> {
   const reason = staffReason(input.reason);
   if (!(AVAILABILITY_STATUSES as readonly string[]).includes(input.status)) {
@@ -75,8 +79,13 @@ export async function setAvailability(
       .where(eq(events.id, eventId))
       .for("update");
     if (!event) throw new StaffError("not_found");
-    if (event.status !== "scheduled") throw new StaffError("invalid");
-    if (event.lockAt <= now) throw new StaffError("event_locked");
+    const past = event.lockAt <= now || event.status === "completed";
+    if (options.afterLock) {
+      if (event.status === "cancelled") throw new StaffError("invalid");
+    } else {
+      if (event.status !== "scheduled") throw new StaffError("invalid");
+      if (past) throw new StaffError("event_locked");
+    }
     const [driver] = await tx
       .select({ id: drivers.id })
       .from(drivers)
@@ -113,7 +122,7 @@ export async function setAvailability(
         : null,
       after: { driverId, status, note },
     });
-    if (existing?.status === status) return { owners: 0 };
+    if (existing?.status === status || past) return { owners: 0 };
     return {
       owners: await notifyAvailability(tx, now, { eventId, driverId, status }),
     };

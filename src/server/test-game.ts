@@ -17,9 +17,10 @@
  * file in src/server that may import src/providers (eslint.config.mjs).
  */
 import path from "node:path";
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import {
   assetPrices,
+  constructors,
   drivers,
   events,
   gameEvents,
@@ -29,12 +30,14 @@ import {
   poolAssets,
   priceUpdateRuns,
   scoringRuns,
+  seatAssignments,
   profiles,
   sessions,
   teams,
   users,
 } from "@/db/schema";
 import { SYSTEM_USER_ID } from "@/identity/system";
+import { openReviewItem } from "@/reference/review";
 import { addOverride } from "@/results/overrides";
 import { saveLineup } from "@/game/lineups";
 import { withdrawPoolAsset } from "@/game/pool";
@@ -192,6 +195,63 @@ export function staleTestOverride(
         createdBy: SYSTEM_USER_ID,
       });
       return { sessionId: race.id };
+    }),
+  );
+}
+
+/**
+ * Opens a team change in the review queue for the next event that hasn't
+ * locked: the driver with `code` seen at constructor `team` (its slug), as
+ * the roster check would find it. Something for the queue to resolve.
+ */
+export function teamChangeTestReview(input: {
+  code: string;
+  team: string;
+}): Promise<{ eventId: string }> {
+  return oneAtATime(() =>
+    withDb(async (db) => {
+      if (!live) throw new HarnessError(409, "Seed the game first");
+      const now = (await resolveClock({ mode: "replay", db })).now();
+      const [event] = await db
+        .select({ id: events.id, seasonId: events.seasonId })
+        .from(events)
+        .where(and(eq(events.status, "scheduled"), gt(events.lockAt, now)))
+        .orderBy(asc(events.lockAt))
+        .limit(1);
+      if (!event) throw new HarnessError(409, "No event is still to lock");
+      const [driver] = await db
+        .select({ id: drivers.id })
+        .from(drivers)
+        .where(eq(drivers.code, input.code));
+      const [team] = await db
+        .select({ id: constructors.id })
+        .from(constructors)
+        .where(eq(constructors.slug, input.team));
+      if (!driver || !team)
+        throw new HarnessError(400, "No such driver or team");
+      const [seat] = await db
+        .select({ constructorId: seatAssignments.constructorId })
+        .from(seatAssignments)
+        .where(
+          and(
+            eq(seatAssignments.driverId, driver.id),
+            eq(seatAssignments.role, "race"),
+            isNull(seatAssignments.validTo),
+          ),
+        );
+      await openReviewItem(db, now, {
+        kind: "team_change",
+        seasonId: event.seasonId,
+        eventId: event.id,
+        driverId: driver.id,
+        details: {
+          driverId: driver.id,
+          constructorId: team.id,
+          expectedConstructorId: seat?.constructorId ?? null,
+        },
+        dedupeKey: `test:team_change:${event.id}:${driver.id}`,
+      });
+      return { eventId: event.id };
     }),
   );
 }

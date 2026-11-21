@@ -2,6 +2,7 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { RESULT_STATES, reviewItems, sessionResultState } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { AUTO_RESOLUTION, canonical, openReviewItem } from "@/reference/review";
+import type { ReviewKind } from "@/staff/review-kinds";
 import { getSessionContext } from "./session-context";
 import {
   problemSubject,
@@ -28,12 +29,16 @@ export interface StatusAdvance {
 }
 
 /** Review kinds with their own name (DM 2.9); the rest are `validation_failed`. */
-const OWN_KIND = new Set([
+const OWN_KIND = new Set<string>([
   "unknown_driver",
   "unknown_constructor",
   "team_change",
   "missing_driver",
-]);
+] satisfies ReviewKind[]);
+
+/** A problem's own review kind, or `validation_failed` for the rest. */
+const reviewKindOf = (kind: string): ReviewKind =>
+  OWN_KIND.has(kind) ? (kind as ReviewKind) : "validation_failed";
 
 /**
  * Brings the session's validation review items in line with `problems`:
@@ -91,7 +96,7 @@ async function reconcileValidationItems(
     if (decided) continue;
 
     await openReviewItem(tx, now, {
-      kind: OWN_KIND.has(problem.kind) ? problem.kind : "validation_failed",
+      kind: reviewKindOf(problem.kind),
       severity: "blocking",
       seasonId: ctx.seasonId,
       eventId: ctx.eventId,

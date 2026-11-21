@@ -42,6 +42,7 @@ import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StaffAuditRouteImport } from './routes/staff.audit'
 import { Route as StaffCalendarRouteImport } from './routes/staff.calendar'
 import { Route as StaffPricesRouteImport } from './routes/staff.prices'
+import { Route as StaffReviewRouteImport } from './routes/staff.review'
 import { Route as StaffScoringRouteImport } from './routes/staff.scoring'
 import { Route as StaffSeatsRouteImport } from './routes/staff.seats'
 import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
@@ -65,6 +66,7 @@ import { Route as ApiTestStaffRouteImport } from './routes/api/test.staff'
 import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
 import { Route as StaffCalendarEventIdRouteImport } from './routes/staff.calendar.$eventId'
 import { Route as StaffResultsSessionIdRouteImport } from './routes/staff.results.$sessionId'
+import { Route as StaffReviewItemIdRouteImport } from './routes/staff.review.$itemId'
 import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
 import { Route as TeamSlotPointsRouteImport } from './routes/team.$slot.points'
 
@@ -233,6 +235,11 @@ const StaffPricesRoute = StaffPricesRouteImport.update({
   path: '/prices',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffReviewRoute = StaffReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => StaffRoute,
+} as any)
 const StaffScoringRoute = StaffScoringRouteImport.update({
   id: '/scoring',
   path: '/scoring',
@@ -348,6 +355,11 @@ const StaffResultsSessionIdRoute = StaffResultsSessionIdRouteImport.update({
   path: '/results/$sessionId',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffReviewItemIdRoute = StaffReviewItemIdRouteImport.update({
+  id: '/$itemId',
+  path: '/$itemId',
+  getParentRoute: () => StaffReviewRoute,
+} as any)
 const TeamSlotIndexRoute = TeamSlotIndexRouteImport.update({
   id: '/team/$slot/',
   path: '/team/$slot/',
@@ -387,6 +399,7 @@ export interface FileRoutesByFullPath {
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
   '/staff/prices': typeof StaffPricesRoute
+  '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
   '/t/$threadId': typeof TThreadIdRoute
@@ -416,6 +429,7 @@ export interface FileRoutesByFullPath {
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
+  '/staff/review/$itemId': typeof StaffReviewItemIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -446,6 +460,7 @@ export interface FileRoutesByTo {
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
   '/staff/prices': typeof StaffPricesRoute
+  '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
   '/t/$threadId': typeof TThreadIdRoute
@@ -475,6 +490,7 @@ export interface FileRoutesByTo {
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
+  '/staff/review/$itemId': typeof StaffReviewItemIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot': typeof TeamSlotIndexRoute
 }
@@ -507,6 +523,7 @@ export interface FileRoutesById {
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
   '/staff/prices': typeof StaffPricesRoute
+  '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
   '/t/$threadId': typeof TThreadIdRoute
@@ -536,6 +553,7 @@ export interface FileRoutesById {
   '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
+  '/staff/review/$itemId': typeof StaffReviewItemIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -569,6 +587,7 @@ export interface FileRouteTypes {
     | '/staff/audit'
     | '/staff/calendar'
     | '/staff/prices'
+    | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
     | '/t/$threadId'
@@ -598,6 +617,7 @@ export interface FileRouteTypes {
     | '/settings/delete/confirm'
     | '/staff/calendar/$eventId'
     | '/staff/results/$sessionId'
+    | '/staff/review/$itemId'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesByTo: FileRoutesByTo
@@ -628,6 +648,7 @@ export interface FileRouteTypes {
     | '/staff/audit'
     | '/staff/calendar'
     | '/staff/prices'
+    | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
     | '/t/$threadId'
@@ -657,6 +678,7 @@ export interface FileRouteTypes {
     | '/settings/delete/confirm'
     | '/staff/calendar/$eventId'
     | '/staff/results/$sessionId'
+    | '/staff/review/$itemId'
     | '/team/$slot/points'
     | '/team/$slot'
   id:
@@ -688,6 +710,7 @@ export interface FileRouteTypes {
     | '/staff/audit'
     | '/staff/calendar'
     | '/staff/prices'
+    | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
     | '/t/$threadId'
@@ -717,6 +740,7 @@ export interface FileRouteTypes {
     | '/settings/delete_/confirm'
     | '/staff/calendar/$eventId'
     | '/staff/results/$sessionId'
+    | '/staff/review/$itemId'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesById: FileRoutesById
@@ -1007,6 +1031,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffPricesRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/review': {
+      id: '/staff/review'
+      path: '/review'
+      fullPath: '/staff/review'
+      preLoaderRoute: typeof StaffReviewRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/staff/scoring': {
       id: '/staff/scoring'
       path: '/scoring'
@@ -1168,6 +1199,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffResultsSessionIdRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/review/$itemId': {
+      id: '/staff/review/$itemId'
+      path: '/$itemId'
+      fullPath: '/staff/review/$itemId'
+      preLoaderRoute: typeof StaffReviewItemIdRouteImport
+      parentRoute: typeof StaffReviewRoute
+    }
     '/team/$slot/': {
       id: '/team/$slot/'
       path: '/team/$slot'
@@ -1197,10 +1235,23 @@ const StaffCalendarRouteWithChildren = StaffCalendarRoute._addFileChildren(
   StaffCalendarRouteChildren,
 )
 
+interface StaffReviewRouteChildren {
+  StaffReviewItemIdRoute: typeof StaffReviewItemIdRoute
+}
+
+const StaffReviewRouteChildren: StaffReviewRouteChildren = {
+  StaffReviewItemIdRoute: StaffReviewItemIdRoute,
+}
+
+const StaffReviewRouteWithChildren = StaffReviewRoute._addFileChildren(
+  StaffReviewRouteChildren,
+)
+
 interface StaffRouteChildren {
   StaffAuditRoute: typeof StaffAuditRoute
   StaffCalendarRoute: typeof StaffCalendarRouteWithChildren
   StaffPricesRoute: typeof StaffPricesRoute
+  StaffReviewRoute: typeof StaffReviewRouteWithChildren
   StaffScoringRoute: typeof StaffScoringRoute
   StaffSeatsRoute: typeof StaffSeatsRoute
   StaffIndexRoute: typeof StaffIndexRoute
@@ -1211,6 +1262,7 @@ const StaffRouteChildren: StaffRouteChildren = {
   StaffAuditRoute: StaffAuditRoute,
   StaffCalendarRoute: StaffCalendarRouteWithChildren,
   StaffPricesRoute: StaffPricesRoute,
+  StaffReviewRoute: StaffReviewRouteWithChildren,
   StaffScoringRoute: StaffScoringRoute,
   StaffSeatsRoute: StaffSeatsRoute,
   StaffIndexRoute: StaffIndexRoute,
