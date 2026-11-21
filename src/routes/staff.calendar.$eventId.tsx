@@ -308,6 +308,14 @@ function SessionRow({ session }: { session: Detail["sessions"][number] }) {
           <Badge tone={session.status === "cancelled" ? "caution" : "neutral"}>
             {SESSION_STATUS_WORDS[session.status] ?? session.status}
           </Badge>
+          {session.hasResults ? (
+            <a
+              href={`/staff/results/${session.id}`}
+              className="flex min-h-[44px] items-center px-space-2 text-[16px] font-semibold text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            >
+              Results<span className="sr-only"> of {session.label}</span>
+            </a>
+          ) : null}
           <Button
             variant="quiet"
             aria-expanded={open}

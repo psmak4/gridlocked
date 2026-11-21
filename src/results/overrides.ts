@@ -9,8 +9,8 @@ import { newId } from "@/lib/ids";
 
 /**
  * The session is `final`: its results are closed, so an override can be
- * neither added nor revoked. Reopening a final session is the audited flow
- * (M8).
+ * neither added nor revoked, unless the caller says it is a correction to a
+ * final session (`onFinal: "correct"`, the staff screen's, M8 Task 7).
  */
 export class SessionFinalError extends Error {
   constructor() {
@@ -20,14 +20,27 @@ export class SessionFinalError extends Error {
 }
 
 /**
- * Locks the session's state row (creating it if the session has none yet),
- * refuses a final session, and bumps `version`: the effective results are
- * about to change, and whatever listens for that (scoring) sees a new
- * version. Called inside the override's transaction, so a refusal rolls
- * everything back. The status itself is moved by `advanceStatus`, which the
- * caller must run afterwards.
+ * What a change to a `final` session does: `refuse` (the default) throws
+ * `SessionFinalError`; `correct` makes the change, keeps the session `final`
+ * and counts it in `reopened_count` (DM 2.3: a late correction re-scores a
+ * final session, with no reopen step; M8 finding 9).
  */
-async function lockAndBump(tx: Db, sessionId: string): Promise<void> {
+export type OnFinal = "refuse" | "correct";
+
+/**
+ * Locks the session's state row (creating it if the session has none yet),
+ * refuses a final session unless `onFinal` is `correct`, and bumps `version`:
+ * the effective results are about to change, and whatever listens for that
+ * (scoring) sees a new version. Called inside the override's transaction, so a
+ * refusal rolls everything back. The status itself is moved by
+ * `advanceStatus`, which the caller must run afterwards; it leaves a final
+ * session final, and scoring picks up the new version.
+ */
+async function lockAndBump(
+  tx: Db,
+  sessionId: string,
+  onFinal: OnFinal = "refuse",
+): Promise<void> {
   await tx
     .insert(sessionResultState)
     .values({ sessionId })
@@ -37,10 +50,14 @@ async function lockAndBump(tx: Db, sessionId: string): Promise<void> {
     .from(sessionResultState)
     .where(eq(sessionResultState.sessionId, sessionId))
     .for("update");
-  if (state!.status === "final") throw new SessionFinalError();
+  const final = state!.status === "final";
+  if (final && onFinal === "refuse") throw new SessionFinalError();
   await tx
     .update(sessionResultState)
-    .set({ version: state!.version + 1 })
+    .set({
+      version: state!.version + 1,
+      ...(final ? { reopenedCount: state!.reopenedCount + 1 } : {}),
+    })
     .where(eq(sessionResultState.sessionId, sessionId));
 }
 
@@ -174,12 +191,13 @@ export async function addOverride(
     fields?: ResultFields;
     reason: string;
     createdBy: string;
+    onFinal?: OnFinal;
   },
 ): Promise<string> {
   const fields = checkFields(o.kind, o.fields);
   if (o.reason.trim() === "") throw new Error("an override needs a reason");
   return db.transaction(async (tx) => {
-    await lockAndBump(tx, o.sessionId);
+    await lockAndBump(tx, o.sessionId, o.onFinal);
     await tx
       .update(resultOverrides)
       .set({
@@ -211,14 +229,16 @@ export async function addOverride(
 
 /**
  * Revokes an override, reverting that driver to the provider value. Refuses a
- * `final` session (`SessionFinalError`) and otherwise bumps the session's
- * `version` once. Callers run `advanceStatus` afterwards.
+ * `final` session (`SessionFinalError`) unless `onFinal` is `correct`, and
+ * otherwise bumps the session's `version` once. Callers run `advanceStatus`
+ * afterwards.
  */
 export async function revokeOverride(
   db: Db,
   now: Date,
   id: string,
   by: string,
+  onFinal: OnFinal = "refuse",
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const [existing] = await tx
@@ -229,7 +249,7 @@ export async function revokeOverride(
       .from(resultOverrides)
       .where(eq(resultOverrides.id, id));
     if (!existing) throw new Error(`no override ${id}`);
-    await lockAndBump(tx, existing.sessionId);
+    await lockAndBump(tx, existing.sessionId, onFinal);
     const revoked = await tx
       .update(resultOverrides)
       .set({

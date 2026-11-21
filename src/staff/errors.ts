@@ -16,6 +16,7 @@ export const STAFF_ERROR_CODES = [
   "invalid",
   "lock_in_past",
   "event_locked",
+  "session_final",
   "item_mismatch",
   "server_error",
 ] as const;
@@ -67,6 +68,8 @@ export const STAFF_ERROR_WORDS: Record<StaffErrorCode, string> = {
   invalid: "Something in the form isn't right. Check it and try again.",
   lock_in_past: "A lock can't move to a time that has passed.",
   event_locked: "This event has locked, so it can't be cancelled here.",
+  session_final:
+    "This session is final, so the provider isn't checked again. Add a correction instead.",
   item_mismatch: "That action doesn't belong to this item.",
   server_error: "Something went wrong on our side. Try again.",
 };
