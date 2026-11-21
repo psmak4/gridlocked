@@ -39,8 +39,9 @@ const RACE_WEEKEND = "race-weekend";
 
 /**
  * How long past its window a session's chat waits for the results post: a
- * long red flag runs a race past its scheduled end, and nothing marks a
- * session suspended yet (M7's review, I5).
+ * long red flag runs a race past its scheduled end before staff mark it
+ * `suspended` (the Calendar screen, M8), and a suspended session's chat stays
+ * live past its end on its own (M7's review, I5).
  */
 export const RESULTS_WAIT_MS = 60 * MINUTE_MS;
 

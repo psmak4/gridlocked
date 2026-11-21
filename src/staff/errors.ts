@@ -15,10 +15,14 @@ export const STAFF_ERROR_CODES = [
   "not_found",
   "invalid",
   "lock_in_past",
+  "event_locked",
   "item_mismatch",
   "server_error",
 ] as const;
 export type StaffErrorCode = (typeof STAFF_ERROR_CODES)[number];
+
+/** The longest reason a staff write takes (M8). */
+export const REASON_MAX = 500;
 
 /** What a staff server function answers. */
 export type StaffResult<T> =
@@ -49,6 +53,7 @@ export const STAFF_ERROR_WORDS: Record<StaffErrorCode, string> = {
   not_found: "This isn't here any more.",
   invalid: "Something in the form isn't right. Check it and try again.",
   lock_in_past: "A lock can't move to a time that has passed.",
+  event_locked: "This event has locked, so it can't be cancelled here.",
   item_mismatch: "That action doesn't belong to this item.",
   server_error: "Something went wrong on our side. Try again.",
 };

@@ -69,6 +69,8 @@ export async function auditPage(
     group?: AuditGroup;
     /** The cursor: the last id of the page before. */
     before?: string;
+    /** Only the rows about these things (a screen's History). */
+    entityIds?: string[];
   },
 ): Promise<AuditPage> {
   const where = and(
@@ -79,6 +81,7 @@ export async function auditPage(
         : undefined,
     input.group ? inArray(auditLog.action, actionsIn(input.group)) : undefined,
     input.before ? lt(auditLog.id, input.before) : undefined,
+    input.entityIds ? inArray(auditLog.entityId, input.entityIds) : undefined,
   );
   const found = await db
     .select({

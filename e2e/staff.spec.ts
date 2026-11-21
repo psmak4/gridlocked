@@ -45,7 +45,7 @@ test.describe("the staff area", () => {
     await page.goto("/profile");
     await page.getByRole("link", { name: "Staff tools" }).click();
     // The first screen an admin may open.
-    await expect(page).toHaveURL("/staff/audit");
+    await expect(page).toHaveURL("/staff/calendar");
     const menu = page.getByRole("navigation", { name: "Staff" });
     await expect(menu.getByText("GRIDLOCKED · STAFF")).toBeVisible();
     await expect(

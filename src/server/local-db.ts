@@ -15,6 +15,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "@/db/schema";
 import type { EmailSender } from "@/identity/email/sender";
 import type { ChatArchiveStore } from "@/community/archive";
+import type { DueStore } from "@/jobs/due-times";
 import type { ExportStore } from "@/identity/export";
 import type { ServerDb } from "./db";
 
@@ -50,6 +51,17 @@ export const localExportStore: ExportStore = {
   },
   async delete(key) {
     localExportFiles.delete(key);
+  },
+};
+
+/** The due-times file for a local run: in memory. */
+export const localDueFiles = new Map<string, string>();
+export const localDueStore: DueStore = {
+  async get(key) {
+    return localDueFiles.get(key) ?? null;
+  },
+  async put(key, body) {
+    localDueFiles.set(key, body);
   },
 };
 

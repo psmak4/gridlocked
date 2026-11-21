@@ -29,8 +29,7 @@ for (const size of [
       "Helping with the forum",
     );
 
-    await page.goto("/staff");
-    await expect(page).toHaveURL("/staff/audit");
+    await page.goto("/staff/audit");
     await expect(heading(page)).toHaveText("Audit log");
     await expect(
       page.getByText(

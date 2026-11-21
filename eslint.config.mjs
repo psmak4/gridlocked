@@ -134,7 +134,7 @@ const eslintConfig = defineConfig([
     // The website's read of the chat-archives bucket (M7): the one file in
     // src/server that wires a storage adapter. Better Auth stays allowed, as
     // for the rest of src/server.
-    files: ["src/server/chat-archive.ts"],
+    files: ["src/server/chat-archive.ts", "src/server/due-store.ts"],
     rules: {
       "no-restricted-imports": "off",
     },
