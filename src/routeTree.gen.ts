@@ -41,6 +41,7 @@ import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
 import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StaffAuditRouteImport } from './routes/staff.audit'
 import { Route as StaffCalendarRouteImport } from './routes/staff.calendar'
+import { Route as StaffModerationRouteImport } from './routes/staff.moderation'
 import { Route as StaffPricesRouteImport } from './routes/staff.prices'
 import { Route as StaffReviewRouteImport } from './routes/staff.review'
 import { Route as StaffScoringRouteImport } from './routes/staff.scoring'
@@ -65,6 +66,7 @@ import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exp
 import { Route as ApiTestStaffRouteImport } from './routes/api/test.staff'
 import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
 import { Route as StaffCalendarEventIdRouteImport } from './routes/staff.calendar.$eventId'
+import { Route as StaffModerationItemIdRouteImport } from './routes/staff.moderation.$itemId'
 import { Route as StaffResultsSessionIdRouteImport } from './routes/staff.results.$sessionId'
 import { Route as StaffReviewItemIdRouteImport } from './routes/staff.review.$itemId'
 import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
@@ -230,6 +232,11 @@ const StaffCalendarRoute = StaffCalendarRouteImport.update({
   path: '/calendar',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffModerationRoute = StaffModerationRouteImport.update({
+  id: '/moderation',
+  path: '/moderation',
+  getParentRoute: () => StaffRoute,
+} as any)
 const StaffPricesRoute = StaffPricesRouteImport.update({
   id: '/prices',
   path: '/prices',
@@ -350,6 +357,11 @@ const StaffCalendarEventIdRoute = StaffCalendarEventIdRouteImport.update({
   path: '/$eventId',
   getParentRoute: () => StaffCalendarRoute,
 } as any)
+const StaffModerationItemIdRoute = StaffModerationItemIdRouteImport.update({
+  id: '/$itemId',
+  path: '/$itemId',
+  getParentRoute: () => StaffModerationRoute,
+} as any)
 const StaffResultsSessionIdRoute = StaffResultsSessionIdRouteImport.update({
   id: '/results/$sessionId',
   path: '/results/$sessionId',
@@ -398,6 +410,7 @@ export interface FileRoutesByFullPath {
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
+  '/staff/moderation': typeof StaffModerationRouteWithChildren
   '/staff/prices': typeof StaffPricesRoute
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
@@ -428,6 +441,7 @@ export interface FileRoutesByFullPath {
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
+  '/staff/moderation/$itemId': typeof StaffModerationItemIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/staff/review/$itemId': typeof StaffReviewItemIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
@@ -459,6 +473,7 @@ export interface FileRoutesByTo {
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
+  '/staff/moderation': typeof StaffModerationRouteWithChildren
   '/staff/prices': typeof StaffPricesRoute
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
@@ -489,6 +504,7 @@ export interface FileRoutesByTo {
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
+  '/staff/moderation/$itemId': typeof StaffModerationItemIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/staff/review/$itemId': typeof StaffReviewItemIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
@@ -522,6 +538,7 @@ export interface FileRoutesById {
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
+  '/staff/moderation': typeof StaffModerationRouteWithChildren
   '/staff/prices': typeof StaffPricesRoute
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
@@ -552,6 +569,7 @@ export interface FileRoutesById {
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
+  '/staff/moderation/$itemId': typeof StaffModerationItemIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/staff/review/$itemId': typeof StaffReviewItemIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
@@ -586,6 +604,7 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/staff/audit'
     | '/staff/calendar'
+    | '/staff/moderation'
     | '/staff/prices'
     | '/staff/review'
     | '/staff/scoring'
@@ -616,6 +635,7 @@ export interface FileRouteTypes {
     | '/api/test/staff'
     | '/settings/delete/confirm'
     | '/staff/calendar/$eventId'
+    | '/staff/moderation/$itemId'
     | '/staff/results/$sessionId'
     | '/staff/review/$itemId'
     | '/team/$slot/points'
@@ -647,6 +667,7 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/staff/audit'
     | '/staff/calendar'
+    | '/staff/moderation'
     | '/staff/prices'
     | '/staff/review'
     | '/staff/scoring'
@@ -677,6 +698,7 @@ export interface FileRouteTypes {
     | '/api/test/staff'
     | '/settings/delete/confirm'
     | '/staff/calendar/$eventId'
+    | '/staff/moderation/$itemId'
     | '/staff/results/$sessionId'
     | '/staff/review/$itemId'
     | '/team/$slot/points'
@@ -709,6 +731,7 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/staff/audit'
     | '/staff/calendar'
+    | '/staff/moderation'
     | '/staff/prices'
     | '/staff/review'
     | '/staff/scoring'
@@ -739,6 +762,7 @@ export interface FileRouteTypes {
     | '/api/test/staff'
     | '/settings/delete_/confirm'
     | '/staff/calendar/$eventId'
+    | '/staff/moderation/$itemId'
     | '/staff/results/$sessionId'
     | '/staff/review/$itemId'
     | '/team/$slot/points'
@@ -1024,6 +1048,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffCalendarRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/moderation': {
+      id: '/staff/moderation'
+      path: '/moderation'
+      fullPath: '/staff/moderation'
+      preLoaderRoute: typeof StaffModerationRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/staff/prices': {
       id: '/staff/prices'
       path: '/prices'
@@ -1192,6 +1223,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffCalendarEventIdRouteImport
       parentRoute: typeof StaffCalendarRoute
     }
+    '/staff/moderation/$itemId': {
+      id: '/staff/moderation/$itemId'
+      path: '/$itemId'
+      fullPath: '/staff/moderation/$itemId'
+      preLoaderRoute: typeof StaffModerationItemIdRouteImport
+      parentRoute: typeof StaffModerationRoute
+    }
     '/staff/results/$sessionId': {
       id: '/staff/results/$sessionId'
       path: '/results/$sessionId'
@@ -1235,6 +1273,18 @@ const StaffCalendarRouteWithChildren = StaffCalendarRoute._addFileChildren(
   StaffCalendarRouteChildren,
 )
 
+interface StaffModerationRouteChildren {
+  StaffModerationItemIdRoute: typeof StaffModerationItemIdRoute
+}
+
+const StaffModerationRouteChildren: StaffModerationRouteChildren = {
+  StaffModerationItemIdRoute: StaffModerationItemIdRoute,
+}
+
+const StaffModerationRouteWithChildren = StaffModerationRoute._addFileChildren(
+  StaffModerationRouteChildren,
+)
+
 interface StaffReviewRouteChildren {
   StaffReviewItemIdRoute: typeof StaffReviewItemIdRoute
 }
@@ -1250,6 +1300,7 @@ const StaffReviewRouteWithChildren = StaffReviewRoute._addFileChildren(
 interface StaffRouteChildren {
   StaffAuditRoute: typeof StaffAuditRoute
   StaffCalendarRoute: typeof StaffCalendarRouteWithChildren
+  StaffModerationRoute: typeof StaffModerationRouteWithChildren
   StaffPricesRoute: typeof StaffPricesRoute
   StaffReviewRoute: typeof StaffReviewRouteWithChildren
   StaffScoringRoute: typeof StaffScoringRoute
@@ -1261,6 +1312,7 @@ interface StaffRouteChildren {
 const StaffRouteChildren: StaffRouteChildren = {
   StaffAuditRoute: StaffAuditRoute,
   StaffCalendarRoute: StaffCalendarRouteWithChildren,
+  StaffModerationRoute: StaffModerationRouteWithChildren,
   StaffPricesRoute: StaffPricesRoute,
   StaffReviewRoute: StaffReviewRouteWithChildren,
   StaffScoringRoute: StaffScoringRoute,

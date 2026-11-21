@@ -45,6 +45,8 @@ import {
   scoringGame,
   startDryRun,
 } from "@/staff/scoring";
+import { moderate, type ModTargetType } from "@/community/moderate";
+import { modItem, modQueue } from "@/community/queue-read";
 import { nextPrices, setAdminPrice } from "@/staff/prices";
 import {
   openReviewCount,
@@ -67,9 +69,14 @@ export const getStaffArea = createServerFn({ method: "GET" }).handler(
   async (): Promise<StaffArea> => {
     setResponseHeader("Cache-Control", "private, no-store");
     const area = staffArea(await getViewer(getRequest()));
-    if (area.state !== "open" || area.role !== "admin") return area;
-    const review = await withRequestNow((db) => openReviewCount(db));
-    return { ...area, counts: { ...area.counts, review } };
+    if (area.state !== "open") return area;
+    return withRequestNow(async (db) => ({
+      ...area,
+      counts: {
+        moderation: (await modQueue(db, { tab: "open" })).length,
+        ...(area.role === "admin" ? { review: await openReviewCount(db) } : {}),
+      },
+    }));
   },
 );
 
@@ -665,5 +672,101 @@ export const resolveReview = createServerFn({ method: "POST" })
       }),
       handler: async ({ db, now, viewer, requestId }, input) =>
         resolveReviewItem(db, now, staffActor(viewer, requestId), input),
+    }),
+  );
+
+// --- The moderation queue (Task 11) -----------------------------------------
+
+/** A tab of the queue: Open, Auto-hidden or Done (50 a page). */
+export const getModQueue = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "moderator",
+      input: z.strictObject({
+        tab: z.enum(["open", "hidden", "done"]),
+        before: z.uuid().optional(),
+      }),
+      handler: async ({ db, now, viewer }, input) =>
+        (await modQueue(db, input)).map(({ createdAt, ...item }) => ({
+          ...item,
+          ageLabel: staffTime(createdAt, viewer.profile.timezone, now),
+        })),
+    }),
+  );
+
+/** One item: the snapshot at first report, the reports, the author. */
+export const getModItem = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "moderator",
+      input: z.strictObject({ id: z.uuid() }),
+      handler: async ({ db, now, viewer }, { id }) => {
+        const item = await modItem(db, id);
+        if (!item) throw new StaffError("not_found");
+        const { createdAt, resolvedAt, ...rest } = item;
+        const zone = viewer.profile.timezone;
+        return {
+          ...rest,
+          ageLabel: staffTime(createdAt, zone, now),
+          postedLabel: staffTime(new Date(item.snapshot.postedAt), zone, now),
+          resolvedLabel: resolvedAt ? staffTime(resolvedAt, zone, now) : null,
+        };
+      },
+    }),
+  );
+
+/**
+ * One of the item's actions, at the version the screen read, with the note
+ * the author sees. The action must be one the item offers.
+ */
+export const moderateItem = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "moderator",
+      input: z.strictObject({
+        id: z.uuid(),
+        version: z.number().int().min(0),
+        action: z.string().min(1).max(32),
+        reason: reasonText,
+        title: z.string().trim().min(1).max(120).optional(),
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) => {
+        const item = await modItem(db, input.id);
+        if (!item) throw new StaffError("not_found");
+        const chosen = item.actions.find((a) => a.action === input.action);
+        if (!chosen) throw new StaffError("invalid");
+        if (chosen.on === "author" && !item.author.userId) {
+          throw new StaffError("invalid");
+        }
+        const result = await moderate(
+          db,
+          now,
+          {
+            userId: viewer.userId,
+            kind: viewer.role === "admin" ? "admin" : "moderator",
+            label: null,
+            requestId,
+          },
+          {
+            action: chosen.action,
+            targetType:
+              chosen.on === "author" ? "user" : (item.type as ModTargetType),
+            targetId:
+              chosen.on === "author" ? item.author.userId! : item.targetId,
+            reason: input.reason,
+            ...(chosen.hours
+              ? { until: new Date(now.getTime() + chosen.hours * 3_600_000) }
+              : {}),
+            ...(chosen.needsTitle ? { title: input.title ?? "" } : {}),
+            queueItemId: item.id,
+            version: input.version,
+          },
+        );
+        if (!result.ok) throw new StaffError(result.error);
+        return { changed: result.changed, label: chosen.label };
+      },
     }),
   );
