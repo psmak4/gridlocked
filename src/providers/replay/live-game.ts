@@ -27,6 +27,7 @@ import {
   type GameAction,
 } from "@/replay/game-script";
 import { SCORED_KINDS } from "@/results/validate";
+import type { ChatArchiveStore } from "@/community/archive";
 import { createPipelineHandlers } from "../pipeline";
 import { createPipelineClients } from "../pipeline/clients";
 import { createReplayFetch, type ReplaySession } from "./fixture-fetch";
@@ -78,6 +79,8 @@ export async function startLiveReplay(
     fixturesDir: string;
     /** The seeded game's pool asset for a Jolpica key (`seedGame2026`). */
     assetId: (key: string) => Promise<string>;
+    /** Where `community_daily` archives chat; none, and it can't. */
+    chatArchiveStore?: ChatArchiveStore;
   },
 ): Promise<LiveReplay> {
   const { gameId, at, fixturesDir } = opts;
@@ -134,14 +137,15 @@ export async function startLiveReplay(
     handlers: async (tickDb, clock) => {
       tickClock = clock;
       return {
-        ...createPipelineHandlers(
-          await createPipelineClients({
+        ...createPipelineHandlers({
+          ...(await createPipelineClients({
             db: tickDb,
             clock,
             timer: virtualTimer(clock),
             fetch: replayFetch,
-          }),
-        ),
+          })),
+          chatArchiveStore: opts.chatArchiveStore,
+        }),
         ...createGameHandlers(),
       };
     },

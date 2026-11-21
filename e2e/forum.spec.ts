@@ -88,6 +88,51 @@ test("post a reply and vote on it", async ({ page, browser }) => {
   await other.close();
 });
 
+test("edit, then delete, your own comment", async ({ page, browser }) => {
+  const author = await createAccount(page.context().request);
+  await setTrust(page.context().request, author.email, 1);
+  await page.goto("/forum/new?category=general");
+  await pageHydrated(page);
+  await page.getByLabel("Title").fill("Best overtake of the season?");
+  await page.getByLabel("Post").fill("Mine is Turn 1 in Austin.");
+  await page.getByRole("button", { name: "Post thread" }).click();
+  await expect(page).toHaveURL(/\/t\/[0-9a-f-]{36}$/);
+  const threadUrl = page.url();
+
+  const other = await browser.newContext();
+  const writer = await other.newPage();
+  const account = await createAccount(other.request);
+  await setTrust(other.request, account.email, 0);
+  await writer.goto(threadUrl);
+  await pageHydrated(writer);
+  await writer.getByLabel("Add a comment").fill("Hamilton at Silverstne.");
+  await writer.getByRole("button", { name: "Post comment" }).click();
+  const comments = writer.getByRole("list", { name: "Comments" });
+  await expect(comments).toContainText("Hamilton at Silverstne.");
+
+  // Your own comment's "…" has Edit and Delete, and no Report.
+  const more = comments.getByRole("button", { name: "More for your post" });
+  await more.click();
+  await expect(writer.getByRole("menuitem", { name: "Report" })).toHaveCount(0);
+  await writer.getByRole("menuitem", { name: "Edit" }).click();
+  const box = comments.getByLabel("Edit your post");
+  await expect(box).toHaveValue("Hamilton at Silverstne.");
+  await box.fill("Hamilton at Silverstone.");
+  await comments.getByRole("button", { name: "Save" }).click();
+  await expect(comments).toContainText("Hamilton at Silverstone.");
+  await expect(comments).toContainText("edited");
+  await expectNoSeriousAxeViolations(writer);
+
+  await more.click();
+  await writer.getByRole("menuitem", { name: "Delete" }).click();
+  await comments.getByRole("button", { name: "Delete post" }).click();
+  // With no replies under it, a deleted comment leaves nothing behind.
+  await expect(writer.getByText("Hamilton at Silverstone.")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText("Hamilton at Silverstone.")).toHaveCount(0);
+  await other.close();
+});
+
 test('a TL0 viewer sees no "New thread"', async ({ page }) => {
   const account = await createAccount(page.context().request);
   await setTrust(page.context().request, account.email, 0);

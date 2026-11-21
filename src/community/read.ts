@@ -40,7 +40,7 @@ import {
   type Reader,
 } from "@/spoilers/reveal";
 import { renderPost } from "./render";
-import { shortEvent, threadMode } from "./session-threads";
+import { awaitingResultsSql, shortEvent, threadMode } from "./session-threads";
 import { SPOILER_THREAD_TITLE } from "./threads";
 
 /** How a deleted account's name reads anywhere it wrote (DM 5.1). */
@@ -240,9 +240,11 @@ const listable = (reader: Reader) =>
   and(
     inArray(threads.status, ["open", "locked", "archived"]),
     isNull(threads.leagueId),
-    // A thread whose opening post is held shows for its author only.
+    // A thread whose opening post is held, or hidden by reports, shows for
+    // its author only. A deleted or removed opening post leaves the thread
+    // and its replies, with a placeholder at the top (DM 5.4).
     or(
-      sql`exists (select 1 from ${posts} where ${posts.threadId} = ${threads.id} and ${posts.isOpening} and ${posts.status} = 'visible')`,
+      sql`not exists (select 1 from ${posts} where ${posts.threadId} = ${threads.id} and ${posts.isOpening} and ${posts.status} in ('pending_review', 'hidden_by_flags'))`,
       reader ? eq(threads.authorUserId, reader.userId) : sql`false`,
     ),
   );
@@ -390,6 +392,8 @@ export type PostView = {
   score: number;
   myVote: -1 | 0 | 1;
   mine: boolean;
+  /** Your own readable post's Markdown, for "Edit"; null on anyone else's. */
+  source: string | null;
   createdAt: string;
   edited: boolean;
   /** Replies under it past the depth cap, behind "Continue thread". */
@@ -413,7 +417,15 @@ export type ThreadPage = {
   };
   /** Live chat while its window is open; discussion before and after. */
   mode: ThreadMode;
+  /** When chat opens, while that's still ahead: the page reloads then. */
+  opensChatAt: string | null;
   hidden: boolean;
+  /**
+   * When a shown page hides for this reader: its session's start, if that's
+   * still ahead and the reader hasn't watched or shown it. The page reloads
+   * then, so an open chat doesn't run on into the result (HLD §7.3).
+   */
+  hidesAt: string | null;
   /** Set when the page opens at one reply ("Continue thread"). */
   focusPostId: string | null;
   posts: PostView[];
@@ -470,6 +482,8 @@ export async function threadPage(
       chatClosesAt: threads.chatClosesAt,
       leagueId: threads.leagueId,
       sessionStatus: sessions.status,
+      sessionStart: sessions.scheduledStart,
+      awaitingResults: awaitingResultsSql,
     })
     .from(threads)
     .innerJoin(categories, eq(categories.id, threads.categoryId))
@@ -483,6 +497,17 @@ export async function threadPage(
   const hidden = (
     await hiddenThreads(db, now, reader, [t], input.show, input.showAll)
   ).has(t.id);
+  // The same check at the session's start says whether the page hides then.
+  const start = t.sessionStart;
+  const hidesAt =
+    !hidden &&
+    start !== null &&
+    start > now &&
+    (
+      await hiddenThreads(db, start, reader, [t], input.show, input.showAll)
+    ).has(t.id)
+      ? start.toISOString()
+      : null;
   const thread = {
     ...toRow(t, hidden),
     categorySlug: t.categorySlug,
@@ -497,10 +522,17 @@ export async function threadPage(
     thread,
     mode: threadMode(
       now,
-      t.sessionStatus ? { status: t.sessionStatus } : null,
+      t.sessionStatus
+        ? { status: t.sessionStatus, awaitingResults: t.awaitingResults }
+        : null,
       t,
     ),
+    opensChatAt:
+      t.chatOpensAt && t.chatOpensAt > now && t.sessionStatus !== "cancelled"
+        ? t.chatOpensAt.toISOString()
+        : null,
     hidden,
+    hidesAt,
     focusPostId: input.postId ?? null,
   };
   if (hidden) return { ...base, posts: [] };
@@ -625,7 +657,8 @@ function layOut(
   };
 
   const walk = (r: PostFacts) => {
-    if (!hasText(r)) return;
+    // The opening post heads the page even as a placeholder.
+    if (!r.isOpening && !hasText(r)) return;
     const depth = r.isOpening ? 0 : r.depth - ctx.offset;
     const state = shownState(r)!;
     const readable = state === "visible" || state === "pending";
@@ -643,6 +676,7 @@ function layOut(
       score: r.score,
       myVote: (ctx.votes.get(r.id) ?? 0) as -1 | 0 | 1,
       mine: mine(r),
+      source: readable && mine(r) ? r.body : null,
       createdAt: r.createdAt.toISOString(),
       edited: r.editedAt !== null,
       moreReplies: atCap ? countBelow(r.id) : 0,

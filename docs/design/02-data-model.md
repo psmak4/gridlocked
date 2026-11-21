@@ -1376,6 +1376,8 @@ erDiagram
 ```
 
 ### 5.1 How deleted users work (affects every table here)
+
+**Built (M7):** a deleted author shows as "deleted user" in threads, posts and chat (`src/community/read.ts`); archived chat is read back by author id, so a deleted account's lines stay anonymous (`src/community/archive.ts`).
 - **A deleted account becomes a tombstone, not a missing row.** The `users` row stays, so every foreign key still holds (0.7: `ON DELETE RESTRICT`). Its personal data is scrubbed: email, name, avatar, profile fields, sign-in accounts and sessions. Its status becomes `deleted`.
 - **Anywhere an author is shown, a deleted author renders as "deleted user".** There's nothing to rewrite in posts, chat or archives, because they store only user IDs and names are looked up when displayed.
 - **Teams and leagues follow the same rule:**
@@ -1385,6 +1387,8 @@ erDiagram
 - **For your lawyer (HLD §13.6):** after scrubbing, the tombstone is a random ID with no personal data. But a post's text can itself contain personal data. Requests to remove specific posts are handled through support with a moderator `remove` action.
 
 ### 5.2 `categories`
+
+**Built (M7)** in `src/db/schema/community.ts`, with the launch categories seeded by migration.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
@@ -1395,6 +1399,8 @@ erDiagram
 | status | text: `active`, `archived` | |
 
 ### 5.3 `threads`
+
+**Built (M7):** user threads in `src/community/threads.ts` (with the spoiler title check), session threads opened by `open_threads` on the event week's Monday and results posts in `src/community/session-threads.ts`. `hot_rank` is set on create and on every vote, with a daily sweep (`src/community/upkeep.ts`). Past its window, a session's chat stays open for up to an hour until the results post arrives, since nothing marks a session suspended until M8.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
@@ -1421,6 +1427,8 @@ erDiagram
 - Auto threads are created by planned jobs (2.10) with dedupe keys like `open_threads:<event_id>`, so they're never duplicated.
 
 ### 5.4 `posts` (nested discussion; decided, about 4 levels on mobile)
+
+**Built (M7)** in `src/community/posts.ts`, rendered from Markdown by micromark (`src/community/render.ts`, decision 3).
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | UUIDv7, so IDs sort by time |
@@ -1446,6 +1454,8 @@ erDiagram
 **`post_mentions`** (`post_id`, `user_id`) drives "you were mentioned" notifications.
 
 ### 5.5 `chat_messages` and `chat_archives` (live session chat; stored apart from posts, HLD §7.2)
+
+**Built (M7):** chat in `src/community/chat.ts`, its CDN-cached refresh at `/api/chat/$threadId`, and the 30-day archive to the `chat-archives` bucket with its replay in `src/community/archive.ts` (decision 5).
 **`chat_messages`**
 | Column | Type | Notes |
 |---|---|---|
@@ -1479,6 +1489,8 @@ erDiagram
 The thread page replays the archive under the discussion. Removed messages aren't archived. Any message that was reported is already preserved in its moderation queue item (5.9), so archiving never destroys evidence.
 
 ### 5.6 `post_votes`
+
+**Built (M7):** votes in `src/community/votes.ts`; reputation from TL1+ and staff votes is the daily job's (`recomputeReputation`, `src/community/upkeep.ts`).
 | Column | Type | Notes |
 |---|---|---|
 | post_id, user_id | composite PK | One vote per user per post |
@@ -1505,6 +1517,8 @@ The thread page replays the archive under the discussion. Removed messages aren'
   - Deletion removes the rows and the export lists them (`watched_sessions`; 6.7).
 
 ### 5.8 `reports` (flags from anyone)
+
+**Built (M7)** in `src/community/moderation.ts`: reports from members and logged-out visitors, weighted, with auto-hide. A logged-out report weighs 0, so it reaches a moderator without counting toward auto-hide, and the system account's posts are never auto-hidden.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
@@ -1521,6 +1535,8 @@ The thread page replays the archive under the discussion. Removed messages aren'
 A user can report a given target only once.
 
 ### 5.9 Moderation: queue, actions, restrictions and filters
+
+**Built (M7):** the queue and auto-hide in `src/community/moderation.ts`; actions and restrictions in `src/community/moderate.ts`, taken through `pnpm staff moderate` until M8's screens; users see them under "Actions on your account" on the profile.
 **`mod_queue_items`:** one open item per target.
 | Column | Type | Notes |
 |---|---|---|
@@ -1564,6 +1580,8 @@ A user can report a given target only once.
 Moderators and admins count as TL3. In Race Weekend, a title naming a driver or team next to a result word (win, pole, podium, P1–P20, DNF, crash, retires) is flagged as a spoiler, not refused.
 
 ### 5.10 Retention (approved 2026-11-16; chat decided 2026-10-27)
+
+**Built (M7)** as `pruneCommunity` in the `community_daily` job (`src/community/upkeep.ts`), with the chat archive (5.5). Notifications go at 90 days whether read or not, since the list never shows older ones.
 | Data | Kept |
 |---|---|
 | Posts, threads, votes | Permanently, unless removed for legal reasons |
@@ -1575,6 +1593,8 @@ Moderators and admins count as TL3. In Race Weekend, a title naming a driver or 
 | Email outbox | 30 days |
 
 ### 5.11 Notifications (in-app and Web Push at launch; email for account messages only, HLD §10)
+
+**Built (M7):** in-app notifications, grouping and broadcasts in `src/notifications/`; Web Push through `push_fanout` with `web-push` (decision 4), off until the VAPID keys are set. `roster_change` and `score_correction` have no producer yet.
 **`notifications`:** personal notifications only.
 | Column | Type | Notes |
 |---|---|---|
@@ -1619,6 +1639,8 @@ It's cheap enough to include at launch. If it's deferred, adding it later is pur
 - **Search never returns:** private league threads, removed content, or results inside a spoiler window for users who haven't revealed them.
 
 ### 5.13 Indexes beyond keys
+
+**Built (M7)** with the tables, in the M7 migrations.
 - `threads (category_id, last_activity_at DESC) WHERE status IN ('open','locked')` and `threads (category_id, hot_rank DESC)`: category lists.
 - `threads (session_id)` and `threads (event_id)`: event hubs and spoiler lookups.
 - `posts (thread_id, path)`: loading a thread or subtree.
@@ -1630,31 +1652,31 @@ It's cheap enough to include at launch. If it's deferred, adding it later is pur
 - GIN on the `tsvector` columns.
 
 ### 5.14 Scenario check
-| Scenario | Real example or source | How it's handled |
-|---|---|---|
-| Event week starts | Every race weekend | Planned jobs create session threads with generic titles (5.3, 2.10) |
-| Session delayed or moved | Rain delays; Suzuka 2019 | Chat window recalculated from session times; nothing stored to flip (5.3) |
-| Red flag runs long | Common | `suspended` keeps chat open (5.3, 1.4) |
-| Chat flood at lights out | Every race start | Slow mode plus per-trust limits on send and on insert; refreshes are cached per thread on the CDN (HLD decision 19). Time-ordered IDs make polling cheap (5.5) |
-| User hasn't watched yet | Core feature | Generic titles, hidden results, comments and chat, hidden fantasy scores, spoiler-safe notifications until the session is marked or the 7 days end (5.7) |
-| Spoiler in a user's thread title | "Verstappen wins!" posted 5 min after the flag | The title check warns and flags it; unrevealed users see "Spoiler thread"; moderators retitle (5.3) |
-| Post edited after being reported | Common evasion | The queue item's content snapshot plus revisions (5.4, 5.9) |
-| Author deletes a post with replies | Common | A "[deleted]" placeholder keeps the tree (5.4) |
-| Account deleted | Decided: always anonymize | A tombstone user shows as "deleted user", and personal data is scrubbed (5.1) |
-| Spam wave of new accounts | Any forum | Turnstile, TL0 limits, link limits, filters that hold for review, weighted flags auto-hide (5.9) |
-| Vote brigading | Any forum | Downvotes TL1+, rate limits, reputation from TL1+ votes only (5.6) |
-| Two moderators on one item | Busy race day | `version` check (5.9) |
-| Moderator mistake | Any | `restore`, with an audit trail (5.9) |
-| Mute expires | Common | `until` on the restriction (5.9) |
-| Private league thread | Decided feature | Visible to members only; not in listings, search or cache (5.3) |
-| Report from a logged-out visitor | EU Digital Services Act | Nullable reporter plus a contact email that's deleted at resolution (5.8) |
-| Copyright notice | Race clips (HLD §13.6) | A `copyright` report, then a `remove` action with a logged reason (5.8, 5.9) |
-| Chat reaches 30 days | Decided | Archived to object storage, replayable; reported messages preserved in the queue (5.5) |
-| "Scores are in" to everyone | Every session | One `broadcasts` row, not one per user (5.11) |
-| Busy thread replies | Popular threads | One grouped unread notification per thread (5.11) |
-| Expired push subscription | Common | Pruned on HTTP 410 (5.11) |
-| Email cap reached | 100/day free (HLD §10) | Outbox queue; magic links and resets first (5.11) |
-| Old thread revived | Common | Optional auto-lock after N days of inactivity per category (config) |
+| Scenario | Real example or source | How it's handled | Test (M7) |
+|---|---|---|---|
+| Event week starts | Every race weekend | Planned jobs create session threads with generic titles (5.3, 2.10) | Task 7 `event week opens one thread per session…`; exit spec |
+| Session delayed or moved | Rain delays; Suzuka 2019 | Chat window recalculated from session times; nothing stored to flip (5.3) | Task 7 `a 30-minute delay moves the chat window` |
+| Red flag runs long | Common | `suspended` keeps chat open (5.3, 1.4) | Task 7 `a suspended session stays in chat mode…` |
+| Chat flood at lights out | Every race start | Slow mode plus per-trust limits on send and on insert; refreshes are cached per thread on the CDN (HLD decision 19). Time-ordered IDs make polling cheap (5.5) | Task 8 refresh tests; Task 16 load test on staging |
+| User hasn't watched yet | Core feature | Generic titles, hidden results, comments and chat, hidden fantasy scores, spoiler-safe notifications until the session is marked or the 7 days end (5.7) | Tasks 6, 8, 10, 13, 14; exit spec |
+| Spoiler in a user's thread title | "Verstappen wins!" posted 5 min after the flag | The title check warns and flags it; unrevealed users see "Spoiler thread"; moderators retitle (5.3) | Task 4 `looksLikeSpoilerTitle`; Task 6 e2e; Task 12 `retitle` |
+| Post edited after being reported | Common evasion | The queue item's content snapshot plus revisions (5.4, 5.9) | Task 11 `the snapshot keeps the text…` |
+| Author deletes a post with replies | Common | A "[deleted]" placeholder keeps the tree (5.4) | Task 5 |
+| Account deleted | Decided: always anonymize | A tombstone user shows as "deleted user", and personal data is scrubbed (5.1) | Task 6 `a deleted author shows as "deleted user"`; Task 9 |
+| Spam wave of new accounts | Any forum | Turnstile, TL0 limits, link limits, filters that hold for review, weighted flags auto-hide (5.9) | Task 4 (TL0 limits, filters that hold); Task 11 |
+| Vote brigading | Any forum | Downvotes TL1+, rate limits, reputation from TL1+ votes only (5.6) | Task 5 `TL0 downvote is refused`; Task 15 `a TL0 upvote adds no reputation` |
+| Two moderators on one item | Busy race day | `version` check (5.9) | Task 12 |
+| Moderator mistake | Any | `restore`, with an audit trail (5.9) | Task 12 `restore…`; exit spec (`pnpm staff moderate`) |
+| Mute expires | Common | `until` on the restriction (5.9) | Tasks 4 and 12 |
+| Private league thread | Decided feature | Visible to members only; not in listings, search or cache (5.3) | Not in M7: league threads come after launch |
+| Report from a logged-out visitor | EU Digital Services Act | Nullable reporter plus a contact email that's deleted at resolution (5.8) | Task 11 |
+| Copyright notice | Race clips (HLD §13.6) | A `copyright` report, then a `remove` action with a logged reason (5.8, 5.9) | Task 11 (reason `copyright`); Task 12 (`remove`) |
+| Chat reaches 30 days | Decided | Archived to object storage, replayable; reported messages preserved in the queue (5.5) | Task 9; exit spec (replay and export) |
+| "Scores are in" to everyone | Every session | One `broadcasts` row, not one per user (5.11) | Task 13 |
+| Busy thread replies | Popular threads | One grouped unread notification per thread (5.11) | Task 13 `five replies in one thread make one unread row` |
+| Expired push subscription | Common | Pruned on HTTP 410 (5.11) | Task 14 |
+| Email cap reached | 100/day free (HLD §10) | Outbox queue; magic links and resets first (5.11) | Done in M5 |
+| Old thread revived | Common | Optional auto-lock after N days of inactivity per category (config) | M8: auto-lock per category is a staff setting |
 
 **Known limits:**
 - A deleted user's username can still appear inside **other people's** posts, as text they wrote. That's the same as Reddit and Discourse, and it's removed on request through moderation (5.1).

@@ -9,6 +9,7 @@ import {
   notifications,
   profiles,
   sessions,
+  users,
 } from "@/db/schema";
 import type { Viewer } from "@/identity/viewer";
 import { moderate, staffActor } from "@/community/moderate";
@@ -174,6 +175,23 @@ describe("notifications (DM 5.11)", () => {
     const later = new Date(at(0).getTime() + 91 * DAY);
     expect(await inbox(t.db, later, author)).toHaveLength(0);
     expect(await unreadCount(t.db, later, author)).toBe(0);
+  });
+
+  it("a personal notification shows whatever the account's join date says", async () => {
+    // A replay clock (M7 Task 16) runs behind the wall clock an account is
+    // created on. Only broadcasts need the join date: nothing personal can
+    // predate the account.
+    await t.db
+      .update(users)
+      .set({ createdAt: new Date(at(0).getTime() + 30 * DAY) })
+      .where(eq(users.id, author.userId));
+    await notify(t.db, at(0), {
+      userId: author.userId,
+      kind: "moderation",
+      data: { action: "warn" },
+    });
+    expect(await inbox(t.db, at(0), author)).toHaveLength(1);
+    expect(await unreadCount(t.db, at(0), author)).toBe(1);
   });
 
   describe("broadcasts", () => {

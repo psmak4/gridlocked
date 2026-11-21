@@ -20,6 +20,7 @@ import {
 } from "./moderate";
 import { report, type CaptchaVerifier } from "./moderation";
 import { reply } from "./posts";
+import { threadPage } from "./read";
 import { createThread } from "./threads";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
@@ -159,6 +160,38 @@ describe("moderation actions (DM 5.9)", () => {
       .from(modQueueItems)
       .where(eq(modQueueItems.id, item.id));
     expect(resolved!.status).toBe("dismissed");
+  });
+
+  it("Keep it on a reported thread lists it again", async () => {
+    const regular = await seedViewer(t.db, { trustLevel: 3, username: "reg" });
+    const filed = await report(
+      t.db,
+      at(2),
+      regular,
+      { targetType: "thread", targetId: threadId, reason: "spam" },
+      { verifyCaptcha: passes },
+    );
+    if (!filed.ok) throw new Error(filed.error);
+    expect(filed.hidden).toBe(true);
+    expect(await threadPage(t.db, at(3), null, { threadId })).toBeNull();
+    const [item] = await t.db
+      .select()
+      .from(modQueueItems)
+      .where(eq(modQueueItems.id, filed.queueItemId));
+    const result = await act(mod, {
+      action: "restore",
+      targetType: "thread",
+      targetId: threadId,
+      reason: "Fair title",
+      queueItemId: item!.id,
+      version: item!.version,
+    });
+    expect(result).toMatchObject({ ok: true, changed: true });
+    const page = await threadPage(t.db, at(3), null, {
+      threadId,
+      showAll: true,
+    });
+    expect(page?.posts.find((p) => p.isOpening)?.state).toBe("visible");
   });
 
   it("resolving an item deletes logged-out reporters' addresses", async () => {

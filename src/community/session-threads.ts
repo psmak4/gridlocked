@@ -37,6 +37,16 @@ export const CHAT_MARGIN_MS = 15 * MINUTE_MS;
 /** Where session threads live. */
 const RACE_WEEKEND = "race-weekend";
 
+/**
+ * How long past its window a session's chat waits for the results post: a
+ * long red flag runs a race past its scheduled end, and nothing marks a
+ * session suspended yet (M7's review, I5).
+ */
+export const RESULTS_WAIT_MS = 60 * MINUTE_MS;
+
+/** True while a thread has no results post (the system account's reply). */
+export const awaitingResultsSql = sql<boolean>`not exists (select 1 from ${posts} where ${posts.threadId} = ${threads.id} and ${posts.authorUserId} = ${SYSTEM_USER_ID} and not ${posts.isOpening})`;
+
 /** The results post's text: a link, so it gives nothing away itself. */
 export const RESULTS_POST_BODY =
   "Results are in: [Results and points](/weekend)";
@@ -55,12 +65,13 @@ export function chatWindow(session: {
 /**
  * Chat or discussion, from the clock and the session (DM 5.3: never
  * stored). Chat inside the window, and past it while the session is
- * suspended (a red flag); discussion otherwise, and always for a cancelled
- * session or a thread with no window. Pure.
+ * suspended (a red flag) or, for up to `RESULTS_WAIT_MS`, while its thread
+ * waits for the results post; discussion otherwise, and always for a
+ * cancelled session or a thread with no window. Pure.
  */
 export function threadMode(
   now: Date,
-  session: { status: SessionStatus } | null,
+  session: { status: SessionStatus; awaitingResults?: boolean } | null,
   thread: { chatOpensAt: Date | null; chatClosesAt: Date | null },
 ): "chat" | "discussion" {
   const { chatOpensAt, chatClosesAt } = thread;
@@ -68,7 +79,11 @@ export function threadMode(
   if (session?.status === "cancelled") return "discussion";
   if (now < chatOpensAt) return "discussion";
   if (now < chatClosesAt) return "chat";
-  return session?.status === "suspended" ? "chat" : "discussion";
+  if (session?.status === "suspended") return "chat";
+  return session?.awaitingResults &&
+    now.getTime() < chatClosesAt.getTime() + RESULTS_WAIT_MS
+    ? "chat"
+    : "discussion";
 }
 
 /** "Monaco GP" for "Monaco Grand Prix", as wave 4's rows say it. */

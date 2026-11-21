@@ -340,6 +340,17 @@ The screens are on the canvas [Gridlocked wave 4](https://claude.ai/artifact/V1z
   - **Delete account** follows the board, naming the person's own teams and the leagues they run when they have any. The button stays disabled until the username is typed (any case). A refusal says why: "This account can't be deleted here." for a reserved account, and "This account is already being deleted." when it already is. Without a confirmed email, the button deletes at once if they signed in within 10 minutes, and otherwise asks them to sign in again. **The confirm page** ("Delete your account?") deletes nothing when it opens, because mail scanners open links. Its button does, and then it says "Your account is deleted". A used or old link says "That link has expired".
   - **Impersonation banner:** while an admin is looking through someone's session, every page starts with a yellow bar, "Viewing as late_braker. Read-only.", with **Stop**, which puts the admin's own session back and goes home. Every save on these pages answers "This session is read-only."
 - **Switches** use native checkboxes on these boards. The design system has since gained a Switch component (wave 5), which replaces them when the screens are built.
+- **Forum and notifications (built in M7).** Each board, where it lives and what tests it:
+  - **Categories:** `/forum`; `e2e/forum.spec.ts`.
+  - **Threads in a category:** `/forum/$category`, hot and new, pinned first. The hidden spoiler thread shows "Spoiler thread · … qualifying" with "Title hidden until you've watched qualifying"; `e2e/fantasy/forum.spec.ts` and `visitor-spoilers.spec.ts`.
+  - **New thread (spoiler title check):** `/forum/new`; `e2e/fantasy/forum.spec.ts`.
+  - **Report (sheet):** from a post's "…" menu, for members and logged-out visitors (with an email); `e2e/forum.spec.ts`.
+  - **Notifications:** `/notifications` and the bell, with grouped replies and spoiler-safe text until the session is watched; `e2e/notifications.spec.ts` and the exit spec. The board's "correction" row has no producer yet (5.11).
+  - **Turn on push (sheet):** from Settings and the notifications page; it says "Push isn't available yet." until the VAPID keys are set; `e2e/notifications.spec.ts`.
+  - **Profile's Recent posts:** the viewer's five newest posts, spoiler-safe; `e2e/settings.spec.ts`.
+  - **Dark theme thread list:** the shared tokens; no board-specific test.
+  - Not on the boards but built: the thread page with nested comments, live chat with slow mode, and the chat replay under a closed chat (`e2e/fantasy/chat.spec.ts`, exit spec).
+  - The whole weekend, from the threads opening to the archive and the export, runs in `e2e/fantasy/community-weekend.spec.ts`.
 
 ## Wave 5: staff screens (drafted 2026-10-27)
 The screens are on the canvas [Gridlocked wave 5](https://claude.ai/artifact/1jEacvWbtfdQ1DNo9Yv52D) (private to you). They're desktop-first pages, 1440 wide, with a staff side menu. Each stacks to one column on a narrow screen.

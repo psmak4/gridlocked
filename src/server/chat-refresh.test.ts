@@ -93,6 +93,19 @@ describe("the chat refresh route (HLD §11.2)", () => {
     expect(bad.headers.get("Cache-Control")).toBe("private, no-store");
   });
 
+  it("each window has one address, so nobody can make the cache miss", async () => {
+    const start = LIVE.toISOString();
+    expect((await get(start)).status).toBe(200);
+    // Another spelling of the same instant.
+    expect((await get(start.replace(".000Z", "Z"))).status).toBe(400);
+    // Anything else in the query.
+    expect((await get(`${start}&x=1`)).status).toBe(400);
+    // A window long past: nobody's page asks for one.
+    expect(
+      (await get(new Date(LIVE.getTime() - 120_000).toISOString())).status,
+    ).toBe(400);
+  });
+
   it("a window before the first message is empty, and a user thread is not found", async () => {
     const early = new Date(LIVE.getTime() - 60_000).toISOString();
     const body = (await (await get(early)).json()) as { messages: unknown[] };

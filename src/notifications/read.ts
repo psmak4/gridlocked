@@ -60,12 +60,26 @@ export function notificationHref(n: Linkable): string {
 }
 
 /** The day the list starts: 90 days back, or when the account was made. */
-async function since(db: Db, now: Date, userId: string): Promise<Date> {
+/** The start of the 90 days the list keeps. */
+const windowStart = (now: Date) =>
+  new Date(now.getTime() - NOTIFICATION_DAYS * DAY_MS);
+
+/**
+ * Where broadcasts start for someone: the 90 days, or their join date if
+ * later, so nobody new gets the season's old news. Their own rows need no
+ * such bound (nothing personal predates the account), and a replay clock
+ * runs behind the wall clock an account is created on.
+ */
+async function broadcastsSince(
+  db: Db,
+  now: Date,
+  userId: string,
+): Promise<Date> {
   const [user] = await db
     .select({ createdAt: users.createdAt })
     .from(users)
     .where(eq(users.id, userId));
-  const window = new Date(now.getTime() - NOTIFICATION_DAYS * DAY_MS);
+  const window = windowStart(now);
   return user && user.createdAt > window ? user.createdAt : window;
 }
 
@@ -75,7 +89,8 @@ export async function inbox(
   now: Date,
   viewer: Viewer,
 ): Promise<InboxItem[]> {
-  const from = await since(db, now, viewer.userId);
+  const from = windowStart(now);
+  const joined = await broadcastsSince(db, now, viewer.userId);
   const personal = await db
     .select({
       id: notifications.id,
@@ -104,7 +119,7 @@ export async function inbox(
   const everyone = await db
     .select()
     .from(broadcasts)
-    .where(gt(broadcasts.createdAt, from))
+    .where(gt(broadcasts.createdAt, joined))
     .orderBy(desc(broadcasts.createdAt))
     .limit(INBOX_LIMIT);
   const [profile] = await db
@@ -219,7 +234,8 @@ export async function unreadCount(
   now: Date,
   viewer: Viewer,
 ): Promise<number> {
-  const from = await since(db, now, viewer.userId);
+  const from = windowStart(now);
+  const joined = await broadcastsSince(db, now, viewer.userId);
   const [mine] = await db
     .select({ n: count() })
     .from(notifications)
@@ -235,7 +251,7 @@ export async function unreadCount(
     .from(profiles)
     .where(eq(profiles.userId, viewer.userId));
   const readAt = profile?.readAt;
-  const after = readAt && readAt > from ? readAt : from;
+  const after = readAt && readAt > joined ? readAt : joined;
   const [theirs] = await db
     .select({ n: count() })
     .from(broadcasts)

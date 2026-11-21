@@ -14,7 +14,7 @@ import { refuse, type CommunityRefusal } from "./errors";
 import { checkPost, effectiveLevel } from "./gate";
 import { queueFilterHits } from "./moderation";
 import { DELETED_USER } from "./read";
-import { threadMode } from "./session-threads";
+import { awaitingResultsSql, threadMode } from "./session-threads";
 
 /** One chat message, as every viewer sees it. */
 export type ChatMessageView = {
@@ -123,6 +123,7 @@ export async function chatState(db: Db, threadId: string) {
       chatClosesAt: threads.chatClosesAt,
       slowMode: threads.slowModeSeconds,
       sessionStatus: sessions.status,
+      awaitingResults: awaitingResultsSql,
     })
     .from(threads)
     .leftJoin(sessions, eq(sessions.id, threads.sessionId))
@@ -133,7 +134,13 @@ export async function chatState(db: Db, threadId: string) {
 type ChatState = NonNullable<Awaited<ReturnType<typeof chatState>>>;
 
 const modeOf = (now: Date, s: ChatState) =>
-  threadMode(now, s.sessionStatus ? { status: s.sessionStatus } : null, s);
+  threadMode(
+    now,
+    s.sessionStatus
+      ? { status: s.sessionStatus, awaitingResults: s.awaitingResults }
+      : null,
+    s,
+  );
 
 /**
  * Sends a chat message. The gate covers restrictions, trust, length, links,

@@ -20,6 +20,7 @@ import {
   type ReportReason,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { SYSTEM_USER_ID } from "@/identity/system";
 import type { Viewer } from "@/identity/viewer";
 import { newId } from "@/lib/ids";
 import { getSetting } from "@/settings";
@@ -230,7 +231,8 @@ class AlreadyReported extends Error {}
 /**
  * Files a report (DM 5.8). One per person per target: a second changes
  * nothing. A logged-out report needs a contact address and a passing bot
- * check, and weighs `report_weights.visitor`.
+ * check, and weighs `report_weights.visitor` (0 by default: queued, never
+ * auto-hidden).
  */
 export async function report(
   db: Db,
@@ -279,7 +281,9 @@ export async function report(
     return {
       ok: true,
       queueItemId: row.queueItemId,
-      hidden: row.weightSum >= weights.threshold,
+      hidden:
+        target.authorUserId !== SYSTEM_USER_ID &&
+        row.weightSum >= weights.threshold,
     };
   };
 
@@ -328,7 +332,11 @@ export async function report(
         })
         .where(eq(modQueueItems.id, item.id))
         .returning({ weightSum: modQueueItems.weightSum });
-      const hidden = updated!.weightSum >= weights.threshold;
+      // The system account's posts (results, session threads) only queue:
+      // reports can't take them down.
+      const hidden =
+        target.authorUserId !== SYSTEM_USER_ID &&
+        updated!.weightSum >= weights.threshold;
       if (hidden && (await hide(t, target))) {
         await t
           .update(modQueueItems)

@@ -173,7 +173,8 @@ jobs:
           for marker in migrationsFolder test-email-capture gl-test-busy \
             test-hook-ban-account test-hook-make-admin test-hook-impersonate \
             test-hook-run-exports test-hook-export-file \
-            test-hook-clear-acceptances test-hook-game test-hook-clock; do
+            test-hook-clear-acceptances test-hook-game test-hook-clock \
+            test-hook-community test-hook-staff; do
             if grep -rq "$marker" .vercel/output; then
               echo "::error::.vercel/output contains the local-only code ($marker)"
               exit 1

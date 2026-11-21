@@ -192,6 +192,47 @@ describe("session threads", () => {
     ).toHaveLength(1);
   });
 
+  it("a page read before chat opens says when it does", async () => {
+    await openSessionThreads(t.db, MONDAY, eventId);
+    const [race] = await t.db
+      .select()
+      .from(threads)
+      .where(eq(threads.sessionId, ids[4]!));
+    const page = (iso: string) =>
+      threadPage(t.db, new Date(iso), null, {
+        threadId: race!.id,
+        showAll: true,
+      });
+    expect(await page("2026-06-07T12:00:00Z")).toMatchObject({
+      mode: "discussion",
+      opensChatAt: "2026-06-07T12:45:00.000Z",
+    });
+    expect((await page("2026-06-07T12:50:00Z"))?.opensChatAt).toBeNull();
+  });
+
+  it("past its window, chat waits for the results post, for an hour at most", async () => {
+    await openSessionThreads(t.db, MONDAY, eventId);
+    const [race] = await t.db
+      .select()
+      .from(threads)
+      .where(eq(threads.sessionId, ids[4]!));
+    const mode = async (iso: string) =>
+      (
+        await threadPage(t.db, new Date(iso), null, {
+          threadId: race!.id,
+          showAll: true,
+        })
+      )?.mode;
+    // The window closes at 15:15; a long red flag runs the race past it.
+    expect(race!.chatClosesAt).toEqual(new Date("2026-06-07T15:15:00Z"));
+    expect(await mode("2026-06-07T15:40:00Z")).toBe("chat");
+    // No results an hour after the window: discussion all the same.
+    expect(await mode("2026-06-07T16:15:00Z")).toBe("discussion");
+    // The results post ends it.
+    await postResults(t.db, new Date("2026-06-07T15:45:00Z"), ids[4]!);
+    expect(await mode("2026-06-07T15:46:00Z")).toBe("discussion");
+  });
+
   it("the results post is a link, and its thread is spoiler-scoped", async () => {
     await openSessionThreads(t.db, MONDAY, eventId);
     const after = new Date("2026-06-07T16:00:00Z");

@@ -53,6 +53,19 @@ const SITE_PATH = /^\/(?![/\\])[^\s"]*$/;
 const LINK = /<a href="([^"]*)"(?: title="[^"]*")?>([\s\S]*?)<\/a>/g;
 const IMAGE = /<img src="[^"]*" alt="([^"]*)"(?: title="[^"]*")? \/>/g;
 
+/**
+ * A site path without its `?show=`: the address of a page someone revealed
+ * mustn't reveal it for whoever follows the link (HLD §7.3).
+ */
+function withoutReveal(href: string): string {
+  const url = new URL(decodeAttr(href), "https://site.invalid");
+  if (!url.searchParams.has("show")) return href;
+  url.searchParams.delete("show");
+  return `${url.pathname}${url.search}${url.hash}`
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;");
+}
+
 /** Safe HTML for a post body. */
 export function renderPost(
   markdown: string,
@@ -64,7 +77,8 @@ export function renderPost(
     .replace(LINK, (_match, href: string, inner: string) => {
       // A page on this site: a path, never `//host` or `/\host`, which a
       // browser reads as another host. Safe for anyone, so it stays a link.
-      if (SITE_PATH.test(href)) return `<a href="${href}">${inner}</a>`;
+      if (SITE_PATH.test(href))
+        return `<a href="${withoutReveal(href)}">${inner}</a>`;
       const url = parseHttpUrl(href);
       if (!url) return inner;
       if (!options.linksAllowed && !isEmbedHost(url.hostname)) return inner;
