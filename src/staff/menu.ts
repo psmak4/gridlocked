@@ -39,6 +39,13 @@ export const STAFF_SCREENS: StaffScreen[] = [
     role: "admin",
   },
   {
+    id: "moderation",
+    label: "Moderation",
+    href: "/staff/moderation",
+    group: "moderation",
+    role: "moderator",
+  },
+  {
     id: "calendar",
     label: "Calendar",
     href: "/staff/calendar",

@@ -10,6 +10,7 @@
  */
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
+import { resolveVersioned } from "@/staff/versioned";
 import {
   auditLog,
   categories,
@@ -88,7 +89,7 @@ export type ModerateInput = {
 
 export type ModerateRefusal = {
   ok: false;
-  error: "not_found" | "invalid" | "version_conflict" | "item_mismatch";
+  error: "not_found" | "invalid" | "stale" | "item_mismatch";
 };
 
 export type ModerateResult =
@@ -255,6 +256,7 @@ async function changeThread(db: Db, input: ModerateInput): Promise<Change> {
       pinned: threads.pinned,
       categoryId: threads.categoryId,
       spoilerSafeTitle: threads.spoilerSafeTitle,
+      containsSpoilers: threads.containsSpoilers,
       authorUserId: threads.authorUserId,
     })
     .from(threads)
@@ -322,12 +324,17 @@ async function changeThread(db: Db, input: ModerateInput): Promise<Change> {
       break;
     }
     case "retitle": {
-      // Only the spoiler-safe title (HLD §7.3): the author's title stays.
+      // Only the spoiler-safe title (HLD §7.3): the author's title stays,
+      // and the thread is marked as a spoiler, so readers see the safe one.
       const title = input.title?.trim() ?? "";
       if (title.length === 0 || title.length > 120)
         throw new Refused(refused("invalid"));
       if (thread.spoilerSafeTitle !== title) set = { spoilerSafeTitle: title };
-      before = { spoilerSafeTitle: thread.spoilerSafeTitle };
+      if (!thread.containsSpoilers) set = { ...set, containsSpoilers: true };
+      before = {
+        spoilerSafeTitle: thread.spoilerSafeTitle,
+        ...(thread.containsSpoilers ? {} : { containsSpoilers: false }),
+      };
       break;
     }
     default:
@@ -416,8 +423,9 @@ async function changeUser(
 /**
  * Takes one moderation action. Refusals: `invalid` for an action on the
  * wrong kind of thing, a blank reason or a missing field; `not_found`; and
- * `version_conflict` when the queue item was decided or changed since the
- * moderator looked.
+ * `stale` when the queue item was decided or changed since the moderator
+ * looked. The item is claimed at that version before anything else is
+ * written (`resolveVersioned`), so of two moderators at once only one acts.
  */
 /** The actions the person acted on hears about (wave 4: MODERATION). */
 const NOTIFIED = new Set<string>([
@@ -446,7 +454,27 @@ export async function moderate(
   try {
     return await db.transaction(async (tx): Promise<ModerateResult> => {
       const t = tx as unknown as Db;
-      if (input.queueItemId !== undefined) await checkItemTarget(t, input);
+      if (input.queueItemId !== undefined) {
+        await checkItemTarget(t, input);
+        const claimed = await resolveVersioned(
+          t,
+          modQueueItems,
+          { id: input.queueItemId, version: input.version! },
+          {
+            // "Keep it" (a restore) closes the reports without action.
+            status: input.action === "restore" ? "dismissed" : "actioned",
+            resolvedBy: actor.userId,
+            resolvedAt: now,
+            resolution: input.action,
+          },
+        );
+        if (!claimed) throw new Refused(refused("stale"));
+        // Logged-out reporters' addresses go at resolution (DM 5.10).
+        await t
+          .update(reports)
+          .set({ reporterContact: null })
+          .where(eq(reports.queueItemId, input.queueItemId));
+      }
       let change: Change;
       if (input.targetType === "user") {
         change = await changeUser(t, now, actor, input);
@@ -464,34 +492,6 @@ export async function moderate(
           input,
           input.action as "remove" | "restore",
         );
-      }
-
-      if (input.queueItemId !== undefined) {
-        const decided = await t
-          .update(modQueueItems)
-          .set({
-            // "Keep it" (a restore) closes the reports without action.
-            status: input.action === "restore" ? "dismissed" : "actioned",
-            resolvedBy: actor.userId,
-            resolvedAt: now,
-            resolution: input.action,
-            version: sql`${modQueueItems.version} + 1`,
-          })
-          .where(
-            and(
-              eq(modQueueItems.id, input.queueItemId),
-              eq(modQueueItems.version, input.version!),
-              eq(modQueueItems.status, "open"),
-            ),
-          )
-          .returning({ id: modQueueItems.id });
-        if (decided.length === 0)
-          throw new Refused(refused("version_conflict"));
-        // Logged-out reporters' addresses go at resolution (DM 5.10).
-        await t
-          .update(reports)
-          .set({ reporterContact: null })
-          .where(eq(reports.queueItemId, input.queueItemId));
       }
 
       const actionId = newId();

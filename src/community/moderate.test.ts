@@ -114,7 +114,7 @@ describe("moderation actions (DM 5.9)", () => {
       queueItemId: item.id,
       version: item.version,
     });
-    expect(second).toEqual({ ok: false, error: "version_conflict" });
+    expect(second).toEqual({ ok: false, error: "stale" });
     // The first one stands: removed, and the item actioned by the moderator.
     expect((await postRow()).status).toBe("removed");
     const [resolved] = await t.db
@@ -127,6 +127,57 @@ describe("moderation actions (DM 5.9)", () => {
       resolution: "remove",
     });
     expect(await t.db.select().from(modActions)).toHaveLength(1);
+  });
+
+  it("two moderators act on one item at its version: one acts, the other is refused with stale and no restriction is written", async () => {
+    const item = await hideByReport();
+    const mute = (viewer: Viewer, reason: string) =>
+      act(viewer, {
+        action: "mute",
+        targetType: "user",
+        targetId: author.userId,
+        reason,
+        until: null,
+        queueItemId: item.id,
+        version: item.version,
+      });
+    const [a, b] = await Promise.all([
+      mute(mod, "Spam"),
+      mute(admin, "Spam, again"),
+    ]);
+    expect([a, b].filter((r) => r.ok)).toHaveLength(1);
+    expect([a, b].find((r) => !r.ok)).toEqual({ ok: false, error: "stale" });
+    expect(await t.db.select().from(userRestrictions)).toHaveLength(1);
+    expect(await t.db.select().from(modActions)).toHaveLength(1);
+    expect(
+      await t.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, "moderation.mute")),
+    ).toHaveLength(1);
+  });
+
+  it("an action on an item already decided writes nothing at all", async () => {
+    const item = await hideByReport();
+    await act(mod, {
+      action: "remove",
+      targetType: "post",
+      targetId: postId,
+      reason: "Ticket spam",
+      queueItemId: item.id,
+      version: item.version,
+    });
+    const late = await act(admin, {
+      action: "mute",
+      targetType: "user",
+      targetId: author.userId,
+      reason: "Spam",
+      until: null,
+      queueItemId: item.id,
+      version: item.version,
+    });
+    expect(late).toEqual({ ok: false, error: "stale" });
+    expect(await t.db.select().from(userRestrictions)).toHaveLength(0);
   });
 
   it("restore puts a hidden post back and logs it", async () => {
@@ -472,6 +523,26 @@ describe("moderation actions (DM 5.9)", () => {
     const after = await threadRow();
     expect(after.title).toBe("Russell wins in Monaco");
     expect(after.spoilerSafeTitle).toBe("Monaco: the race");
+  });
+
+  it("retitle marks a thread not yet marked as a spoiler", async () => {
+    await t.db
+      .update(threads)
+      .set({ containsSpoilers: false, spoilerSafeTitle: null })
+      .where(eq(threads.id, threadId));
+    const result = await act(mod, {
+      action: "retitle",
+      targetType: "thread",
+      targetId: threadId,
+      reason: "The title is a spoiler",
+      title: "Monaco: the race",
+    });
+    expect(result).toMatchObject({ ok: true, changed: true });
+    expect(await threadRow()).toMatchObject({
+      title: "Russell wins in Monaco",
+      spoilerSafeTitle: "Monaco: the race",
+      containsSpoilers: true,
+    });
   });
 
   it("an action on nothing, or the wrong kind of thing, is refused", async () => {
