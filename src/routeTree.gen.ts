@@ -40,6 +40,7 @@ import { Route as SignUpIndexRouteImport } from './routes/sign-up.index'
 import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
 import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StaffAuditRouteImport } from './routes/staff.audit'
+import { Route as StaffCalendarRouteImport } from './routes/staff.calendar'
 import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
 import { Route as TeamIndexRouteImport } from './routes/team.index'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
@@ -59,6 +60,7 @@ import { Route as ApiTestMakeAdminRouteImport } from './routes/api/test.make-adm
 import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exports'
 import { Route as ApiTestStaffRouteImport } from './routes/api/test.staff'
 import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
+import { Route as StaffCalendarEventIdRouteImport } from './routes/staff.calendar.$eventId'
 import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
 import { Route as TeamSlotPointsRouteImport } from './routes/team.$slot.points'
 
@@ -217,6 +219,11 @@ const StaffAuditRoute = StaffAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffCalendarRoute = StaffCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => StaffRoute,
+} as any)
 const TThreadIdRoute = TThreadIdRouteImport.update({
   id: '/t/$threadId',
   path: '/t/$threadId',
@@ -312,6 +319,11 @@ const SettingsDeleteConfirmRoute = SettingsDeleteConfirmRouteImport.update({
   path: '/settings/delete/confirm',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StaffCalendarEventIdRoute = StaffCalendarEventIdRouteImport.update({
+  id: '/$eventId',
+  path: '/$eventId',
+  getParentRoute: () => StaffCalendarRoute,
+} as any)
 const TeamSlotIndexRoute = TeamSlotIndexRouteImport.update({
   id: '/team/$slot/',
   path: '/team/$slot/',
@@ -349,6 +361,7 @@ export interface FileRoutesByFullPath {
   '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
+  '/staff/calendar': typeof StaffCalendarRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -374,6 +387,7 @@ export interface FileRoutesByFullPath {
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
+  '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -402,6 +416,7 @@ export interface FileRoutesByTo {
   '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
+  '/staff/calendar': typeof StaffCalendarRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -427,6 +442,7 @@ export interface FileRoutesByTo {
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
+  '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot': typeof TeamSlotIndexRoute
 }
@@ -457,6 +473,7 @@ export interface FileRoutesById {
   '/settings/username': typeof SettingsUsernameRoute
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
+  '/staff/calendar': typeof StaffCalendarRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -482,6 +499,7 @@ export interface FileRoutesById {
   '/api/test/run-exports': typeof ApiTestRunExportsRoute
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
+  '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -513,6 +531,7 @@ export interface FileRouteTypes {
     | '/settings/username'
     | '/sign-up/email'
     | '/staff/audit'
+    | '/staff/calendar'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -538,6 +557,7 @@ export interface FileRouteTypes {
     | '/api/test/run-exports'
     | '/api/test/staff'
     | '/settings/delete/confirm'
+    | '/staff/calendar/$eventId'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesByTo: FileRoutesByTo
@@ -566,6 +586,7 @@ export interface FileRouteTypes {
     | '/settings/username'
     | '/sign-up/email'
     | '/staff/audit'
+    | '/staff/calendar'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -591,6 +612,7 @@ export interface FileRouteTypes {
     | '/api/test/run-exports'
     | '/api/test/staff'
     | '/settings/delete/confirm'
+    | '/staff/calendar/$eventId'
     | '/team/$slot/points'
     | '/team/$slot'
   id:
@@ -620,6 +642,7 @@ export interface FileRouteTypes {
     | '/settings/username'
     | '/sign-up/email'
     | '/staff/audit'
+    | '/staff/calendar'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -645,6 +668,7 @@ export interface FileRouteTypes {
     | '/api/test/run-exports'
     | '/api/test/staff'
     | '/settings/delete_/confirm'
+    | '/staff/calendar/$eventId'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesById: FileRoutesById
@@ -921,6 +945,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffAuditRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/calendar': {
+      id: '/staff/calendar'
+      path: '/calendar'
+      fullPath: '/staff/calendar'
+      preLoaderRoute: typeof StaffCalendarRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/t/$threadId': {
       id: '/t/$threadId'
       path: '/t/$threadId'
@@ -1054,6 +1085,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDeleteConfirmRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/staff/calendar/$eventId': {
+      id: '/staff/calendar/$eventId'
+      path: '/$eventId'
+      fullPath: '/staff/calendar/$eventId'
+      preLoaderRoute: typeof StaffCalendarEventIdRouteImport
+      parentRoute: typeof StaffCalendarRoute
+    }
     '/team/$slot/': {
       id: '/team/$slot/'
       path: '/team/$slot'
@@ -1071,13 +1109,27 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface StaffCalendarRouteChildren {
+  StaffCalendarEventIdRoute: typeof StaffCalendarEventIdRoute
+}
+
+const StaffCalendarRouteChildren: StaffCalendarRouteChildren = {
+  StaffCalendarEventIdRoute: StaffCalendarEventIdRoute,
+}
+
+const StaffCalendarRouteWithChildren = StaffCalendarRoute._addFileChildren(
+  StaffCalendarRouteChildren,
+)
+
 interface StaffRouteChildren {
   StaffAuditRoute: typeof StaffAuditRoute
+  StaffCalendarRoute: typeof StaffCalendarRouteWithChildren
   StaffIndexRoute: typeof StaffIndexRoute
 }
 
 const StaffRouteChildren: StaffRouteChildren = {
   StaffAuditRoute: StaffAuditRoute,
+  StaffCalendarRoute: StaffCalendarRouteWithChildren,
   StaffIndexRoute: StaffIndexRoute,
 }
 

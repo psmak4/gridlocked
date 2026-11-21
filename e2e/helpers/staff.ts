@@ -3,9 +3,13 @@ import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { createAccount, hydrated, ORIGIN, signIn } from "./accounts";
 
 /** Local-only hook: makes the account with this address an admin. */
-export async function makeAdmin(request: APIRequestContext, email: string) {
+export async function makeAdmin(
+  request: APIRequestContext,
+  email: string,
+  origin: string = ORIGIN,
+) {
   const response = await request.post("/api/test/make-admin", {
-    headers: { origin: ORIGIN },
+    headers: { origin },
     data: { email },
   });
   expect(response.status()).toBe(200);
@@ -82,11 +86,16 @@ export async function setUpTotp(
 
 /**
  * A new admin, signed in, with two-step sign-in set up and staff tools
- * unlocked for this session by a backup code.
+ * unlocked for this session by a backup code. `origin` is the server's own:
+ * the fantasy project's is another port.
  */
-export async function unlockedAdmin(page: Page, request: APIRequestContext) {
-  const account = await createAccount(request);
-  await makeAdmin(request, account.email);
+export async function unlockedAdmin(
+  page: Page,
+  request: APIRequestContext,
+  origin: string = ORIGIN,
+) {
+  const account = await createAccount(request, { origin });
+  await makeAdmin(request, account.email, origin);
   await signIn(page, account);
   const totp = await setUpTotp(page, account.password);
   const section = page.getByRole("region", { name: "Two-step sign-in" });

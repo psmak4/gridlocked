@@ -1,7 +1,7 @@
 import { useId } from "react";
+import { REASON_MAX } from "@/staff/errors";
 
-/** The longest reason a staff write takes (M8). */
-export const REASON_MAX = 500;
+export { REASON_MAX };
 
 /**
  * Every staff write's reason: required, not blank, at most 500 characters.

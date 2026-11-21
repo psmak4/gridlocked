@@ -63,6 +63,10 @@ export const AUDIT_ACTIONS = {
   "pool_asset.create": { label: "Asset added to the game", group: "season" },
   "pool_asset.withdraw": { label: "Asset withdrawn", group: "season" },
   "asset_price.set": { label: "Price set", group: "season" },
+  "event.lock_at.update": { label: "Lock time change", group: "season" },
+  "event.cancel": { label: "Event cancelled", group: "season" },
+  "session.times.update": { label: "Session times change", group: "season" },
+  "session.status.update": { label: "Session status change", group: "season" },
 
   // Security: staff access, roles and accounts.
   "staff.session.verify": { label: "Staff tools unlocked", group: "security" },

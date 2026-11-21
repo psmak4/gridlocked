@@ -178,6 +178,8 @@ Why `lock_at` is here and not in the game tables: it's a time the whole site use
 
 What a cancellation does in the game (whether transfers are counted and whether chips are refunded) is settled in Part 3.
 
+**Staff changes (M8).** The Calendar screen (`/staff/calendar`) sets `lock_at` by hand (`lock_at_source = admin`), or puts it back on its session's start (`default`). Both are audited as `event.lock_at.update` and refused if the lock or the new time has passed. **Mark cancelled** sets `status = cancelled` on the event and all its sessions before its lock (`event.cancel`), and planning again refunds the chips played for it (DM 3.9). After the lock it's refused; the results screens decide instead. There's no un-cancel. Each change plans the event's jobs and every game of the season again, as the daily sync does.
+
 ### 1.4 `sessions`
 | Column | Type | Notes |
 |---|---|---|
@@ -192,6 +194,8 @@ What a cancellation does in the game (whether transfers are counted and whether 
 | status | text: `scheduled`, `live`, `suspended`, `completed`, `abandoned`, `cancelled` | `live` and `completed` come from the clock plus results arriving; the rest are admin-set. `suspended` covers a red flag that runs past the scheduled end, so chat stays in live mode. `abandoned` means the session started but didn't finish normally (e.g. Spa 2021: results taken from an early lap). How the game scores an abandoned session is a ruleset question (Part 3). A session moved to another day (e.g. Suzuka 2019 qualifying moved to Sunday) just gets new times |
 
 Whether a session is scored is decided by the ruleset (Part 3), not stored here.
+
+**Staff changes (M8).** The Calendar screen sets a session's times by hand (`time_source = admin`, audited as `session.times.update`), which moves its thread's chat window, and its lock when the lock follows it and hasn't passed. Staff set `suspended`, `abandoned`, `cancelled` and back to `scheduled` (`session.status.update`). A cancelled session gets a `skip` exception in every running game that has none, gets no results post, and turns its thread to discussion mode; back to `scheduled`, those `skip` exceptions are cleared. A suspended session keeps its chat live past its end.
 
 ### 1.5 `drivers` (follows the person; decided)
 | Column | Type | Notes |

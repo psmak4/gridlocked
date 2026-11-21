@@ -25,6 +25,7 @@ import {
   type StaffErrorCode,
   type StaffResult,
 } from "@/staff/errors";
+import type { StaffActor } from "@/staff/roster";
 import { getViewer, withRequestNow } from "./session";
 
 /** What a staff handler gets: the request's database, "now", viewer and id. */
@@ -111,4 +112,9 @@ export function staffFn<I, T>(def: StaffFnDef<I, T>) {
     const viewer = await getViewer(getRequest());
     return runStaff(def, viewer, data, (fn) => withRequestNow(fn));
   };
+}
+
+/** Who a staff write's audit rows name: the signed-in admin, by this call. */
+export function staffActor(viewer: Viewer, requestId: string): StaffActor {
+  return { kind: "admin", label: null, userId: viewer.userId, requestId };
 }
