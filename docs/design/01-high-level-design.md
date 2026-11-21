@@ -567,6 +567,13 @@ Going over a free limit never sends a bill; the service stops instead. The failu
 5. **Staging on its own free Neon project.** Each project gets its own 100 compute-hours, so testing never uses production's allowance.
 6. **Cap Neon's autoscaling at the smallest size (0.25 CU)** on the free plan. Otherwise a spike scales the compute up and burns the allowance several times faster.
 7. **Watch usage.** An admin dashboard and alerts show Neon compute-hours, transfer, Vercel usage and email count against their limits, with a warning at about 70% of each. That gives a few days' notice to upgrade before anything stops.
+   - **How it's built (M8):** a daily GitHub workflow, `usage-snapshot.yml`, runs at 05:00 UTC.
+     - It reads Neon's `GET /projects/{id}` (`compute_time_seconds` and `data_transfer_bytes`, the Free plan's only usage source) with `NEON_API_KEY_STAGING`.
+     - It reads Vercel's FOCUS billing charges (`GET /v1/billing/charges`, the active-CPU rows) with `VERCEL_USAGE_TOKEN`, a read-only token.
+     - It writes one `usage_snapshots` row. No provider key goes into the app.
+   - A meter at 70% opens a `usage_high` warning in the review queue. If either reading fails, the run fails and nothing is written.
+   - Email counts come from the outbox.
+   - Vercel's charge rows for active CPU are matched by name and converted by unit. The first real run on Hobby confirms that; if Vercel reports none, the meter says "No reading from Vercel" rather than 0.
 
 **Live chat was the feature most at risk, and it's now the fallback (decided 2026-10-28).** Session threads in chat mode refresh every few seconds instead of holding a WebSocket open (§11.2). The refresh still costs Vercel invocations, so it must be cached per thread on the CDN: about 500 people refreshing every 3 seconds for a 2-hour race is about 1.2M uncached requests, more than Hobby's 1M a month, but only about 2,400 if every refresh in a 3-second window shares one cached response. M7 measures this on staging.
 

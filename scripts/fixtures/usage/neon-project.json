@@ -1,0 +1,13 @@
+{
+  "project": {
+    "id": "example-project-00000000",
+    "name": "example",
+    "active_time_seconds": 950400,
+    "compute_time_seconds": 266400,
+    "data_transfer_bytes": 1250000000,
+    "written_data_bytes": 52000000,
+    "data_storage_bytes_hour": 9100000000000,
+    "consumption_period_start": "2026-03-01T00:00:00Z",
+    "consumption_period_end": "2026-04-01T00:00:00Z"
+  }
+}

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { privateHeaders } from "@/lib/private-headers";
+import { cn } from "@/lib/utils";
 import { getStaffSettings, saveStaffSettings } from "@/server/staff";
 import { STAFF_ERROR_WORDS } from "@/staff/errors";
 
@@ -190,9 +191,51 @@ function SettingsForm({ data }: { data: Data }) {
           <h2 id="usage" className={eyebrow}>
             FREE-TIER USAGE
           </h2>
-          <p className="text-[16px] text-ink-muted">
-            No usage readings yet. They arrive once a day.
+          <p className="text-[14px] text-ink-muted">
+            This month so far, read once a day. Each warns at 70% of its free
+            limit.
           </p>
+          <ul className="m-0 flex list-none flex-col gap-space-3 p-0">
+            {data.meters.map((m) => (
+              <li
+                key={m.label}
+                data-slot="usage-meter"
+                className="flex flex-col gap-space-1"
+              >
+                <span className="flex flex-wrap items-baseline justify-between gap-space-2">
+                  <span className="text-[16px] font-bold">{m.label}</span>
+                  <span className="text-[14px]">{m.value ?? "—"}</span>
+                </span>
+                {m.pct !== null ? (
+                  <span
+                    role="meter"
+                    aria-label={m.label}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.min(m.pct, 100)}
+                    aria-valuetext={`${m.pct}%`}
+                    className="block h-[8px] overflow-hidden rounded-radius-pill bg-surface-sunken"
+                  >
+                    <span
+                      className={cn(
+                        "block h-full rounded-radius-pill",
+                        m.warn ? "bg-caution" : "bg-ink",
+                      )}
+                      style={{ width: `${Math.min(m.pct, 100)}%` }}
+                    />
+                  </span>
+                ) : null}
+                <span
+                  className={cn(
+                    "text-[14px]",
+                    m.warn ? "font-semibold text-caution" : "text-ink-muted",
+                  )}
+                >
+                  {m.note}
+                </span>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section aria-labelledby="pipeline" className={section}>

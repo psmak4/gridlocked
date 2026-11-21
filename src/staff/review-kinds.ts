@@ -396,6 +396,10 @@ export const REVIEW_KINDS = {
     "A job failed for good",
     "A background job failed every retry and stopped.",
   ),
+  usage_high: plain(
+    "A free tier is over 70%",
+    "This month's usage of a free plan has passed 70% of its limit. Plan to upgrade before it runs out (HLD §11.4).",
+  ),
   email_cap_near: plain(
     "Emails are near today's cap",
     "The day's email sending is close to its limit.",
