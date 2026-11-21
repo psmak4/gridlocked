@@ -66,7 +66,11 @@ export async function normalizeSession(
 ): Promise<{ changed: number }> {
   return db.transaction(async (tx) => {
     /** Holds the session behind a blocking review item; writes no results. */
-    const hold = async (kind: string, details: Record<string, unknown>) => {
+    const hold = async (
+      kind:
+        "unknown_classification" | "validation_failed" | "results_disappeared",
+      details: Record<string, unknown>,
+    ) => {
       const ctx = await getSessionContext(tx, sessionId);
       await openReviewItem(tx, now, {
         kind,
@@ -81,7 +85,7 @@ export async function normalizeSession(
     };
 
     let failure: {
-      code: string;
+      code: "unknown_classification" | "validation_failed";
       problem: string;
       details?: Record<string, unknown>;
     } | null = parsed.ok

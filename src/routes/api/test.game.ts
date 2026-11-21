@@ -12,6 +12,8 @@ import { withNoStore } from "@/server/no-store";
 //   staff would: the pool changing under an open builder.
 // - PATCH `{ crowd: 60, joinCode? }` adds 60 accounts with saved teams (and
 //   puts them in that league): a table long enough to page.
+// - PATCH `{ teamChange: { code: "ALB", team: "haas" } }` opens a team change
+//   in the review queue for the next event still to lock.
 // - PATCH `{ stale: "ALB" }` disqualifies that driver from the latest scored
 //   race with nothing re-scored: something for a scoring dry run to show.
 // The flag is replaced at build time, so a normal build keeps the 404 and
@@ -70,7 +72,29 @@ async function change(request: Request): Promise<Response> {
     crowd?: unknown;
     joinCode?: unknown;
     stale?: unknown;
+    teamChange?: { code?: unknown; team?: unknown };
   };
+  if (
+    typeof body.teamChange?.code === "string" &&
+    typeof body.teamChange.team === "string"
+  ) {
+    const { teamChangeTestReview, HarnessError } =
+      await import("@/server/test-game");
+    try {
+      const done = await teamChangeTestReview({
+        code: body.teamChange.code,
+        team: body.teamChange.team,
+      });
+      return withNoStore(Response.json({ ...done, hook: "test-hook-game" }));
+    } catch (error) {
+      if (error instanceof HarnessError) {
+        return withNoStore(
+          new Response(error.message, { status: error.status }),
+        );
+      }
+      throw error;
+    }
+  }
   if (typeof body.stale === "string") {
     const { staleTestOverride, HarnessError } =
       await import("@/server/test-game");

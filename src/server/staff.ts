@@ -46,10 +46,16 @@ import {
   startDryRun,
 } from "@/staff/scoring";
 import { nextPrices, setAdminPrice } from "@/staff/prices";
+import {
+  openReviewCount,
+  resolveReviewItem,
+  reviewItem,
+  reviewList,
+} from "@/staff/review";
 import { checkProviderAgain, sessionResults } from "@/staff/session-results";
 import { staffTime } from "@/staff/time";
 import { webDueStore } from "./due-store";
-import { getViewer } from "./session";
+import { getViewer, withRequestNow } from "./session";
 import { staffActor, staffFn, staffInput } from "./staff-fn";
 
 /**
@@ -60,7 +66,10 @@ import { staffActor, staffFn, staffInput } from "./staff-fn";
 export const getStaffArea = createServerFn({ method: "GET" }).handler(
   async (): Promise<StaffArea> => {
     setResponseHeader("Cache-Control", "private, no-store");
-    return staffArea(await getViewer(getRequest()));
+    const area = staffArea(await getViewer(getRequest()));
+    if (area.state !== "open" || area.role !== "admin") return area;
+    const review = await withRequestNow((db) => openReviewCount(db));
+    return { ...area, counts: { ...area.counts, review } };
   },
 );
 
@@ -598,5 +607,63 @@ export const savePrice = createServerFn({ method: "POST" })
           ...input,
           price: Math.round(Number(input.price) * 10),
         }),
+    }),
+  );
+
+// --- The review queue (Task 10) ---------------------------------------------
+
+/** The Open or Resolved tab, with labels in the viewer's time zone. */
+export const getReviewList = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({ tab: z.enum(["open", "resolved"]) }),
+      handler: async ({ db, now, viewer }, { tab }) => {
+        const zone = viewer.profile.timezone;
+        const items = await reviewList(db, { status: tab });
+        return items.map(({ createdAt, resolvedAt, ...item }) => ({
+          ...item,
+          whenLabel: staffTime(resolvedAt ?? createdAt, zone, now),
+        }));
+      },
+    }),
+  );
+
+/** One item: its evidence, what it holds, and its actions. */
+export const getReviewItem = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({ id: z.uuid() }),
+      handler: async ({ db, now, viewer }, { id }) => {
+        const item = await reviewItem(db, id);
+        if (!item) throw new StaffError("not_found");
+        const { createdAt, resolvedAt, ...rest } = item;
+        const zone = viewer.profile.timezone;
+        return {
+          ...rest,
+          openedLabel: staffTime(createdAt, zone, now),
+          resolvedLabel: resolvedAt ? staffTime(resolvedAt, zone, now) : null,
+        };
+      },
+    }),
+  );
+
+/** Resolve an item with one of its actions, at the version the screen read. */
+export const resolveReview = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        id: z.uuid(),
+        version: z.number().int().positive(),
+        actionId: z.string().min(1).max(64),
+        reason: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) =>
+        resolveReviewItem(db, now, staffActor(viewer, requestId), input),
     }),
   );

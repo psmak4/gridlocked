@@ -510,7 +510,7 @@ This is kept apart from `results`, because practice isn't scored and its data co
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| kind | text | e.g. `validation_failed`, `unknown_driver`, `team_change`, `missing_driver`, `event_missing_from_provider`, `uncertain_event_match`, `provider_after_manual`, `unknown_classification`, `provider_mismatch`, `score_mismatch`, `scoring_retried` |
+| kind | text | e.g. `validation_failed`, `unknown_driver`, `team_change`, `missing_driver`, `event_missing_from_provider`, `uncertain_event_match`, `provider_after_manual`, `unknown_classification`, `score_mismatch`, `scoring_retried`: the full list is `REVIEW_KINDS` (M8) |
 | severity | text: `blocking`, `warning` | `blocking` holds scoring for the linked session; `warning` doesn't |
 | season_id, event_id, session_id, driver_id | uuid FKs, nullable | What it's about. Spoiler-scoped by `session_id` |
 | details | jsonb | What was found, shaped per `kind` |
@@ -522,6 +522,13 @@ This is kept apart from `results`, because practice isn't scored and its data co
 | created_at | timestamptz | |
 
 **Rule:** a session's status can't become `provisional` or `final` while it has an open `blocking` item. The status change is made in the same transaction as the check.
+
+**Kinds and the queue (M8).** `kind` is one of `REVIEW_KINDS` (`src/staff/review-kinds.ts`), and `openReviewItem` takes only those, so the queue has words and actions for every kind it can meet. The board's five (`team_change`, `missing_driver`, `event_missing_from_provider`, `uncertain_event_match`, and `provider_after_manual` as "sources disagree") have its actions:
+- **Update seats from this event on** (`changeSeats`);
+- **Mark unavailable** (`setAvailability`, also after the lock, telling nobody then);
+- **Mark cancelled** (`cancelEvent`).
+
+Every kind also has a "Go to …" link where a screen fixes it, and **Dismiss**. A resolve claims the item at the version the screen read and runs the action in the same transaction, with `review_item.resolve` or `review_item.dismiss` in the audit log. An action that refuses (an event since locked, say) leaves the item open, and a second resolve at the same version is refused as stale, writing nothing. `resolution` holds the action's label, and the reason is in the audit row. Resolving a `blocking` item then runs `advanceStatus` for its session, and queues its scoring. The validator doesn't reopen a finding an admin decided (the same details, not auto-resolved).
 
 ### 2.10 `jobs` (one table for all background work)
 | Column | Type | Notes |
