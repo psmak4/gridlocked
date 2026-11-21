@@ -29,7 +29,8 @@ import {
  */
 export interface StaffActor {
   kind: "admin";
-  label: string;
+  /** Who ran the staff workflow; null for an admin acting on the site. */
+  label: string | null;
   userId?: string;
   /** Ties the audit rows of one run together, e.g. `gh-run:<id>`. */
   requestId?: string;

@@ -21,7 +21,7 @@ import {
   totpCode,
   viewerFor,
 } from "../../tests/helpers/staff";
-import { auditLog, authSessions, users } from "@/db/schema";
+import { auditLog, authSessions, reviewItems, users } from "@/db/schema";
 import { requireStaff, verifyStaffSession } from "./staff-access";
 
 const DISCORD = {
@@ -268,6 +268,8 @@ describe("the staff two-step (DM 6.4)", () => {
     const cookie = await signInWithTotp(auth, BOSS, secret);
     const v = (await viewer(cookie))!;
     for (let i = 0; i < 7; i++) {
+      // Each code once: a step can't be used twice (M8 Task 2).
+      later(SECOND);
       await verifyStaffSession(auth, t.db, now(), {
         viewer: v,
         code: await totpCode(auth, secret),
@@ -307,6 +309,115 @@ describe("the staff two-step (DM 6.4)", () => {
       code: backupCodes[1]!,
     });
     expect(requireStaff(await viewer(second), "admin")).toBeTruthy();
+  });
+
+  describe("replays and failed codes (M5 carry-over)", () => {
+    const audits = (action: string) =>
+      t.db.select().from(auditLog).where(eq(auditLog.action, action));
+
+    it("a TOTP code accepted once is refused the second time within its window", async () => {
+      const { secret } = await adminWithTotp();
+      const first = await signInWithTotp(auth, BOSS, secret);
+      const second = await signInWithTotp(auth, BOSS, secret);
+      const code = await totpCode(auth, secret);
+      await verifyStaffSession(auth, t.db, now(), {
+        viewer: (await viewer(first))!,
+        code,
+      });
+      const secondViewer = (await viewer(second))!;
+      expect(
+        await errorCode(() =>
+          verifyStaffSession(auth, t.db, now(), {
+            viewer: secondViewer,
+            code,
+          }),
+        ),
+      ).toBe("invalid_code");
+      expect((await viewer(second))!.staffVerifiedAt).toBeNull();
+    });
+
+    it("a code for an earlier step than the last accepted one is refused", async () => {
+      const { secret } = await adminWithTotp();
+      const first = await signInWithTotp(auth, BOSS, secret);
+      const second = await signInWithTotp(auth, BOSS, secret);
+      const earlier = await totpCode(
+        auth,
+        secret,
+        new Date(now().getTime() - SECOND),
+      );
+      await verifyStaffSession(auth, t.db, now(), {
+        viewer: (await viewer(first))!,
+        code: await totpCode(auth, secret),
+      });
+      const secondViewer = (await viewer(second))!;
+      expect(
+        await errorCode(() =>
+          verifyStaffSession(auth, t.db, now(), {
+            viewer: secondViewer,
+            code: earlier,
+          }),
+        ),
+      ).toBe("invalid_code");
+    });
+
+    it("a wrong code writes staff.session.verify_failed with the method tried and no code", async () => {
+      const { userId, secret } = await adminWithTotp();
+      const v = (await viewer(await signInWithTotp(auth, BOSS, secret)))!;
+      const right = await totpCode(auth, secret);
+      const wrong = right === "000000" ? "111111" : "000000";
+      await errorCode(() =>
+        verifyStaffSession(auth, t.db, now(), { viewer: v, code: wrong }),
+      );
+      await errorCode(() =>
+        verifyStaffSession(auth, t.db, now(), {
+          viewer: v,
+          code: "not-a-backup",
+        }),
+      );
+      const failed = await audits("staff.session.verify_failed");
+      expect(failed).toMatchObject([
+        {
+          actorUserId: userId,
+          entityType: "user",
+          entityId: userId,
+          after: { method: "totp", sessionId: v.sessionId },
+        },
+        { after: { method: "backup_code" } },
+      ]);
+      expect(JSON.stringify(failed)).not.toContain(wrong);
+      expect(JSON.stringify(failed)).not.toContain("not-a-backup");
+    });
+
+    it("the fifth failure in the window also writes staff.session.verify_locked and opens a warning review item staff_verify_locked for the user", async () => {
+      const { userId, secret } = await adminWithTotp();
+      const v = (await viewer(await signInWithTotp(auth, BOSS, secret)))!;
+      const right = await totpCode(auth, secret);
+      const wrong = right === "000000" ? "111111" : "000000";
+      for (let i = 0; i < 4; i++) {
+        await errorCode(() =>
+          verifyStaffSession(auth, t.db, now(), { viewer: v, code: wrong }),
+        );
+      }
+      expect(await audits("staff.session.verify_locked")).toHaveLength(0);
+      await errorCode(() =>
+        verifyStaffSession(auth, t.db, now(), { viewer: v, code: wrong }),
+      );
+      expect(await audits("staff.session.verify_locked")).toMatchObject([
+        { entityId: userId },
+      ]);
+      const items = await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.kind, "staff_verify_locked"));
+      expect(items).toMatchObject([
+        { severity: "warning", status: "open", details: { userId } },
+      ]);
+      // A sixth, limited attempt adds nothing more.
+      await errorCode(() =>
+        verifyStaffSession(auth, t.db, now(), { viewer: v, code: wrong }),
+      );
+      expect(await audits("staff.session.verify_locked")).toHaveLength(1);
+    });
   });
 
   it("a new session starts locked", async () => {

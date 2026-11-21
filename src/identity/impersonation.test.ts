@@ -23,7 +23,7 @@ import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
 import { DISABLED_AUTH_PATHS } from "./auth";
 import { startImpersonation, stopImpersonating } from "./impersonation";
-import { banUser } from "./roles";
+import { banUserAs } from "./roles";
 import { verifyStaffSession } from "./staff-access";
 import { SYSTEM_USER_ID } from "./system";
 import { requireWritable, type Viewer } from "./viewer";
@@ -235,7 +235,7 @@ describe("impersonation (DM 6.4)", () => {
   });
 
   it("a banned user can't be impersonated", async () => {
-    await banUser(t.db, now(), {
+    await banUserAs(t.db, now(), {
       targetUserId: ada,
       until: null,
       reason: "Spam",

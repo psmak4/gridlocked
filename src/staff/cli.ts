@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CLASSIFICATIONS, providerIds, sessions, users } from "@/db/schema";
-import { setRole } from "@/identity/roles";
+import { setRoleAs } from "@/identity/roles";
 import type { Db } from "@/db/types";
 import { resultFieldsSchema, type ResultFields } from "@/results/overrides";
 import { SCORED_KINDS } from "@/results/validate";
@@ -385,7 +385,7 @@ export async function runStaffCommand(
   return { dryRun: false, command: cmd.command, resolved, ...result };
 }
 
-/** `set-role`: the user by username, then `setRole` unless a dry run. */
+/** `set-role`: the user by username, then `setRoleAs` unless a dry run. */
 async function runSetRole(
   db: Db,
   now: Date,
@@ -406,7 +406,7 @@ async function runSetRole(
     role: { from: user.role, to: role },
   };
   if (!cmd.dryRun) {
-    await setRole(db, now, {
+    await setRoleAs(db, now, {
       targetUserId: user.id,
       role,
       reason: cmd.reason,

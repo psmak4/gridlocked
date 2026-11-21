@@ -14,14 +14,28 @@ import {
   type TestAuth,
 } from "../../tests/helpers/auth";
 import { signInWithDiscord } from "../../tests/helpers/discord";
-import { errorCode, signUpAs, viewerFor } from "../../tests/helpers/staff";
+import {
+  enableTotp,
+  errorCode,
+  signUpAs,
+  totpCode,
+  viewerFor,
+} from "../../tests/helpers/staff";
 import { seedUser } from "../../tests/helpers/users";
 import { auditLog, authSessions, users } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { authErrorKind } from "@/lib/auth-error-kind";
 import { newId } from "@/lib/ids";
 import type { StaffActor } from "@/staff/roster";
-import { banUser, setRole, unbanUser, type Role } from "./roles";
+import {
+  banUser,
+  banUserAs,
+  setRole,
+  setRoleAs,
+  unbanUserAs,
+  type Role,
+} from "./roles";
+import { verifyStaffSession } from "./staff-access";
 import { SYSTEM_USER_ID } from "./system";
 
 const HOUR = 3_600_000;
@@ -69,11 +83,74 @@ describe("roles and bans (DM 6.4)", () => {
     await t.close();
   });
 
+  describe("staff guards on the viewer's own functions (M5 carry-over)", () => {
+    const staffViewer = async (email: string, verified: boolean) => {
+      const signedUp = await signUpAs(auth, t.db, email, "admin");
+      const { secret, cookie } = await enableTotp(auth, signedUp.cookie, {
+        password: PASSWORD,
+      });
+      const v = (await viewerFor(t.db, cookie, now))!;
+      if (verified) {
+        await verifyStaffSession(auth, t.db, now(), {
+          viewer: v,
+          code: await totpCode(auth, secret),
+        });
+      }
+      return (await viewerFor(t.db, cookie, now))!;
+    };
+
+    it("setRole from an unverified session is refused with staff_session_unverified, nothing written", async () => {
+      const locked = await staffViewer("lock@example.test", false);
+      const { userId: ada } = await signUpAs(auth, t.db, ADA, "user");
+      expect(
+        await errorCode(() =>
+          setRole(t.db, now(), locked, {
+            targetUserId: ada,
+            role: "moderator",
+            reason: "Helping out",
+          }),
+        ),
+      ).toBe("staff_session_unverified");
+      expect(await roleOf(ada)).toBe("user");
+      expect(await audits("user.role.update")).toHaveLength(0);
+    });
+
+    it("banUser from an impersonated session is refused with read_only", async () => {
+      const verified = await staffViewer("open@example.test", true);
+      const { userId: ada } = await signUpAs(auth, t.db, ADA, "user");
+      const impersonating = { ...verified, impersonatedBy: boss };
+      expect(
+        await errorCode(() =>
+          banUser(t.db, now(), impersonating, {
+            targetUserId: ada,
+            until: null,
+            reason: "Spam",
+          }),
+        ),
+      ).toBe("read_only");
+      expect(await audits("user.ban")).toHaveLength(0);
+    });
+
+    it("setRole from a verified admin session changes the role and audits it as them", async () => {
+      const verified = await staffViewer("open@example.test", true);
+      const { userId: ada } = await signUpAs(auth, t.db, ADA, "user");
+      await setRole(t.db, now(), verified, {
+        targetUserId: ada,
+        role: "moderator",
+        reason: "Helping out",
+      });
+      expect(await roleOf(ada)).toBe("moderator");
+      expect(await audits("user.role.update")).toMatchObject([
+        { actorUserId: verified.userId, actorKind: "admin", actorLabel: null },
+      ]);
+    });
+  });
+
   it("a role change writes the audit in the same transaction", async () => {
     const { userId: ada } = await signUpAs(auth, t.db, ADA, "user");
     expect(await sessionsOf(ada)).toHaveLength(1);
 
-    await setRole(t.db, now(), {
+    await setRoleAs(t.db, now(), {
       targetUserId: ada,
       role: "moderator",
       reason: "Helps with race chat",
@@ -98,7 +175,7 @@ describe("roles and bans (DM 6.4)", () => {
 
     // An audit that can't be written takes the change with it.
     await expect(
-      setRole(t.db, now(), {
+      setRoleAs(t.db, now(), {
         targetUserId: ada,
         role: "admin",
         reason: "Promotion",
@@ -112,7 +189,7 @@ describe("roles and bans (DM 6.4)", () => {
   it("needs a reason", async () => {
     const ada = await seedUser(t.db, { username: "ada" });
     await expect(
-      setRole(t.db, now(), {
+      setRoleAs(t.db, now(), {
         targetUserId: ada,
         role: "admin",
         reason: "   ",
@@ -125,7 +202,7 @@ describe("roles and bans (DM 6.4)", () => {
 
   it("the last admin can't be demoted", async () => {
     const demote = (target: string) =>
-      setRole(t.db, now(), {
+      setRoleAs(t.db, now(), {
         targetUserId: target,
         role: "user",
         reason: "Stepping down",
@@ -141,7 +218,7 @@ describe("roles and bans (DM 6.4)", () => {
     // Nor can the last active admin be banned.
     expect(
       await errorCode(() =>
-        banUser(t.db, now(), {
+        banUserAs(t.db, now(), {
           targetUserId: boss,
           until: null,
           reason: "Oops",
@@ -160,7 +237,7 @@ describe("roles and bans (DM 6.4)", () => {
     const ada = await seedUser(t.db, { username: "ada" });
     expect(
       await errorCode(() =>
-        setRole(t.db, now(), {
+        setRoleAs(t.db, now(), {
           targetUserId: ada,
           role: "system" as Role,
           reason: "Results bot",
@@ -170,7 +247,7 @@ describe("roles and bans (DM 6.4)", () => {
     ).toBe("role_reserved");
     expect(
       await errorCode(() =>
-        setRole(t.db, now(), {
+        setRoleAs(t.db, now(), {
           targetUserId: SYSTEM_USER_ID,
           role: "user",
           reason: "Tidy up",
@@ -180,7 +257,7 @@ describe("roles and bans (DM 6.4)", () => {
     ).toBe("role_reserved");
     expect(
       await errorCode(() =>
-        banUser(t.db, now(), {
+        banUserAs(t.db, now(), {
           targetUserId: SYSTEM_USER_ID,
           until: null,
           reason: "Tidy up",
@@ -195,7 +272,7 @@ describe("roles and bans (DM 6.4)", () => {
 
   it("a banned user can't sign in", async () => {
     const { userId: ada } = await signUpAs(auth, t.db, ADA, "user");
-    await banUser(t.db, now(), {
+    await banUserAs(t.db, now(), {
       targetUserId: ada,
       until: null,
       reason: "Spam",
@@ -216,7 +293,7 @@ describe("roles and bans (DM 6.4)", () => {
       },
     ]);
 
-    await unbanUser(t.db, now(), {
+    await unbanUserAs(t.db, now(), {
       targetUserId: ada,
       reason: "Appeal upheld",
       actor,
@@ -239,7 +316,7 @@ describe("roles and bans (DM 6.4)", () => {
       .select()
       .from(users)
       .where(eq(users.email, person.email));
-    await banUser(t.db, now(), {
+    await banUserAs(t.db, now(), {
       targetUserId: grid!.id,
       until: null,
       reason: "Spam",
@@ -289,7 +366,7 @@ describe("roles and bans (DM 6.4)", () => {
       }) as unknown as Db;
     };
     const change = (db: Db) =>
-      setRole(db, now(), {
+      setRoleAs(db, now(), {
         targetUserId: ada,
         role: "moderator",
         reason: "Helps with chat",
@@ -308,7 +385,7 @@ describe("roles and bans (DM 6.4)", () => {
     expect(await viewerFor(t.db, cookie, now)).not.toBeNull();
     expect(await sessionsOf(ada)).toHaveLength(2);
 
-    await banUser(t.db, now(), {
+    await banUserAs(t.db, now(), {
       targetUserId: ada,
       until: new Date(now().getTime() + 24 * HOUR),
       reason: "Cooling off",
@@ -322,7 +399,7 @@ describe("roles and bans (DM 6.4)", () => {
   it("a temporary ban ends on its own", async () => {
     const { userId: ada } = await signUpAs(auth, t.db, ADA, "user");
     const until = new Date(now().getTime() + 24 * HOUR);
-    await banUser(t.db, now(), {
+    await banUserAs(t.db, now(), {
       targetUserId: ada,
       until,
       reason: "Cooling off",
@@ -342,7 +419,7 @@ describe("roles and bans (DM 6.4)", () => {
     // An end in the past isn't a ban.
     expect(
       await errorCode(() =>
-        banUser(t.db, now(), {
+        banUserAs(t.db, now(), {
           targetUserId: ada,
           until: new Date(now().getTime() - HOUR),
           reason: "Late",
