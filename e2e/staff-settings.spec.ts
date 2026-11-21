@@ -36,6 +36,11 @@ test("turn chat off with a reason, and the audit log shows On → Off with it", 
   await expect(locked).toHaveCount(2);
   await expect(locked.first()).toContainText("Notification emails");
   await expect(page.getByLabel("First check (min)")).toHaveValue("5");
+  // No usage reading has been taken on this server.
+  const meters = page.locator('[data-slot="usage-meter"]');
+  await expect(meters).toHaveCount(4);
+  await expect(meters.first()).toContainText("No reading yet");
+  await expect(meters.last()).toContainText("Account emails today");
   await expectNoSeriousAxeViolations(page);
 
   const chat = page.getByRole("switch", { name: "Live chat" });

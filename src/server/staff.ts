@@ -51,6 +51,7 @@ import { nextPrices, setAdminPrice } from "@/staff/prices";
 import * as USERS from "./staff-users";
 import { getSetting } from "@/settings";
 import { EDITABLE_SETTINGS, setSetting } from "@/settings/write";
+import { usageMeters } from "@/staff/usage";
 import {
   openReviewCount,
   resolveReviewItem,
@@ -823,7 +824,8 @@ export const getStaffSettings = createServerFn({ method: "GET" })
     staffFn({
       role: "admin",
       input: z.strictObject({}),
-      handler: async ({ db }) => ({
+      handler: async ({ db, now }) => ({
+        meters: await usageMeters(db, now),
         flags: await getSetting(db, "feature_flags"),
         poll: await getSetting(db, "poll_schedule"),
         finalizer: await getSetting(db, "finalizer_checks"),
