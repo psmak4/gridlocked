@@ -142,6 +142,15 @@ function Profile() {
           </div>
         </div>
 
+        {profile.staff ? (
+          <a
+            href="/staff"
+            className="flex min-h-[44px] items-center self-start rounded-radius-m font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          >
+            Staff tools
+          </a>
+        ) : null}
+
         <dl className="grid grid-cols-2 gap-space-2">
           {[
             { label: "REPUTATION", value: String(profile.reputation) },

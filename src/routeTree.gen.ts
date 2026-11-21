@@ -17,6 +17,7 @@ import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as StaffRouteImport } from './routes/staff'
 import { Route as WeekendRouteImport } from './routes/weekend'
 import { Route as DevComponentsRouteImport } from './routes/_dev.components'
 import { Route as ForumIndexRouteImport } from './routes/forum.index'
@@ -37,6 +38,7 @@ import { Route as SettingsSignInRouteImport } from './routes/settings.sign-in'
 import { Route as SettingsUsernameRouteImport } from './routes/settings.username'
 import { Route as SignUpIndexRouteImport } from './routes/sign-up.index'
 import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
+import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
 import { Route as TeamIndexRouteImport } from './routes/team.index'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
@@ -97,6 +99,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StaffRoute = StaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WeekendRoute = WeekendRouteImport.update({
@@ -198,6 +205,11 @@ const SignUpEmailRoute = SignUpEmailRouteImport.update({
   id: '/sign-up/email',
   path: '/sign-up/email',
   getParentRoute: () => rootRouteImport,
+} as any)
+const StaffIndexRoute = StaffIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => StaffRoute,
 } as any)
 const TThreadIdRoute = TThreadIdRouteImport.update({
   id: '/t/$threadId',
@@ -314,6 +326,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
+  '/staff': typeof StaffRouteWithChildren
   '/weekend': typeof WeekendRoute
   '/components': typeof DevComponentsRoute
   '/forum/$category': typeof ForumCategoryRoute
@@ -337,6 +350,7 @@ export interface FileRoutesByFullPath {
   '/prices/': typeof PricesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
+  '/staff/': typeof StaffIndexRoute
   '/team/': typeof TeamIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -388,6 +402,7 @@ export interface FileRoutesByTo {
   '/prices': typeof PricesIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/sign-up': typeof SignUpIndexRoute
+  '/staff': typeof StaffIndexRoute
   '/team': typeof TeamIndexRoute
   '/welcome': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -417,6 +432,7 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
+  '/staff': typeof StaffRouteWithChildren
   '/weekend': typeof WeekendRoute
   '/_dev/components': typeof DevComponentsRoute
   '/forum/$category': typeof ForumCategoryRoute
@@ -440,6 +456,7 @@ export interface FileRoutesById {
   '/prices/': typeof PricesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
+  '/staff/': typeof StaffIndexRoute
   '/team/': typeof TeamIndexRoute
   '/welcome/': typeof WelcomeIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -470,6 +487,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reset-password'
     | '/sign-in'
+    | '/staff'
     | '/weekend'
     | '/components'
     | '/forum/$category'
@@ -493,6 +511,7 @@ export interface FileRouteTypes {
     | '/prices/'
     | '/settings/'
     | '/sign-up/'
+    | '/staff/'
     | '/team/'
     | '/welcome/'
     | '/api/auth/$'
@@ -544,6 +563,7 @@ export interface FileRouteTypes {
     | '/prices'
     | '/settings'
     | '/sign-up'
+    | '/staff'
     | '/team'
     | '/welcome'
     | '/api/auth/$'
@@ -572,6 +592,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reset-password'
     | '/sign-in'
+    | '/staff'
     | '/weekend'
     | '/_dev/components'
     | '/forum/$category'
@@ -595,6 +616,7 @@ export interface FileRouteTypes {
     | '/prices/'
     | '/settings/'
     | '/sign-up/'
+    | '/staff/'
     | '/team/'
     | '/welcome/'
     | '/api/auth/$'
@@ -624,6 +646,7 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignInRoute: typeof SignInRoute
+  StaffRoute: typeof StaffRouteWithChildren
   WeekendRoute: typeof WeekendRoute
   DevComponentsRoute: typeof DevComponentsRoute
   ForumCategoryRoute: typeof ForumCategoryRoute
@@ -723,6 +746,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/staff': {
+      id: '/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof StaffRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/weekend': {
@@ -864,6 +894,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/sign-up/email'
       preLoaderRoute: typeof SignUpEmailRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/staff/': {
+      id: '/staff/'
+      path: '/'
+      fullPath: '/staff/'
+      preLoaderRoute: typeof StaffIndexRouteImport
+      parentRoute: typeof StaffRoute
     }
     '/t/$threadId': {
       id: '/t/$threadId'
@@ -1015,6 +1052,16 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface StaffRouteChildren {
+  StaffIndexRoute: typeof StaffIndexRoute
+}
+
+const StaffRouteChildren: StaffRouteChildren = {
+  StaffIndexRoute: StaffIndexRoute,
+}
+
+const StaffRouteWithChildren = StaffRoute._addFileChildren(StaffRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthErrorRoute: AuthErrorRoute,
@@ -1024,6 +1071,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignInRoute: SignInRoute,
+  StaffRoute: StaffRouteWithChildren,
   WeekendRoute: WeekendRoute,
   DevComponentsRoute: DevComponentsRoute,
   ForumCategoryRoute: ForumCategoryRoute,

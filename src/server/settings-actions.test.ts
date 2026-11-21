@@ -112,6 +112,21 @@ describe("settings actions (M5 task 13)", () => {
       expect(state.trust.allows).toMatch(/^Member means you can /);
     });
 
+    it("offers Staff tools to a moderator or admin in their own session only", async () => {
+      const user = await seedUser(db);
+      const moderator = await seedUser(db, { role: "moderator" });
+      const admin = await seedUser(db, { role: "admin" });
+      const staffOf = async (v: Viewer) =>
+        (await profileState(db, NOW, v)).staff;
+      expect(await staffOf(await viewerOf(user))).toBe(false);
+      expect(await staffOf(await viewerOf(moderator))).toBe(true);
+      expect(await staffOf(await viewerOf(admin))).toBe(true);
+      // An admin looking as a moderator isn't offered the moderator's tools.
+      expect(await staffOf(impersonated(await viewerOf(moderator)))).toBe(
+        false,
+      );
+    });
+
     it("names the favorites from the reference data", async () => {
       const seeded = await seedLeagueGames(db, NOW);
       const userId = await seedUser(db);
