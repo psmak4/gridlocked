@@ -115,6 +115,14 @@ const diffSchema = z.object({
     }),
   ),
   teamsThrough: z.string().nullable().optional(),
+  /**
+   * A dry run's every changed team, with the change this session's step made
+   * to its event points (M8 Task 8): what the scoring board adds up. A live
+   * run leaves it out.
+   */
+  teams: z
+    .array(z.object({ id: z.string(), change: z.number().int() }))
+    .optional(),
 });
 type DiffSummary = z.infer<typeof diffSchema>;
 
@@ -549,6 +557,7 @@ export async function dryRunEvent(
       assetPoints: new Map(assetPoints),
       teamsChanged: 0,
       biggest: [] as Change[],
+      teams: [] as { id: string; change: number }[],
     };
   });
 
@@ -602,6 +611,7 @@ export async function dryRunEvent(
         if (after !== before) {
           teams.add(teamId);
           step.teamsChanged += 1;
+          step.teams.push({ id: teamId, change: after - before });
           step.biggest = biggestOf([
             ...step.biggest,
             teamChange(teamId, before, after),
@@ -626,6 +636,7 @@ export async function dryRunEvent(
           ...diff,
           teamsChanged: step.teamsChanged,
           biggest: merged,
+          teams: step.teams,
         },
       })
       .where(eq(scoringRuns.id, step.runId));

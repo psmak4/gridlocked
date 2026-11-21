@@ -55,6 +55,7 @@ import {
   approveRescore,
   checkScoreExplanations,
   createGameChecksHandler,
+  discardDryRun,
   dryRunGame,
   publishCorrectionVersion,
   pruneLineupVersions,
@@ -1034,6 +1035,66 @@ describe("corrections and the daily checks (DM 4.8, 4.9, 3.7)", () => {
       await expect(approve()).rejects.toMatchObject({
         code: "dry_run_required",
       });
+    });
+
+    it("discardDryRun marks the dry run discarded, and approveRescore is then refused with dry_run_required", async () => {
+      await override(race.id);
+      const { runIds } = await dryRun();
+
+      expect(
+        await discardDryRun(t.db, clock.now(), ACTOR, {
+          gameId,
+          reason: "Wrong engine build",
+        }),
+      ).toEqual({ discarded: 1 });
+
+      const [dry] = (await runsOf(race.id)).filter((r) => r.mode === "dry_run");
+      expect(dry).toMatchObject({ id: runIds[0], status: "superseded" });
+      const [entry] = await audits("game.dry_run_discard");
+      expect(entry).toMatchObject({
+        reason: "Wrong engine build",
+        entityType: "game",
+        entityId: gameId,
+        after: { runIds },
+      });
+      await expect(approve()).rejects.toMatchObject({
+        code: "dry_run_required",
+      });
+      // Nothing left to discard.
+      await expect(
+        discardDryRun(t.db, clock.now(), ACTOR, { gameId, reason: "Again" }),
+      ).rejects.toMatchObject({ code: "dry_run_required" });
+    });
+
+    it("approve twice: the second is refused with stale", async () => {
+      await override(race.id);
+      const { dryRunId } = await dryRun();
+      const approveIt = () =>
+        approveRescore(t.db, clock.now(), ACTOR, {
+          gameId,
+          dryRunId,
+          reason: "The dry run looks right",
+        });
+
+      expect(await approveIt()).toEqual({ queued: 1 });
+      const [entry] = await audits("game.rescore_approved");
+      expect(entry).toMatchObject({ after: { dryRunId } });
+
+      await expect(approveIt()).rejects.toMatchObject({ code: "stale" });
+      expect(await audits("game.rescore_approved")).toHaveLength(1);
+    });
+
+    it("approving an older dry run once a newer one started is stale", async () => {
+      await override(race.id);
+      const first = await dryRun();
+      await dryRun();
+      await expect(
+        approveRescore(t.db, clock.now(), ACTOR, {
+          gameId,
+          dryRunId: first.dryRunId,
+          reason: "Old numbers",
+        }),
+      ).rejects.toMatchObject({ code: "stale" });
     });
 
     it("a blank reason writes nothing", async () => {
