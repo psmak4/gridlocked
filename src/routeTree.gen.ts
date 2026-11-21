@@ -41,6 +41,7 @@ import { Route as SignUpEmailRouteImport } from './routes/sign-up.email'
 import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StaffAuditRouteImport } from './routes/staff.audit'
 import { Route as StaffCalendarRouteImport } from './routes/staff.calendar'
+import { Route as StaffSeatsRouteImport } from './routes/staff.seats'
 import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
 import { Route as TeamIndexRouteImport } from './routes/team.index'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
@@ -224,6 +225,11 @@ const StaffCalendarRoute = StaffCalendarRouteImport.update({
   path: '/calendar',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffSeatsRoute = StaffSeatsRouteImport.update({
+  id: '/seats',
+  path: '/seats',
+  getParentRoute: () => StaffRoute,
+} as any)
 const TThreadIdRoute = TThreadIdRouteImport.update({
   id: '/t/$threadId',
   path: '/t/$threadId',
@@ -362,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
+  '/staff/seats': typeof StaffSeatsRoute
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -417,6 +424,7 @@ export interface FileRoutesByTo {
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
+  '/staff/seats': typeof StaffSeatsRoute
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -474,6 +482,7 @@ export interface FileRoutesById {
   '/sign-up/email': typeof SignUpEmailRoute
   '/staff/audit': typeof StaffAuditRoute
   '/staff/calendar': typeof StaffCalendarRouteWithChildren
+  '/staff/seats': typeof StaffSeatsRoute
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -532,6 +541,7 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/staff/audit'
     | '/staff/calendar'
+    | '/staff/seats'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -587,6 +597,7 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/staff/audit'
     | '/staff/calendar'
+    | '/staff/seats'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -643,6 +654,7 @@ export interface FileRouteTypes {
     | '/sign-up/email'
     | '/staff/audit'
     | '/staff/calendar'
+    | '/staff/seats'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -952,6 +964,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffCalendarRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/seats': {
+      id: '/staff/seats'
+      path: '/seats'
+      fullPath: '/staff/seats'
+      preLoaderRoute: typeof StaffSeatsRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/t/$threadId': {
       id: '/t/$threadId'
       path: '/t/$threadId'
@@ -1124,12 +1143,14 @@ const StaffCalendarRouteWithChildren = StaffCalendarRoute._addFileChildren(
 interface StaffRouteChildren {
   StaffAuditRoute: typeof StaffAuditRoute
   StaffCalendarRoute: typeof StaffCalendarRouteWithChildren
+  StaffSeatsRoute: typeof StaffSeatsRoute
   StaffIndexRoute: typeof StaffIndexRoute
 }
 
 const StaffRouteChildren: StaffRouteChildren = {
   StaffAuditRoute: StaffAuditRoute,
   StaffCalendarRoute: StaffCalendarRouteWithChildren,
+  StaffSeatsRoute: StaffSeatsRoute,
   StaffIndexRoute: StaffIndexRoute,
 }
 

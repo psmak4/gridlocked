@@ -285,6 +285,8 @@ Every pool driver gets a row for every event, created with `available`.
 
 **This status is for people, not for scoring.** It drives the team-builder warning and the notifications. Scoring doesn't read it: a pool driver missing from a scored session's results gets the NC or no-time penalty because they're missing (HLD §6), whatever this table says. That keeps a stale status from ever changing points. "Who is in the pool" is a game fact, so the pool itself is in Part 3. This table holds only the real-world status.
 
+**Staff changes (M8).** The Drivers and seats screen (`/staff/seats`) sets a driver's status for an event before its lock, with a note players see in `reason` (`source = admin`, audited as `driver_availability.update` with the status and note before and after). After the lock it's refused (`event_locked`). A new status notifies the driver's owners (5.11); a new note alone doesn't, and the same status and note again writes nothing.
+
 ### 1.11 `provider_ids` (only adapters read it; decided, HLD §3.3)
 | Column | Type | Notes |
 |---|---|---|
@@ -1602,7 +1604,7 @@ Moderators and admins count as TL3. In Race Weekend, a title naming a driver or 
 
 ### 5.11 Notifications (in-app and Web Push at launch; email for account messages only, HLD §10)
 
-**Built (M7):** in-app notifications, grouping and broadcasts in `src/notifications/`; Web Push through `push_fanout` with `web-push` (decision 4), off until the VAPID keys are set. `roster_change` and `score_correction` have no producer yet.
+**Built (M7):** in-app notifications, grouping and broadcasts in `src/notifications/`; Web Push through `push_fanout` with `web-push` (decision 4), off until the VAPID keys are set. `score_correction` has no producer yet. **M8:** `roster_change` is the availability notice: "<driver> is out for the <event>. Check <team>." (or doubtful, or available again) to each person whose lineup for the event has the driver, once per person however many teams, grouped by event and driver. It names no session, so it is never spoiler-scoped, and it opens `/team`.
 **`notifications`:** personal notifications only.
 | Column | Type | Notes |
 |---|---|---|

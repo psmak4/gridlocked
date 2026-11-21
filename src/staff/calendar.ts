@@ -31,7 +31,7 @@ import {
   utcDates,
   utcLock,
 } from "./calendar-words";
-import { StaffError } from "./errors";
+import { StaffError, staffReason } from "./errors";
 import { audit, type StaffActor } from "./roster";
 
 // The calendar's staff actions (M8 Task 5, HLD §8, DM 1.3 and 1.4): a lock
@@ -49,12 +49,6 @@ import { audit, type StaffActor } from "./roster";
 // the 6-hourly safety tick and on the lock job's own check of `lock_at`.
 
 export { STAFF_SESSION_STATUSES, type StaffSessionStatus };
-
-function reasonOf(reason: string): string {
-  const trimmed = reason.trim();
-  if (!trimmed) throw new StaffError("reason_required");
-  return trimmed;
-}
 
 const lockState = (e: { lockAt: Date; lockAtSource: string }) => ({
   lockAt: e.lockAt.toISOString(),
@@ -104,7 +98,7 @@ export async function setLockAt(
   input: { eventId: string; lockAt: Date; reason: string },
   store?: DueStore,
 ): Promise<void> {
-  const reason = reasonOf(input.reason);
+  const reason = staffReason(input.reason);
   await db.transaction(async (tx) => {
     const event = await lockedEvent(tx, input.eventId);
     if (event.status !== "scheduled") throw new StaffError("invalid");
@@ -155,7 +149,7 @@ export async function followLockSession(
   input: { eventId: string; reason: string },
   store?: DueStore,
 ): Promise<void> {
-  const reason = reasonOf(input.reason);
+  const reason = staffReason(input.reason);
   await db.transaction(async (tx) => {
     const event = await lockedEvent(tx, input.eventId);
     if (event.status !== "scheduled") throw new StaffError("invalid");
@@ -194,7 +188,7 @@ export async function setSessionTimes(
   input: { sessionId: string; start: Date; end: Date; reason: string },
   store?: DueStore,
 ): Promise<void> {
-  const reason = reasonOf(input.reason);
+  const reason = staffReason(input.reason);
   const { start, end } = input;
   if (
     Number.isNaN(start.getTime()) ||
@@ -300,7 +294,7 @@ export async function setSessionStatus(
   input: { sessionId: string; status: StaffSessionStatus; reason: string },
   store?: DueStore,
 ): Promise<void> {
-  const reason = reasonOf(input.reason);
+  const reason = staffReason(input.reason);
   const { status } = input;
   if (!(STAFF_SESSION_STATUSES as readonly string[]).includes(status)) {
     throw new StaffError("invalid");
@@ -380,7 +374,7 @@ export async function cancelEvent(
   input: { eventId: string; reason: string },
   store?: DueStore,
 ): Promise<void> {
-  const reason = reasonOf(input.reason);
+  const reason = staffReason(input.reason);
   const changed = await db.transaction(async (tx) => {
     const event = await lockedEvent(tx, input.eventId);
     if (event.status === "cancelled") return false;
