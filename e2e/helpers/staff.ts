@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
-import { hydrated, ORIGIN } from "./accounts";
+import { createAccount, hydrated, ORIGIN, signIn } from "./accounts";
 
 /** Local-only hook: makes the account with this address an admin. */
 export async function makeAdmin(request: APIRequestContext, email: string) {
@@ -78,4 +78,47 @@ export async function setUpTotp(
       .allInnerTexts()
   ).map((code) => code.trim());
   return { setupKey, backupCodes };
+}
+
+/**
+ * A new admin, signed in, with two-step sign-in set up and staff tools
+ * unlocked for this session by a backup code.
+ */
+export async function unlockedAdmin(page: Page, request: APIRequestContext) {
+  const account = await createAccount(request);
+  await makeAdmin(request, account.email);
+  await signIn(page, account);
+  const totp = await setUpTotp(page, account.password);
+  const section = page.getByRole("region", { name: "Two-step sign-in" });
+  await hydrated(section.getByRole("button", { name: "Unlock staff tools" }));
+  await section
+    .getByLabel("Code from your app, or a backup code")
+    .fill(totp.backupCodes[0]!);
+  await section.getByRole("button", { name: "Unlock staff tools" }).click();
+  await expect(
+    section.getByText("Staff tools are unlocked for this session."),
+  ).toBeVisible();
+  return { ...account, ...totp };
+}
+
+/** Runs one `pnpm staff` command on the local database (`/api/test/staff`). */
+export async function runStaffCommand(
+  request: APIRequestContext,
+  command: string,
+  change: unknown,
+  reason: string,
+) {
+  const ran = await request.post("/api/test/staff", {
+    headers: { origin: ORIGIN },
+    data: {
+      command,
+      env: {
+        STAFF_CHANGE: JSON.stringify(change),
+        STAFF_REASON: reason,
+        STAFF_ACTOR: "e2e-workflow",
+        STAFF_DRY_RUN: "false",
+      },
+    },
+  });
+  expect(ran.status()).toBe(200);
 }

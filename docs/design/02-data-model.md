@@ -1848,7 +1848,7 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
 | actor_label | text, nullable | Who acted while there are no user rows: the staff workflow's GitHub login (added 2026-10-31) |
 | actor_kind | text: `admin`, `moderator`, `user`, `system`, `job` | |
 | impersonating_user_id | uuid FK, nullable | Set when an admin acted while impersonating. `ON DELETE RESTRICT` |
-| action | text | Dotted names, e.g. `event.lock_at.update`, `result_override.create`, `review_item.resolve`, `user.role.update`, `ruleset.correction.apply`, `scoring.rescore.approve` |
+| action | text | Dotted names, e.g. `event.lock_at.update`, `result_override.create`, `review_item.resolve`, `user.role.update`, `ruleset.correction.apply`, `scoring.rescore.approve`. Since M8 each is a key of `AUDIT_ACTIONS` (`src/audit/actions.ts`), with the audit screen's label and its filter group (results and scoring, moderation, season data, security, settings); `writeAudit` takes only those, so an action the screen can't name doesn't compile |
 | entity_type, entity_id | text, uuid | Polymorphic, like `provider_ids` (1.11) |
 | before, after | jsonb, nullable | Only the changed fields. **Personal fields** (the keys `email`, `ip`, `ipAddress`, `userAgent` and `name`, at any depth) are stored as `"[redacted]"` by `writeAudit`, so the log never becomes a second copy of personal data |
 | reason | text, nullable | Required for overrides, corrections, bans and role changes |
@@ -1858,6 +1858,7 @@ Defaults and nullability: `avatar_seed` is required; `timezone` defaults to `UTC
 - **Append-only:** a trigger refuses `UPDATE` and `DELETE`. A mistaken action is fixed by a new action, never by editing the log.
 - **What's logged:** every admin and moderator write in Parts 1–6, scoring corrections and approvals (4.9), and security events. Security events are a role change, an email or password change, the start or end of impersonation, a ban, and an account deletion.
 - **Not logged:** players' own game and forum actions. Lineup versions, posts and votes are already their own history.
+- **The audit screen** (`/staff/audit`, admins only) reads it 50 rows a page, newest first, by `id`, filtered by who (a staff member, or jobs) and by group. It names the actor by username ("deleted user" once their profile is a tombstone), the workflow by `actor_label`, and jobs and the system as "Job", and shows `before` and `after` as "field: old → new" for the changed fields only. Nothing on it edits anything.
 - **Retention:** kept permanently. It's small and contains no personal data. Partition it by year if it ever needs it.
 
 ### 6.7 Account deletion and data export (always anonymize, decided 2026-10-27)
