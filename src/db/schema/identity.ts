@@ -192,6 +192,17 @@ export const authRateLimits = pgTable("auth_rate_limits", {
 
 // --- Ours ---------------------------------------------------------------------
 
+/**
+ * The last TOTP step each user's staff two-step accepted (M8 Task 2). A code
+ * is taken only for a later step, so one code can't unlock two sessions.
+ */
+export const staffTotpSteps = pgTable("staff_totp_steps", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  lastStep: bigint("last_step", { mode: "number" }).notNull(),
+});
+
 /** DM 6.2: everything about a user that isn't sign-in. */
 export const profiles = pgTable(
   "profiles",

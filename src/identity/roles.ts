@@ -17,21 +17,14 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { audit, type StaffActor } from "@/staff/roster";
-import { IdentityError } from "./viewer";
+import { requireStaff } from "./staff-roles";
+import { IdentityError, type Viewer } from "./viewer";
 import { requireStaffReason } from "./identity-error";
 
 export type Role = UserRole;
 export { USER_ROLES as ROLES };
 
-/** The roles staff tools check for, lowest first. */
-export const STAFF_ROLES = ["moderator", "admin"] as const;
-export type StaffRole = (typeof STAFF_ROLES)[number];
-
-/** True if `role` is at least `needed`. `system` and `user` are never staff. */
-export function hasStaffRole(role: Role, needed: StaffRole): boolean {
-  const rank = (r: Role) => STAFF_ROLES.indexOf(r as StaffRole);
-  return rank(role) >= 0 && rank(role) >= rank(needed);
-}
+export { hasStaffRole, STAFF_ROLES, type StaffRole } from "./staff-roles";
 
 /**
  * What each role may do through the admin plugin's endpoints, in the
@@ -181,11 +174,53 @@ async function revokeSessions(tx: Tx, userId: string): Promise<void> {
 }
 
 /**
+ * The actor for a signed-in admin acting on the site: `requireStaff` first,
+ * so an unverified, impersonated or demoted session is refused before
+ * anything is read (M8 Task 2). The audit names them by user, not label.
+ */
+function siteAdmin(viewer: Viewer | null): StaffActor {
+  const v = requireStaff(viewer, "admin");
+  return { kind: "admin", label: null, userId: v.userId };
+}
+
+/** `setRoleAs`, for a signed-in admin. */
+export async function setRole(
+  db: Db,
+  now: Date,
+  viewer: Viewer | null,
+  input: { targetUserId: string; role: Role; reason: string },
+): Promise<void> {
+  await setRoleAs(db, now, { ...input, actor: siteAdmin(viewer) });
+}
+
+/** `banUserAs`, for a signed-in admin. */
+export async function banUser(
+  db: Db,
+  now: Date,
+  viewer: Viewer | null,
+  input: { targetUserId: string; until: Date | null; reason: string },
+): Promise<void> {
+  await banUserAs(db, now, { ...input, actor: siteAdmin(viewer) });
+}
+
+/** `unbanUserAs`, for a signed-in admin. */
+export async function unbanUser(
+  db: Db,
+  now: Date,
+  viewer: Viewer | null,
+  input: { targetUserId: string; reason: string },
+): Promise<void> {
+  await unbanUserAs(db, now, { ...input, actor: siteAdmin(viewer) });
+}
+
+/**
  * Gives `targetUserId` the role `role`, with the audit `user.role.update`.
  * Refuses `system` (as the role or the target) and leaving no active admin.
- * The same role again changes nothing and writes nothing.
+ * The same role again changes nothing and writes nothing. Takes an actor
+ * rather than a viewer: the staff workflow's CLI only; the site calls
+ * `setRole`.
  */
-export async function setRole(
+export async function setRoleAs(
   db: Db,
   now: Date,
   input: {
@@ -228,7 +263,7 @@ export async function setRole(
  * user's next sign-in and lifts a ban whose end has passed. M7 adds the
  * `mod_actions` mirror (DM 5.9).
  */
-export async function banUser(
+export async function banUserAs(
   db: Db,
   now: Date,
   input: {
@@ -276,7 +311,7 @@ export async function banUser(
 }
 
 /** Lifts a ban at once, with the audit `user.unban`. */
-export async function unbanUser(
+export async function unbanUserAs(
   db: Db,
   now: Date,
   input: { targetUserId: string; reason: string; actor: StaffActor },

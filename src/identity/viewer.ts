@@ -112,8 +112,21 @@ export async function consumeRateLimit(
   db: Db,
   now: Date,
   key: string,
-  { windowSeconds, max }: { windowSeconds: number; max: number },
+  limit: { windowSeconds: number; max: number },
 ): Promise<boolean> {
+  return (await consumeRateLimitCount(db, now, key, limit)) <= limit.max;
+}
+
+/**
+ * `consumeRateLimit`, giving back the count in the window with this attempt
+ * included, for a limit that acts on reaching its maximum.
+ */
+export async function consumeRateLimitCount(
+  db: Db,
+  now: Date,
+  key: string,
+  { windowSeconds }: { windowSeconds: number },
+): Promise<number> {
   const nowMs = now.getTime();
   const expired = sql`${nowMs} - ${authRateLimits.lastRequest} >= ${windowSeconds * 1000}`;
   const [row] = await db
@@ -127,7 +140,7 @@ export async function consumeRateLimit(
       },
     })
     .returning({ count: authRateLimits.count });
-  return (row?.count ?? 1) <= max;
+  return row?.count ?? 1;
 }
 
 /**

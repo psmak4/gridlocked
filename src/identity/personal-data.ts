@@ -25,6 +25,7 @@ import {
   authAccounts,
   authSessions,
   authTwoFactors,
+  staffTotpSteps,
   authVerifications,
   categories,
   chatMessages,
@@ -344,6 +345,16 @@ export const PERSONAL_DATA: PersonalDataEntry[] = [
     exportAs: null,
     async scrub(tx, { userId }) {
       await tx.delete(authTwoFactors).where(eq(authTwoFactors.userId, userId));
+    },
+  },
+  {
+    table: "staff_totp_steps",
+    userColumn: "user_id",
+    onDelete: "delete",
+    why: "the last two-step code's time step, kept so a code works once; nothing personal, so nothing is exported",
+    exportAs: null,
+    async scrub(tx, { userId }) {
+      await tx.delete(staffTotpSteps).where(eq(staffTotpSteps.userId, userId));
     },
   },
   {
