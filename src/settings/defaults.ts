@@ -35,6 +35,12 @@ const trustLevelThreshold = z.object({
 });
 
 export const settingSchemas = {
+  /**
+   * The two switches staff may flip (M8 Task 13): live chat (session threads
+   * stay in discussion mode and the refresh answers 404) and Web Push (the
+   * fan-out sends nothing; in-app notifications are still written).
+   */
+  feature_flags: z.strictObject({ chat: z.boolean(), push: z.boolean() }),
   /** Set below each provider's published limits (HLD §4.1). */
   provider_limits: z.object({ jolpica: rateLimits, openf1: rateLimits }),
   session_durations: sessionDurations,
@@ -129,6 +135,7 @@ export type SettingValue<K extends SettingKey> = z.infer<
 >;
 
 export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
+  feature_flags: { chat: true, push: true },
   provider_limits: {
     jolpica: { perSecond: 3, perHour: 400 },
     openf1: { perSecond: 2, perMinute: 25 },

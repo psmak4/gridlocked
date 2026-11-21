@@ -13,6 +13,7 @@ import {
   users,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { getSetting } from "@/settings";
 import type { Viewer } from "@/identity/viewer";
 import { newId } from "@/lib/ids";
 import {
@@ -231,6 +232,12 @@ export async function fanOut(
   input: PushFanoutPayload,
   options: { log?: (line: string) => void } = {},
 ): Promise<FanOutResult> {
+  // Push turned off by staff (M8 Task 13): nothing goes out, and a
+  // broadcast's later pages aren't queued. The in-app rows are written
+  // regardless, and the devices stay for when it's back on.
+  if (!(await getSetting(db, "feature_flags")).push) {
+    return { sent: 0, removed: 0, failed: 0, skipped: 0 };
+  }
   const { sends, next } =
     "notificationIds" in input
       ? { sends: await personalSends(db, input.notificationIds) }
