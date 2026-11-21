@@ -109,6 +109,8 @@ export const AUDIT_ACTIONS = {
     group: "security",
   },
   "user.delete": { label: "Account deleted", group: "security" },
+  // Settings.
+  "setting.update": { label: "Setting changed", group: "settings" },
 } as const satisfies Record<string, { label: string; group: AuditGroup }>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;

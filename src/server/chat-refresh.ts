@@ -48,6 +48,10 @@ export async function chatRefreshResponse(
     return refused(400, "Bad request");
 
   return run(async (db, now) => {
+    // Chat turned off by staff: no session thread has a live chat to refresh.
+    if (!(await getSetting(db, "feature_flags")).chat) {
+      return refused(404, "Not found");
+    }
     const limits = await getSetting(db, "chat_limits");
     const size = limits.windowSeconds * 1000;
     // Only window starts, and not far ahead or behind: each URL is one

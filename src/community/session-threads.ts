@@ -68,14 +68,17 @@ export function chatWindow(session: {
  * stored). Chat inside the window, and past it while the session is
  * suspended (a red flag) or, for up to `RESULTS_WAIT_MS`, while its thread
  * waits for the results post; discussion otherwise, and always for a
- * cancelled session or a thread with no window. Pure.
+ * cancelled session or a thread with no window, and whenever staff have
+ * turned chat off (`feature_flags.chat`, M8 Task 13). Pure.
  */
 export function threadMode(
   now: Date,
   session: { status: SessionStatus; awaitingResults?: boolean } | null,
   thread: { chatOpensAt: Date | null; chatClosesAt: Date | null },
+  chatOn = true,
 ): "chat" | "discussion" {
   const { chatOpensAt, chatClosesAt } = thread;
+  if (!chatOn) return "discussion";
   if (!chatOpensAt || !chatClosesAt) return "discussion";
   if (session?.status === "cancelled") return "discussion";
   if (now < chatOpensAt) return "discussion";

@@ -49,6 +49,8 @@ import { moderate, type ModTargetType } from "@/community/moderate";
 import { modItem, modQueue } from "@/community/queue-read";
 import { nextPrices, setAdminPrice } from "@/staff/prices";
 import * as USERS from "./staff-users";
+import { getSetting } from "@/settings";
+import { EDITABLE_SETTINGS, setSetting } from "@/settings/write";
 import {
   openReviewCount,
   resolveReviewItem,
@@ -811,3 +813,55 @@ export const restrictUser = createServerFn({ method: "POST" })
 export const viewAsUser = createServerFn({ method: "POST" })
   .validator(staffInput)
   .handler(staffFn(USERS.IMPERSONATE));
+
+// --- Settings (Task 13) ------------------------------------------------------
+
+/** The editable settings as they stand. */
+export const getStaffSettings = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({}),
+      handler: async ({ db }) => ({
+        flags: await getSetting(db, "feature_flags"),
+        poll: await getSetting(db, "poll_schedule"),
+        finalizer: await getSetting(db, "finalizer_checks"),
+      }),
+    }),
+  );
+
+/**
+ * The screen's one Save: each key that changed, with the same reason, in
+ * one transaction, so a refused value leaves the others as they were.
+ */
+export const saveStaffSettings = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        reason: reasonText,
+        values: z.strictObject({
+          feature_flags: z.unknown().optional(),
+          poll_schedule: z.unknown().optional(),
+          finalizer_checks: z.unknown().optional(),
+        }),
+      }),
+      handler: async ({ db, now, viewer, requestId }, { reason, values }) =>
+        db.transaction(async (tx) => {
+          const changed: string[] = [];
+          for (const key of EDITABLE_SETTINGS) {
+            if (values[key] === undefined) continue;
+            const done = await setSetting(
+              tx as unknown as typeof db,
+              now,
+              staffActor(viewer, requestId),
+              { key, value: values[key], reason },
+            );
+            if (done.changed) changed.push(key);
+          }
+          return { changed };
+        }),
+    }),
+  );
