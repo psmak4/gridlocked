@@ -18,6 +18,7 @@ import {
   isNull,
   lt,
   lte,
+  max,
 } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -94,6 +95,14 @@ export type StandingsPage = {
   next: number | null;
   /** How ties split, and a mini-league's rounds. */
   tiebreak: string;
+  /**
+   * Which table this page read: the through event and when its totals were
+   * last written. "See more" sends it back, so a later page can tell the
+   * table has changed since the first (M6 carry-over).
+   */
+  version: string;
+  /** The `version` sent back was another table's: this is the new first page. */
+  restarted: boolean;
 };
 
 const TIEBREAK = "Teams on the same points are split by who got there first.";
@@ -192,11 +201,13 @@ export async function standingsPage(
     slug: string;
     reader: Reader;
     afterRank?: number;
+    /** The first page's `version`, sent back with `afterRank`. */
+    version?: string | null;
     limit?: number;
     show?: string[];
   },
 ): Promise<StandingsPage> {
-  const afterRank = input.afterRank ?? 0;
+  let afterRank = input.afterRank ?? 0;
   const limit = input.limit ?? STANDINGS_PAGE;
   const userId = input.reader?.userId ?? null;
   const [league] = await db
@@ -474,6 +485,18 @@ export async function standingsPage(
     : [];
   const hidden = hiddenSessionIds.length > 0;
 
+  const version = through
+    ? await tableVersion(db, input.gameId, through.eventId)
+    : "";
+  // Reading on from a table that has changed would join two tables: start
+  // again from the top of the new one.
+  const restarted =
+    afterRank > 0 &&
+    input.version !== undefined &&
+    input.version !== null &&
+    input.version !== version;
+  if (restarted) afterRank = 0;
+
   const base: StandingsPage = {
     league: {
       id: league.id,
@@ -499,6 +522,8 @@ export async function standingsPage(
     yours: [],
     next: null,
     tiebreak: tiebreakWords(range),
+    version,
+    restarted,
   };
   if (hidden || !through) return base;
 
@@ -516,6 +541,27 @@ export async function standingsPage(
     yours: named.slice(page.rows.length),
     next: page.next,
   };
+}
+
+/**
+ * A table's version: its through event, and the newest `computed_at` of the
+ * game's totals there, which a re-score of that event moves on.
+ */
+async function tableVersion(
+  db: Db,
+  gameId: string,
+  eventId: string,
+): Promise<string> {
+  const [row] = await db
+    .select({ at: max(teamEventTotals.computedAt) })
+    .from(teamEventTotals)
+    .where(
+      and(
+        eq(teamEventTotals.gameId, gameId),
+        eq(teamEventTotals.eventId, eventId),
+      ),
+    );
+  return `${eventId}@${row?.at?.toISOString() ?? "none"}`;
 }
 
 /** Each row's team name, manager and points at the through event. */
@@ -578,6 +624,7 @@ async function nameRows(
 export const getStandingsInput = z.object({
   slug: z.string().min(1).max(200),
   afterRank: z.number().int().min(0).optional(),
+  version: z.string().max(100).nullable().optional(),
   show: z.array(z.uuid()).max(10).optional(),
 });
 
@@ -596,6 +643,7 @@ export async function standingsForViewer(
     slug: input.slug,
     reader: readerOf(v),
     afterRank: input.afterRank,
+    version: input.version,
     show: input.show,
   });
 }

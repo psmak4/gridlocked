@@ -27,6 +27,7 @@ const ACTION_WORDS: Record<string, string> = {
   mute: "Muted",
   unmute: "Unmuted",
   chat_ban: "Chat ban",
+  chat_unban: "Chat ban lifted",
   ban: "Banned",
   unban: "Unbanned",
   set_trust_level: "Trust level changed",

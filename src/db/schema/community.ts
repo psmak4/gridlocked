@@ -91,6 +91,7 @@ export const MOD_ACTIONS = [
   "mute",
   "unmute",
   "chat_ban",
+  "chat_unban",
   "ban",
   "unban",
   "set_trust_level",

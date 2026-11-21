@@ -271,6 +271,105 @@ describe("moderation actions (DM 5.9)", () => {
     ).toBe(true);
   });
 
+  const restrictionsNow = async () =>
+    (await t.db.select().from(userRestrictions))
+      .filter((r) => r.liftedAt === null)
+      .map((r) => r.kind)
+      .sort();
+
+  async function muteAndChatBan() {
+    for (const action of ["mute", "chat_ban"] as const) {
+      const done = await act(mod, {
+        action,
+        targetType: "user",
+        targetId: author.userId,
+        reason: "Cool off",
+        until: null,
+      });
+      expect(done.ok).toBe(true);
+    }
+  }
+
+  it("unmute lifts a mute and leaves a chat ban in place", async () => {
+    await muteAndChatBan();
+    const lifted = await act(
+      mod,
+      {
+        action: "unmute",
+        targetType: "user",
+        targetId: author.userId,
+        reason: "Apologised",
+      },
+      3,
+    );
+    expect(lifted).toMatchObject({ ok: true, changed: true });
+    expect(await restrictionsNow()).toEqual(["chat_ban"]);
+  });
+
+  it("chat_unban lifts a chat ban and leaves a mute in place", async () => {
+    await muteAndChatBan();
+    const lifted = await act(
+      mod,
+      {
+        action: "chat_unban",
+        targetType: "user",
+        targetId: author.userId,
+        reason: "Served long enough",
+      },
+      3,
+    );
+    expect(lifted).toMatchObject({ ok: true, changed: true });
+    expect(await restrictionsNow()).toEqual(["mute"]);
+  });
+
+  it("restoring a removed thread that was locked restores it locked", async () => {
+    const thread = (action: "lock" | "remove" | "restore", minute: number) =>
+      act(
+        mod,
+        { action, targetType: "thread", targetId: threadId, reason: action },
+        minute,
+      );
+    expect((await thread("lock", 2)).ok).toBe(true);
+    expect((await thread("remove", 3)).ok).toBe(true);
+    expect((await threadRow()).status).toBe("removed");
+    expect((await thread("restore", 4)).ok).toBe(true);
+    expect((await threadRow()).status).toBe("locked");
+  });
+
+  it("an action naming a queue item about a different target is refused with item_mismatch, nothing written", async () => {
+    const item = await hideByReport();
+    const wrong = await act(mod, {
+      action: "lock",
+      targetType: "thread",
+      targetId: threadId,
+      reason: "Wrong item",
+      queueItemId: item.id,
+      version: item.version,
+    });
+    expect(wrong).toEqual({ ok: false, error: "item_mismatch" });
+    expect((await threadRow()).status).toBe("open");
+    expect(await t.db.select().from(modActions)).toHaveLength(0);
+    const [still] = await t.db
+      .select()
+      .from(modQueueItems)
+      .where(eq(modQueueItems.id, item.id));
+    expect(still).toMatchObject({ status: "open", version: item.version });
+  });
+
+  it("a user action may name the queue item about that user's content", async () => {
+    const item = await hideByReport();
+    const muted = await act(mod, {
+      action: "mute",
+      targetType: "user",
+      targetId: author.userId,
+      reason: "Spam",
+      until: null,
+      queueItemId: item.id,
+      version: item.version,
+    });
+    expect(muted).toMatchObject({ ok: true });
+  });
+
   it("every action writes an audit row with its reason", async () => {
     const steps: ModerateInput[] = [
       {

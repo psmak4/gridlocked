@@ -77,6 +77,8 @@ function moderationText(d: NotificationData): string {
         : "You can't use live chat for now. Tap to see why.";
     case "unmute":
       return "You can post again.";
+    case "chat_unban":
+      return "You can use live chat again.";
     default:
       return "A moderator took an action on your account. Tap to see why.";
   }

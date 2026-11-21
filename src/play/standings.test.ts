@@ -141,6 +141,55 @@ describe("league standings on the fantasy screens", () => {
     expect(new Set(seen).size).toBe(120);
   }, 120_000);
 
+  it("See more with the version of the first page returns the next rows of that table", async () => {
+    const ids: string[] = [];
+    for (const [i, points] of [40, 30, 20, 10].entries()) {
+      const id = await team(`Team ${i}`);
+      await score(id, [points]);
+      ids.push(id);
+    }
+    const { slug } = await league(ids, 1);
+    const first = await page(slug, { limit: 2 });
+    expect(first.version).not.toBe("");
+    const more = await page(slug, {
+      afterRank: first.next!,
+      version: first.version,
+      limit: 2,
+    });
+    expect(more.restarted).toBe(false);
+    expect(more.version).toBe(first.version);
+    expect(more.rows.map((r) => r.rank)).toEqual([3, 4]);
+  });
+
+  it("See more after an event is scored returns restarted: true and the new table's first page", async () => {
+    const ids: string[] = [];
+    for (const [i, points] of [40, 30, 20, 10].entries()) {
+      const id = await team(`Team ${i}`);
+      await score(id, [points]);
+      ids.push(id);
+    }
+    const { slug, leagueId } = await league(ids, 1);
+    const first = await page(slug, { limit: 2 });
+    // Event 2 is scored, and turns the table upside down.
+    for (const [i, id] of ids.entries()) {
+      await score(id, [100 * (i + 1)], [4 - i], {
+        from: 2,
+        history: [[40, 30, 20, 10][i]!],
+      });
+    }
+    await recomputeStandings(db, NOW, { gameId, eventId: eventIds[1]! });
+    const more = await page(slug, {
+      afterRank: first.next!,
+      version: first.version,
+      limit: 2,
+    });
+    expect(leagueId).toBeTruthy();
+    expect(more.restarted).toBe(true);
+    expect(more.version).not.toBe(first.version);
+    expect(more.rows.map((r) => r.rank)).toEqual([1, 2]);
+    expect(more.rows[0]!.teamId).toBe(ids[3]);
+  });
+
   it("shared ranks show once each and the next rank skips", async () => {
     const a = await team("Apex Predators");
     const b = await team("Late Brakers");

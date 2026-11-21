@@ -54,9 +54,14 @@ function StandingsRoute() {
         <StandingsScreen
           key={`${slug}:${search.show ?? ""}`}
           page={page}
-          more={(afterRank) =>
+          more={(afterRank, version) =>
             getStandings({
-              data: { slug, afterRank, ...(show.length ? { show } : {}) },
+              data: {
+                slug,
+                afterRank,
+                version,
+                ...(show.length ? { show } : {}),
+              },
             })
           }
           show={(ids) =>
