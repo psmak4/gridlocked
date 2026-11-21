@@ -9,7 +9,18 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { SYSTEM_USER_ID } from "@/identity/system";
-import { addOverride, type ResultFields } from "@/results/overrides";
+import {
+  addOverride,
+  type OnFinal,
+  type ResultFields,
+  revokeOverride as revokeOverrideRow,
+} from "@/results/overrides";
+import { StaffError } from "./errors";
+import {
+  CLASSIFICATION_WORDS,
+  type ClassificationWord,
+  type CorrectionField,
+} from "./result-words";
 import { audit, requireReason, type StaffActor } from "./roster";
 import {
   revalidateEvent,
@@ -54,6 +65,8 @@ export async function overrideResult(
     fields: ResultFields;
     reason: string;
     actor: StaffActor;
+    /** The staff screen corrects a final session; the CLI refuses one. */
+    onFinal?: OnFinal;
   },
   deps: StaffDeps = {},
 ): Promise<{ changed: boolean; sessions: SessionMove[] }> {
@@ -104,6 +117,7 @@ export async function overrideResult(
       fields,
       reason,
       createdBy: SYSTEM_USER_ID,
+      onFinal: input.onFinal,
     });
     await writeAudit(tx, now, {
       ...audit(input.actor, reason),
@@ -240,4 +254,265 @@ export async function insertResult(
     changed,
     sessions: await revalidateEvent(db, now, session.eventId, deps),
   };
+}
+
+/**
+ * Revokes a correction, so the driver goes back to the provider's row, with a
+ * reason, and writes the audit row in the same transaction; then the event is
+ * checked again, which re-scores the session (M8 Task 7). A final session
+ * stays final and counts a reopen (`onFinal: "correct"`). An override that
+ * doesn't exist or is already revoked is `not_found`, writing nothing.
+ */
+export async function revokeOverride(
+  db: Db,
+  now: Date,
+  actor: StaffActor,
+  input: { overrideId: string; reason: string },
+  deps: StaffDeps = {},
+): Promise<{ sessions: SessionMove[] }> {
+  const reason = requireReason(input.reason);
+  const eventId = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        id: resultOverrides.id,
+        sessionId: resultOverrides.sessionId,
+        driverId: resultOverrides.driverId,
+        kind: resultOverrides.kind,
+        fields: resultOverrides.fields,
+        reason: resultOverrides.reason,
+        eventId: sessions.eventId,
+      })
+      .from(resultOverrides)
+      .innerJoin(sessions, eq(sessions.id, resultOverrides.sessionId))
+      .where(
+        and(
+          eq(resultOverrides.id, input.overrideId),
+          isNull(resultOverrides.revokedAt),
+        ),
+      );
+    if (!row) {
+      throw new StaffError(
+        "not_found",
+        `no active override ${input.overrideId}`,
+      );
+    }
+    await revokeOverrideRow(tx, now, row.id, SYSTEM_USER_ID, "correct");
+    await writeAudit(tx, now, {
+      ...audit(actor, reason),
+      action: "result_override.revoke",
+      entityType: "result_override",
+      entityId: row.id,
+      before: {
+        sessionId: row.sessionId,
+        driverId: row.driverId,
+        kind: row.kind,
+        fields: row.fields,
+        reason: row.reason,
+      },
+      after: null,
+    });
+    return row.eventId;
+  });
+  return { sessions: await revalidateEvent(db, now, eventId, deps) };
+}
+
+/**
+ * Hides a provider row that shouldn't be there (a driver listed who didn't
+ * run), with a reason: a `suppress` override, which `effective_results` leaves
+ * out, audited as `result_override.create` in the same transaction. Then the
+ * event is checked again. A driver with no provider row in the session is
+ * `not_found`; a final session is corrected (`onFinal: "correct"`).
+ */
+export async function suppressResult(
+  db: Db,
+  now: Date,
+  actor: StaffActor,
+  input: { sessionId: string; driverId: string; reason: string },
+  deps: StaffDeps = {},
+): Promise<{ sessions: SessionMove[] }> {
+  const reason = requireReason(input.reason);
+  const { sessionId, driverId } = input;
+  const [session] = await db
+    .select({ eventId: sessions.eventId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId));
+  if (!session) throw new StaffError("not_found", `no session ${sessionId}`);
+
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ driverId: results.driverId })
+      .from(results)
+      .where(
+        and(eq(results.sessionId, sessionId), eq(results.driverId, driverId)),
+      );
+    if (!row) {
+      throw new StaffError(
+        "not_found",
+        `driver ${driverId} has no provider row in session ${sessionId}`,
+      );
+    }
+    const [active] = await tx
+      .select()
+      .from(resultOverrides)
+      .where(
+        and(
+          eq(resultOverrides.sessionId, sessionId),
+          eq(resultOverrides.driverId, driverId),
+          isNull(resultOverrides.revokedAt),
+        ),
+      );
+    const id = await addOverride(tx, now, {
+      sessionId,
+      driverId,
+      kind: "suppress",
+      reason,
+      createdBy: SYSTEM_USER_ID,
+      onFinal: "correct",
+    });
+    await writeAudit(tx, now, {
+      ...audit(actor, reason),
+      action: "result_override.create",
+      entityType: "result_override",
+      entityId: id,
+      before: active
+        ? { overrideId: active.id, kind: active.kind, fields: active.fields }
+        : null,
+      after: { sessionId, driverId, kind: "suppress", fields: {} },
+    });
+  });
+  return { sessions: await revalidateEvent(db, now, session.eventId, deps) };
+}
+
+/** A whole number from the form, within `[min, max]`, or `invalid`. */
+function wholeNumber(value: string, min: number, max: number): number {
+  const n = /^\d+$/.test(value.trim()) ? Number(value.trim()) : Number.NaN;
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new StaffError(
+      "invalid",
+      `${value} isn't a number from ${min} to ${max}`,
+    );
+  }
+  return n;
+}
+
+/** The fields one "Add a correction" sets. */
+function correctionFields(
+  what: Exclude<CorrectionField, "remove">,
+  value: string,
+): ResultFields {
+  switch (what) {
+    case "position":
+      return { position: wholeNumber(value, 1, 30) };
+    case "grid":
+      return { grid: wholeNumber(value, 0, 30) };
+    case "fastest_lap":
+      return { fastest_lap_rank: wholeNumber(value, 1, 30) };
+    case "classification": {
+      if (!Object.hasOwn(CLASSIFICATION_WORDS, value)) {
+        throw new StaffError("invalid", `no classification ${value}`);
+      }
+      const classification = value as ClassificationWord;
+      return {
+        classification,
+        provider_status: CLASSIFICATION_WORDS[classification],
+      };
+    }
+  }
+}
+
+/**
+ * The staff screen's "Add a correction" (M8 Task 7): one change to one
+ * driver's row, with the reason players see, audited in the same transaction.
+ * It sits on top of the driver's active correction rather than replacing it,
+ * so a position fix and a later status fix both stay (one override per
+ * driver, DM 2.6, with their fields merged); an inserted row stays an insert.
+ * `remove` hides the row (`suppressResult`). A final session is corrected and
+ * stays final. Then the event is checked again, which re-scores the session.
+ *
+ * Refuses a value that doesn't fit (`invalid`) and a driver with no row to
+ * correct (`not_found`), writing nothing.
+ */
+export async function correctResult(
+  db: Db,
+  now: Date,
+  actor: StaffActor,
+  input: {
+    sessionId: string;
+    driverId: string;
+    what: CorrectionField;
+    value: string;
+    reason: string;
+  },
+  deps: StaffDeps = {},
+): Promise<{ sessions: SessionMove[] }> {
+  const reason = requireReason(input.reason);
+  const { sessionId, driverId, what } = input;
+  if (what === "remove") {
+    return suppressResult(
+      db,
+      now,
+      actor,
+      { sessionId, driverId, reason },
+      deps,
+    );
+  }
+  const change = correctionFields(what, input.value);
+  const [session] = await db
+    .select({ eventId: sessions.eventId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId));
+  if (!session) throw new StaffError("not_found", `no session ${sessionId}`);
+
+  await db.transaction(async (tx) => {
+    const [active] = await tx
+      .select()
+      .from(resultOverrides)
+      .where(
+        and(
+          eq(resultOverrides.sessionId, sessionId),
+          eq(resultOverrides.driverId, driverId),
+          isNull(resultOverrides.revokedAt),
+        ),
+      );
+    const current =
+      active && active.kind !== "suppress"
+        ? (active.fields as ResultFields)
+        : {};
+    const kind = active?.kind === "insert" ? "insert" : "patch";
+    if (kind === "patch") {
+      const [row] = await tx
+        .select({ driverId: results.driverId })
+        .from(results)
+        .where(
+          and(eq(results.sessionId, sessionId), eq(results.driverId, driverId)),
+        );
+      if (!row) {
+        throw new StaffError(
+          "not_found",
+          `driver ${driverId} has no result in session ${sessionId}`,
+        );
+      }
+    }
+    const fields = { ...current, ...change };
+    const id = await addOverride(tx, now, {
+      sessionId,
+      driverId,
+      kind,
+      fields,
+      reason,
+      createdBy: SYSTEM_USER_ID,
+      onFinal: "correct",
+    });
+    await writeAudit(tx, now, {
+      ...audit(actor, reason),
+      action: "result_override.create",
+      entityType: "result_override",
+      entityId: id,
+      before: active
+        ? { overrideId: active.id, kind: active.kind, fields: active.fields }
+        : null,
+      after: { sessionId, driverId, kind, fields },
+    });
+  });
+  return { sessions: await revalidateEvent(db, now, session.eventId, deps) };
 }

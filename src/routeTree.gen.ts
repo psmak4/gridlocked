@@ -62,6 +62,7 @@ import { Route as ApiTestRunExportsRouteImport } from './routes/api/test.run-exp
 import { Route as ApiTestStaffRouteImport } from './routes/api/test.staff'
 import { Route as SettingsDeleteConfirmRouteImport } from './routes/settings.delete_.confirm'
 import { Route as StaffCalendarEventIdRouteImport } from './routes/staff.calendar.$eventId'
+import { Route as StaffResultsSessionIdRouteImport } from './routes/staff.results.$sessionId'
 import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
 import { Route as TeamSlotPointsRouteImport } from './routes/team.$slot.points'
 
@@ -330,6 +331,11 @@ const StaffCalendarEventIdRoute = StaffCalendarEventIdRouteImport.update({
   path: '/$eventId',
   getParentRoute: () => StaffCalendarRoute,
 } as any)
+const StaffResultsSessionIdRoute = StaffResultsSessionIdRouteImport.update({
+  id: '/results/$sessionId',
+  path: '/results/$sessionId',
+  getParentRoute: () => StaffRoute,
+} as any)
 const TeamSlotIndexRoute = TeamSlotIndexRouteImport.update({
   id: '/team/$slot/',
   path: '/team/$slot/',
@@ -395,6 +401,7 @@ export interface FileRoutesByFullPath {
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
+  '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -451,6 +458,7 @@ export interface FileRoutesByTo {
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
+  '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot': typeof TeamSlotIndexRoute
 }
@@ -509,6 +517,7 @@ export interface FileRoutesById {
   '/api/test/staff': typeof ApiTestStaffRoute
   '/settings/delete_/confirm': typeof SettingsDeleteConfirmRoute
   '/staff/calendar/$eventId': typeof StaffCalendarEventIdRoute
+  '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -568,6 +577,7 @@ export interface FileRouteTypes {
     | '/api/test/staff'
     | '/settings/delete/confirm'
     | '/staff/calendar/$eventId'
+    | '/staff/results/$sessionId'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesByTo: FileRoutesByTo
@@ -624,6 +634,7 @@ export interface FileRouteTypes {
     | '/api/test/staff'
     | '/settings/delete/confirm'
     | '/staff/calendar/$eventId'
+    | '/staff/results/$sessionId'
     | '/team/$slot/points'
     | '/team/$slot'
   id:
@@ -681,6 +692,7 @@ export interface FileRouteTypes {
     | '/api/test/staff'
     | '/settings/delete_/confirm'
     | '/staff/calendar/$eventId'
+    | '/staff/results/$sessionId'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesById: FileRoutesById
@@ -1111,6 +1123,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffCalendarEventIdRouteImport
       parentRoute: typeof StaffCalendarRoute
     }
+    '/staff/results/$sessionId': {
+      id: '/staff/results/$sessionId'
+      path: '/results/$sessionId'
+      fullPath: '/staff/results/$sessionId'
+      preLoaderRoute: typeof StaffResultsSessionIdRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/team/$slot/': {
       id: '/team/$slot/'
       path: '/team/$slot'
@@ -1145,6 +1164,7 @@ interface StaffRouteChildren {
   StaffCalendarRoute: typeof StaffCalendarRouteWithChildren
   StaffSeatsRoute: typeof StaffSeatsRoute
   StaffIndexRoute: typeof StaffIndexRoute
+  StaffResultsSessionIdRoute: typeof StaffResultsSessionIdRoute
 }
 
 const StaffRouteChildren: StaffRouteChildren = {
@@ -1152,6 +1172,7 @@ const StaffRouteChildren: StaffRouteChildren = {
   StaffCalendarRoute: StaffCalendarRouteWithChildren,
   StaffSeatsRoute: StaffSeatsRoute,
   StaffIndexRoute: StaffIndexRoute,
+  StaffResultsSessionIdRoute: StaffResultsSessionIdRoute,
 }
 
 const StaffRouteWithChildren = StaffRoute._addFileChildren(StaffRouteChildren)
