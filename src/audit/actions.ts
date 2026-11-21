@@ -22,6 +22,10 @@ export const AUDIT_ACTIONS = {
     group: "results",
   },
   "game.dry_run": { label: "Scoring dry run", group: "results" },
+  "game.dry_run_discard": {
+    label: "Scoring dry run discarded",
+    group: "results",
+  },
   "game.rescore_approved": { label: "Re-score approved", group: "results" },
   "ruleset_version.correct": { label: "Ruleset corrected", group: "results" },
   "game_session_exception.set": {

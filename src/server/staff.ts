@@ -37,6 +37,14 @@ import { REASON_MAX, StaffError } from "@/staff/errors";
 import { correctResult, revokeOverride } from "@/staff/results";
 import { CORRECTION_FIELDS, correctionSummary } from "@/staff/result-words";
 import { changeSeats, recordSubstitution } from "@/staff/roster";
+import {
+  approveDryRun,
+  discardGameDryRun,
+  dryRunSummary,
+  rulesetVersions,
+  scoringGame,
+  startDryRun,
+} from "@/staff/scoring";
 import { checkProviderAgain, sessionResults } from "@/staff/session-results";
 import { staffTime } from "@/staff/time";
 import { webDueStore } from "./due-store";
@@ -463,5 +471,93 @@ export const checkProvider = createServerFn({ method: "POST" })
         const store = await webDueStore();
         return checkProviderAgain(db, now, input, store ?? undefined);
       },
+    }),
+  );
+
+// --- Scoring: the dry run, approval and ruleset versions (Task 8) -----------
+
+/** The scoring board: the game, its latest dry run and its ruleset versions. */
+export const getScoring = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({}),
+      handler: async ({ db, now, viewer }) => {
+        const game = await scoringGame(db);
+        if (!game) return { game: null, dryRun: null, versions: [] };
+        const zone = viewer.profile.timezone;
+        const summary = await dryRunSummary(db, game.id);
+        const versions = await rulesetVersions(db, game.id);
+        return {
+          game,
+          dryRun: summary && {
+            ...withoutKey(summary, "startedAt"),
+            startedLabel: staffTime(summary.startedAt, zone, now),
+          },
+          versions: versions.map((v) => ({
+            ...withoutKey(v, "publishedAt"),
+            publishedLabel: staffTime(v.publishedAt, zone, now),
+          })),
+        };
+      },
+    }),
+  );
+
+function withoutKey<T extends object, K extends keyof T>(
+  value: T,
+  key: K,
+): Omit<T, K> {
+  const rest = { ...value };
+  delete rest[key];
+  return rest;
+}
+
+const gameReason = z.strictObject({ gameId: z.uuid(), reason: reasonText });
+
+/** Start a dry run: what re-scoring the whole game would change. */
+export const startScoringDryRun = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: gameReason,
+      handler: async ({ db, now, viewer, requestId }, input) => {
+        const report = await startDryRun(
+          db,
+          now,
+          staffActor(viewer, requestId),
+          input,
+        );
+        return { sessions: report.sessions, teamsChanged: report.teamsChanged };
+      },
+    }),
+  );
+
+/** Approve and re-score, naming the dry run the board showed. */
+export const approveScoring = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        gameId: z.uuid(),
+        dryRunId: z.uuid(),
+        reason: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) =>
+        approveDryRun(db, now, staffActor(viewer, requestId), input),
+    }),
+  );
+
+/** Discard the dry run: nothing is re-scored. */
+export const discardScoring = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: gameReason,
+      handler: async ({ db, now, viewer, requestId }, input) =>
+        discardGameDryRun(db, now, staffActor(viewer, requestId), input),
     }),
   );

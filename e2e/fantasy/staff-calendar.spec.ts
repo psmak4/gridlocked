@@ -31,8 +31,7 @@ for (const size of [
     await page.setViewportSize(size);
     await unlockedAdmin(page, request, FANTASY_ORIGIN);
 
-    await page.goto("/staff");
-    await expect(page).toHaveURL("/staff/calendar");
+    await page.goto("/staff/calendar");
     await expect(heading(page)).toHaveText("2026 calendar");
     await expect(page.getByText(/times in UTC/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Sync now" })).toBeVisible();

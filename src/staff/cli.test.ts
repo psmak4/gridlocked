@@ -19,9 +19,19 @@ import {
   eventEntries,
   resultOverrides,
   reviewItems,
+  rulesetVersions,
   userRestrictions,
   users,
 } from "@/db/schema";
+import {
+  lockRound,
+  round2026,
+  seedGame2026,
+} from "../../tests/helpers/game-2026";
+import { openGame } from "@/game/lineups";
+import { RULESET_2026 } from "@/game/ruleset";
+import { setSimulatedClock } from "@/replay/clock-loop";
+import { SCORING_RULES_2026 } from "@/scoring/rules";
 import { seedUser } from "../../tests/helpers/users";
 import { advanceStatus } from "@/results/status";
 import { parseStaffEnv, runStaffCommand } from "./cli";
@@ -696,5 +706,105 @@ describe("pnpm staff moderate", () => {
         ),
       ),
     ).rejects.toThrow("no user nobody");
+  });
+});
+
+describe("pnpm staff correct-ruleset", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let gameId: string;
+  const NOW = new Date("2026-02-01T09:00:00.000Z");
+  const change = (overrides: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      events: ["2026/1"],
+      notes: "The winner's points were wrong.",
+      params: RULESET_2026,
+      rules: SCORING_RULES_2026,
+      ...overrides,
+    });
+  const env = (extra: Record<string, string> = {}) => ({
+    STAFF_EVENT: "",
+    STAFF_CHANGE: change(),
+    STAFF_REASON: "A wrong points table",
+    STAFF_ACTOR: "psmak4",
+    STAFF_REQUEST_ID: "gh-run:12",
+    ...extra,
+  });
+  beforeEach(async () => {
+    t = await createTestDb();
+    await setSimulatedClock(t.db, NOW);
+    const game = await seedGame2026(t.db, NOW);
+    gameId = game.gameId;
+    await openGame(t.db, NOW, gameId);
+    await lockRound(t.db, gameId, (await round2026(t.db, 1)).id);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("correct-ruleset parses its JSON and calls publishCorrectionVersion with the reason", async () => {
+    const cmd = parseStaffEnv("correct-ruleset", env());
+    expect(cmd).toMatchObject({
+      command: "correct-ruleset",
+      dryRun: true,
+      reason: "A wrong points table",
+    });
+    const dry = await runStaffCommand(t.db, NOW, cmd);
+    expect(dry).toMatchObject({
+      dryRun: true,
+      command: "correct-ruleset",
+      resolved: { gameId, rules: SCORING_RULES_2026.length },
+    });
+    const versions = () =>
+      t.db
+        .select()
+        .from(rulesetVersions)
+        .where(eq(rulesetVersions.gameId, gameId));
+    expect(await versions()).toHaveLength(1);
+
+    const real = await runStaffCommand(
+      t.db,
+      NOW,
+      parseStaffEnv("correct-ruleset", env({ STAFF_DRY_RUN: "false" })),
+    );
+    expect(real).toMatchObject({
+      dryRun: false,
+      command: "correct-ruleset",
+      rulesetVersionId: expect.any(String),
+    });
+    const correction = (await versions()).find((v) => v.isCorrection);
+    expect(correction).toMatchObject({
+      notes: "The winner's points were wrong.",
+      version: 2,
+    });
+    const [entry] = await t.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "ruleset_version.correct"));
+    expect(entry).toMatchObject({
+      reason: "A wrong points table",
+      actorLabel: "psmak4",
+      requestId: "gh-run:12",
+    });
+  });
+
+  it("refuses rules or params their schemas refuse, and no events, before any write", () => {
+    expect(() =>
+      parseStaffEnv(
+        "correct-ruleset",
+        env({ STAFF_CHANGE: change({ rules: [{ code: "x" }] }) }),
+      ),
+    ).toThrow(/STAFF_CHANGE/);
+    expect(() =>
+      parseStaffEnv(
+        "correct-ruleset",
+        env({ STAFF_CHANGE: change({ events: [] }) }),
+      ),
+    ).toThrow(/STAFF_CHANGE/);
+    expect(() =>
+      parseStaffEnv(
+        "correct-ruleset",
+        env({ STAFF_CHANGE: change({ params: { nope: true } }) }),
+      ),
+    ).toThrow(/STAFF_CHANGE/);
   });
 });
