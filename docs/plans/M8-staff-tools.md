@@ -79,6 +79,13 @@ I read wave 5's nine boards, the DM sections above, and the staff code that M2 t
 10. **M7's moderation has four gaps** (roadmap "Carried from M7"). One is a model change: chat bans get their own lift, `chat_unban`, which joins DM 5.9's action list.
 
 ## Decisions (yours)
+**Answered 2026-11-21: every decision went the recommended way.**
+1. Prices publish automatically.
+2. A daily `usage-snapshot.yml` feeds the meters. You'll create `VERCEL_USAGE_TOKEN` before Task 14, and its scheduled staging write has your standing OK.
+3. The rulesets editor waits, and `correct-ruleset` comes now.
+4. Chat and push are the only flags.
+5. `pnpm staff` and the workflow stay.
+
 These change what gets built. Each has my recommendation first.
 
 1. **Price publishing.**
