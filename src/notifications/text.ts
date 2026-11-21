@@ -108,11 +108,18 @@ export function notificationText(
       };
     case "mention":
       return { label, text: `${actor} mentioned you in “${title}”` };
-    case "roster_change":
+    case "roster_change": {
+      const state =
+        d.status === "available"
+          ? "available again"
+          : d.status === "doubtful"
+            ? "doubtful"
+            : "out";
       return {
         label,
-        text: `${d.driver} is ${d.status === "unavailable" ? "out" : "doubtful"} for ${d.event}. Check ${d.team}.`,
+        text: `${d.driver} is ${state} for the ${d.event}. Check ${d.team}.`,
       };
+    }
     case "lock_reminder":
       return {
         label,

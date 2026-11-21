@@ -24,7 +24,17 @@ import {
   setSessionTimes,
   STAFF_SESSION_STATUSES,
 } from "@/staff/calendar";
+import {
+  AVAILABILITY_STATUSES,
+  availabilityFor,
+  nextEventId,
+  seasonDrivers,
+  seatEvents,
+  seatTable,
+  setAvailability,
+} from "@/staff/availability";
 import { REASON_MAX, StaffError } from "@/staff/errors";
+import { changeSeats, recordSubstitution } from "@/staff/roster";
 import { staffTime } from "@/staff/time";
 import { webDueStore } from "./due-store";
 import { getViewer } from "./session";
@@ -245,5 +255,116 @@ export const cancelCalendarEvent = createServerFn({ method: "POST" })
         );
         return null;
       },
+    }),
+  );
+
+// --- Drivers, seats and availability (Task 6) -------------------------------
+
+export const seatsInput = z.strictObject({
+  team: z
+    .string()
+    .regex(/^[a-z0-9-]{1,64}$/)
+    .optional(),
+  event: z.uuid().optional(),
+});
+export type SeatsInput = z.infer<typeof seatsInput>;
+
+/** The seat table (one team's tab, or all), the forms' choices, and availability. */
+export const getSeats = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: seatsInput,
+      handler: async ({ db, now }, input) => {
+        const season = await calendarSeason(db, now);
+        const eventId = input.event ?? (await nextEventId(db, now, season));
+        return {
+          table: await seatTable(db, season, input.team),
+          events: await seatEvents(db, now, season),
+          drivers: await seasonDrivers(db, season),
+          availability: eventId
+            ? await availabilityFor(db, now, eventId)
+            : null,
+        };
+      },
+    }),
+  );
+
+/** Move a driver from a date: one `changeSeats` change. */
+export const moveDriver = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        fromEventId: z.uuid(),
+        driverId: z.uuid(),
+        constructorId: z.uuid().nullable(),
+        carNumber: z.number().int().min(0).max(999).optional(),
+        reason: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) => {
+        if (input.constructorId && input.carNumber === undefined) {
+          throw new StaffError("invalid");
+        }
+        const { eventsSynced } = await changeSeats(db, now, {
+          fromEventId: input.fromEventId,
+          changes: [
+            {
+              driverId: input.driverId,
+              constructorId: input.constructorId,
+              carNumber: input.carNumber,
+            },
+          ],
+          reason: input.reason,
+          actor: staffActor(viewer, requestId),
+        });
+        return { eventsSynced };
+      },
+    }),
+  );
+
+/** Add a new driver: a substitution for one event (`recordSubstitution`). */
+export const addDriver = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        eventId: z.uuid(),
+        inDriverId: z.uuid(),
+        constructorId: z.uuid(),
+        carNumber: z.number().int().min(0).max(999),
+        outDriverId: z.uuid().nullable(),
+        reason: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) => {
+        const { changed } = await recordSubstitution(db, now, {
+          ...input,
+          actor: staffActor(viewer, requestId),
+        });
+        return { changed };
+      },
+    }),
+  );
+
+/** One driver's availability for an event; the note players see is the reason. */
+export const saveAvailability = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(
+    staffFn({
+      role: "admin",
+      input: z.strictObject({
+        eventId: z.uuid(),
+        driverId: z.uuid(),
+        status: z.enum(AVAILABILITY_STATUSES),
+        note: reasonText,
+      }),
+      handler: async ({ db, now, viewer, requestId }, input) =>
+        setAvailability(db, now, staffActor(viewer, requestId), {
+          ...input,
+          reason: input.note,
+        }),
     }),
   );
