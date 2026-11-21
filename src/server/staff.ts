@@ -48,6 +48,7 @@ import {
 import { moderate, type ModTargetType } from "@/community/moderate";
 import { modItem, modQueue } from "@/community/queue-read";
 import { nextPrices, setAdminPrice } from "@/staff/prices";
+import * as USERS from "./staff-users";
 import {
   openReviewCount,
   resolveReviewItem,
@@ -770,3 +771,43 @@ export const moderateItem = createServerFn({ method: "POST" })
       },
     }),
   );
+
+// --- Users (Task 12) ---------------------------------------------------------
+
+/** Accounts by username prefix, at most 20; never by email. */
+export const getUsers = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.FIND_USERS));
+
+/** One user: role, trust, restrictions, recent actions and trust history. */
+export const getUser = createServerFn({ method: "GET" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.USER_DETAIL));
+
+export const saveUserRole = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.SET_ROLE));
+
+export const banAccount = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.BAN));
+
+export const unbanAccount = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.UNBAN));
+
+export const saveTrustLevel = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.SET_TRUST));
+
+export const releaseTrustLock = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.CLEAR_TRUST_LOCK));
+
+export const restrictUser = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.RESTRICT));
+
+export const viewAsUser = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(USERS.IMPERSONATE));

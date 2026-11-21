@@ -46,6 +46,7 @@ import { Route as StaffPricesRouteImport } from './routes/staff.prices'
 import { Route as StaffReviewRouteImport } from './routes/staff.review'
 import { Route as StaffScoringRouteImport } from './routes/staff.scoring'
 import { Route as StaffSeatsRouteImport } from './routes/staff.seats'
+import { Route as StaffUsersRouteImport } from './routes/staff.users'
 import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
 import { Route as TeamIndexRouteImport } from './routes/team.index'
 import { Route as WelcomeIndexRouteImport } from './routes/welcome.index'
@@ -69,6 +70,7 @@ import { Route as StaffCalendarEventIdRouteImport } from './routes/staff.calenda
 import { Route as StaffModerationItemIdRouteImport } from './routes/staff.moderation.$itemId'
 import { Route as StaffResultsSessionIdRouteImport } from './routes/staff.results.$sessionId'
 import { Route as StaffReviewItemIdRouteImport } from './routes/staff.review.$itemId'
+import { Route as StaffUsersUsernameRouteImport } from './routes/staff.users.$username'
 import { Route as TeamSlotIndexRouteImport } from './routes/team.$slot.index'
 import { Route as TeamSlotPointsRouteImport } from './routes/team.$slot.points'
 
@@ -257,6 +259,11 @@ const StaffSeatsRoute = StaffSeatsRouteImport.update({
   path: '/seats',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffUsersRoute = StaffUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => StaffRoute,
+} as any)
 const TThreadIdRoute = TThreadIdRouteImport.update({
   id: '/t/$threadId',
   path: '/t/$threadId',
@@ -372,6 +379,11 @@ const StaffReviewItemIdRoute = StaffReviewItemIdRouteImport.update({
   path: '/$itemId',
   getParentRoute: () => StaffReviewRoute,
 } as any)
+const StaffUsersUsernameRoute = StaffUsersUsernameRouteImport.update({
+  id: '/$username',
+  path: '/$username',
+  getParentRoute: () => StaffUsersRoute,
+} as any)
 const TeamSlotIndexRoute = TeamSlotIndexRouteImport.update({
   id: '/team/$slot/',
   path: '/team/$slot/',
@@ -415,6 +427,7 @@ export interface FileRoutesByFullPath {
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
+  '/staff/users': typeof StaffUsersRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -444,6 +457,7 @@ export interface FileRoutesByFullPath {
   '/staff/moderation/$itemId': typeof StaffModerationItemIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/staff/review/$itemId': typeof StaffReviewItemIdRoute
+  '/staff/users/$username': typeof StaffUsersUsernameRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -478,6 +492,7 @@ export interface FileRoutesByTo {
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
+  '/staff/users': typeof StaffUsersRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -507,6 +522,7 @@ export interface FileRoutesByTo {
   '/staff/moderation/$itemId': typeof StaffModerationItemIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/staff/review/$itemId': typeof StaffReviewItemIdRoute
+  '/staff/users/$username': typeof StaffUsersUsernameRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot': typeof TeamSlotIndexRoute
 }
@@ -543,6 +559,7 @@ export interface FileRoutesById {
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
+  '/staff/users': typeof StaffUsersRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
   '/welcome/spoilers': typeof WelcomeSpoilersRoute
@@ -572,6 +589,7 @@ export interface FileRoutesById {
   '/staff/moderation/$itemId': typeof StaffModerationItemIdRoute
   '/staff/results/$sessionId': typeof StaffResultsSessionIdRoute
   '/staff/review/$itemId': typeof StaffReviewItemIdRoute
+  '/staff/users/$username': typeof StaffUsersUsernameRoute
   '/team/$slot/points': typeof TeamSlotPointsRoute
   '/team/$slot/': typeof TeamSlotIndexRoute
 }
@@ -609,6 +627,7 @@ export interface FileRouteTypes {
     | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
+    | '/staff/users'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -638,6 +657,7 @@ export interface FileRouteTypes {
     | '/staff/moderation/$itemId'
     | '/staff/results/$sessionId'
     | '/staff/review/$itemId'
+    | '/staff/users/$username'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesByTo: FileRoutesByTo
@@ -672,6 +692,7 @@ export interface FileRouteTypes {
     | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
+    | '/staff/users'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -701,6 +722,7 @@ export interface FileRouteTypes {
     | '/staff/moderation/$itemId'
     | '/staff/results/$sessionId'
     | '/staff/review/$itemId'
+    | '/staff/users/$username'
     | '/team/$slot/points'
     | '/team/$slot'
   id:
@@ -736,6 +758,7 @@ export interface FileRouteTypes {
     | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
+    | '/staff/users'
     | '/t/$threadId'
     | '/welcome/favorites'
     | '/welcome/spoilers'
@@ -765,6 +788,7 @@ export interface FileRouteTypes {
     | '/staff/moderation/$itemId'
     | '/staff/results/$sessionId'
     | '/staff/review/$itemId'
+    | '/staff/users/$username'
     | '/team/$slot/points'
     | '/team/$slot/'
   fileRoutesById: FileRoutesById
@@ -1083,6 +1107,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffSeatsRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/users': {
+      id: '/staff/users'
+      path: '/users'
+      fullPath: '/staff/users'
+      preLoaderRoute: typeof StaffUsersRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/t/$threadId': {
       id: '/t/$threadId'
       path: '/t/$threadId'
@@ -1244,6 +1275,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffReviewItemIdRouteImport
       parentRoute: typeof StaffReviewRoute
     }
+    '/staff/users/$username': {
+      id: '/staff/users/$username'
+      path: '/$username'
+      fullPath: '/staff/users/$username'
+      preLoaderRoute: typeof StaffUsersUsernameRouteImport
+      parentRoute: typeof StaffUsersRoute
+    }
     '/team/$slot/': {
       id: '/team/$slot/'
       path: '/team/$slot'
@@ -1297,6 +1335,18 @@ const StaffReviewRouteWithChildren = StaffReviewRoute._addFileChildren(
   StaffReviewRouteChildren,
 )
 
+interface StaffUsersRouteChildren {
+  StaffUsersUsernameRoute: typeof StaffUsersUsernameRoute
+}
+
+const StaffUsersRouteChildren: StaffUsersRouteChildren = {
+  StaffUsersUsernameRoute: StaffUsersUsernameRoute,
+}
+
+const StaffUsersRouteWithChildren = StaffUsersRoute._addFileChildren(
+  StaffUsersRouteChildren,
+)
+
 interface StaffRouteChildren {
   StaffAuditRoute: typeof StaffAuditRoute
   StaffCalendarRoute: typeof StaffCalendarRouteWithChildren
@@ -1305,6 +1355,7 @@ interface StaffRouteChildren {
   StaffReviewRoute: typeof StaffReviewRouteWithChildren
   StaffScoringRoute: typeof StaffScoringRoute
   StaffSeatsRoute: typeof StaffSeatsRoute
+  StaffUsersRoute: typeof StaffUsersRouteWithChildren
   StaffIndexRoute: typeof StaffIndexRoute
   StaffResultsSessionIdRoute: typeof StaffResultsSessionIdRoute
 }
@@ -1317,6 +1368,7 @@ const StaffRouteChildren: StaffRouteChildren = {
   StaffReviewRoute: StaffReviewRouteWithChildren,
   StaffScoringRoute: StaffScoringRoute,
   StaffSeatsRoute: StaffSeatsRoute,
+  StaffUsersRoute: StaffUsersRouteWithChildren,
   StaffIndexRoute: StaffIndexRoute,
   StaffResultsSessionIdRoute: StaffResultsSessionIdRoute,
 }

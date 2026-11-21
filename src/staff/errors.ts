@@ -21,6 +21,8 @@ export const STAFF_ERROR_CODES = [
   "game_not_running",
   "prices_frozen",
   "item_mismatch",
+  "last_admin",
+  "cannot_impersonate",
   "server_error",
 ] as const;
 export type StaffErrorCode = (typeof STAFF_ERROR_CODES)[number];
@@ -79,5 +81,9 @@ export const STAFF_ERROR_WORDS: Record<StaffErrorCode, string> = {
   prices_frozen:
     "This event has opened, so its prices are fixed. Change them for the next one.",
   item_mismatch: "That action doesn't belong to this item.",
+  last_admin:
+    "This is the last active admin. Make someone else an admin first.",
+  cannot_impersonate:
+    "You can't view the site as an admin, a banned account or yourself.",
   server_error: "Something went wrong on our side. Try again.",
 };
