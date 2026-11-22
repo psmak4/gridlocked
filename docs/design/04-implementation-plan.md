@@ -434,6 +434,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
     - the poll schedule and the after-race re-checks have no upper bounds, so an admin can save a very long gap;
     - every staff page counts open moderation items by loading the whole open queue;
     - an admin can ban another admin (the last admin is kept), though view-as-user already refuses admins; decide whether bans should too.
+- **Plan:** [plans/M9-hardening-and-beta.md](../plans/M9-hardening-and-beta.md), written 2026-11-22; decisions 1–6 await your answers.
 - **Approval needed:**
   - the production Neon project;
   - the production Vercel project and domain;
