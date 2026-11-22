@@ -365,6 +365,13 @@
       "when": 1795252481058,
       "tag": "0051_staff_totp_steps",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795261357026,
+      "tag": "0052_usage_snapshots",
+      "breakpoints": true
     }
   ]
 }

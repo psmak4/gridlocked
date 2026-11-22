@@ -1,0 +1,60 @@
+name: Usage snapshot (staging)
+
+# Once a day at 05:00 UTC (and by hand): reads the free tiers' usage for the
+# month so far, Neon's compute and transfer and Vercel's function CPU, and
+# writes one `usage_snapshots` row to the Neon project `gridlocked-staging`,
+# opening a `usage_high` warning for a meter at 70% or more (HLD §11.4). It
+# writes nothing and fails if either reading fails, so a missing or expired
+# token shows as a red run, not a zero meter. The owner gave a standing OK
+# for this scheduled write (M8 decision 2).
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never alongside a deploy: a write must not race the migrations.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  NEON_PROJECT_ID: ancient-fog-03461181
+
+jobs:
+  snapshot:
+    # Only the reviewed code on main touches staging.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Holds DATABASE_URL_STAGING, NEON_API_KEY_STAGING and VERCEL_USAGE_TOKEN.
+    environment: staging
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Must come before setup-node so `cache: pnpm` can find the pnpm binary.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The keys reach the script only through the environment, and it
+      # never prints them.
+      - name: Record the usage snapshot
+        run: pnpm usage-snapshot
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+          VERCEL_USAGE_TOKEN: ${{ secrets.VERCEL_USAGE_TOKEN }}

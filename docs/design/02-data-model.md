@@ -568,6 +568,12 @@ These sit in a small `settings` table (key, Zod-validated value, `updated_by`, `
 - The same value again writes nothing.
 - The audit row's `entity_id` is a fixed id made from the key, because `settings.key` isn't a uuid.
 
+**Usage snapshots (M8).** The `usage_snapshots` table has the columns `id`, `taken_at`, `neon_compute_hours`, `neon_transfer_gb`, `vercel_cpu_hours` (null when Vercel reported none) and `limits` (jsonb).
+- `usage-snapshot.yml` writes one row a day, for the month so far.
+- `limits` keeps the free limits the reading was measured against: 100 CU-hours, 5 GB and 4 CPU-hours.
+- A meter at 70% or more opens a `usage_high` warning, once per meter per month.
+- The settings screen shows the latest row from this month, or "No reading yet". It also counts today's account emails straight from `email_outbox`: sent today, plus queued.
+
 ### 2.12 Indexes beyond keys
 - `jobs (run_at) WHERE status = 'pending'`: the claim query and the due-times file.
 - `jobs (status, finished_at)`: pruning and the admin "stuck or dead jobs" view.
