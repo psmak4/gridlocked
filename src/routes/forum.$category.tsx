@@ -17,7 +17,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs } from "@/components/ui/tabs";
 import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
-import { SHOW_ALL, shownIds, showsAll } from "@/lib/shown-ids";
+import { revealOf } from "@/lib/shown-ids";
+import { useRevealed } from "@/lib/use-revealed";
 import { getCategoryFn } from "@/server/community";
 
 /** `?sort=new` for the newest; hot by default. `?page=` is the next page's cursor. */
@@ -39,21 +40,27 @@ export const Route = createFileRoute("/forum/$category")({
   loaderDeps: ({ search }) => ({
     sort: search.sort ?? "hot",
     page: search.page,
-    show: shownIds(search.show),
-    showAll: showsAll(search.show),
+    // The old address form of a reveal (`useRevealed`).
+    show: search.show,
   }),
-  loader: async ({ params, deps }) => {
+  loader: async ({ params, deps, location }) => {
+    const shown = revealOf(location.state, deps.show);
     const result = await getCategoryFn({
       data: {
         slug: params.category,
         sort: deps.sort,
         cursor: deps.page ?? null,
-        ...(deps.show.length > 0 ? { show: deps.show } : {}),
-        ...(deps.showAll ? { showAll: true } : {}),
+        ...(shown.ids.length > 0 ? { show: shown.ids } : {}),
+        ...(shown.all ? { showAll: true } : {}),
       },
     });
     if (!result.page) throw notFound();
-    return { ...result, page: result.page, nowMs: Date.parse(result.now) };
+    return {
+      ...result,
+      page: result.page,
+      nowMs: Date.parse(result.now),
+      showAll: shown.all,
+    };
   },
   // After the loader: a function here before `validateSearch` loses the
   // search's type.
@@ -64,24 +71,20 @@ export const Route = createFileRoute("/forum/$category")({
 
 /** A category's threads (wave 4): Hot or New, pinned first. */
 function CategoryRoute() {
-  const { page, writer, nowMs } = Route.useLoaderData();
-  const { sort, showAll } = Route.useLoaderDeps();
+  const { page, writer, nowMs, showAll } = Route.useLoaderData();
+  const { sort } = Route.useLoaderDeps();
   const navigate = Route.useNavigate();
   const { category } = page;
-  // A visitor's device choice (HLD §7.3): "all" asks for `?show=all`.
+  // A visitor's device choice (HLD §7.3): "all" reveals the page in its
+  // history entry, never in the address.
   const visitor = writer === null;
   const hasHidden = page.threads.some((row) => row.hidden);
-  const setShow = (show: string | undefined) =>
-    void navigate({
-      search: (prev) => ({ ...prev, show }),
-      replace: true,
-      resetScroll: false,
-    });
+  const { reveal, hideAll } = useRevealed(Route.useSearch().show);
   useDeviceReveal({
     visitor,
     hasHidden,
     showAll,
-    showEverything: () => setShow(SHOW_ALL),
+    showEverything: () => reveal({ all: true }),
   });
   return (
     <AppShell active="forum">
@@ -121,8 +124,8 @@ function CategoryRoute() {
         {visitor && (hasHidden || showAll) ? (
           <DeviceRevealSwitch
             on={showAll}
-            onShowAll={() => setShow(SHOW_ALL)}
-            onShowSafe={() => setShow(undefined)}
+            onShowAll={() => reveal({ all: true })}
+            onShowSafe={hideAll}
           />
         ) : null}
         {page.threads.length === 0 ? (
@@ -143,7 +146,6 @@ function CategoryRoute() {
             staticLink
             href={`/forum/${category.slug}?${new URLSearchParams({
               ...(sort === "new" ? { sort } : {}),
-              ...(showAll ? { show: SHOW_ALL } : {}),
               page: page.nextCursor,
             }).toString()}`}
           >

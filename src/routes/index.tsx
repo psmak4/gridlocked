@@ -7,29 +7,27 @@ import { Button } from "@/components/ui/button";
 import { authClient } from "@/identity/auth-client";
 import { getHome, markSessionsWatched } from "@/server/play";
 import { isRefusal } from "@/play/refusal";
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { revealOf } from "@/lib/shown-ids";
+import { useRevealed } from "@/lib/use-revealed";
 
 /**
- * `?show=<id>,<id>`: the sessions "Show it" revealed on this page. It lives
- * in the URL, so it lasts until the page is left and is never stored.
+ * `?show=` is the old address form of "Show it" (before M9): it still
+ * reveals on the load it arrives with, then moves into the history entry's
+ * state (`useRevealed`), which back and forward keep and a copied address
+ * doesn't carry.
  */
 const searchSchema = z.object({ show: z.string().max(400).optional() });
-const shownIds = (show: string | undefined) =>
-  (show ?? "")
-    .split(",")
-    .filter((id) => UUID.test(id))
-    .slice(0, 10);
 
 export const Route = createFileRoute("/")({
   validateSearch: searchSchema,
-  loaderDeps: ({ search }) => ({ show: shownIds(search.show) }),
+  loaderDeps: ({ search }) => ({ show: search.show }),
   // A logged-out home never opens the database (M5): only someone signed in
   // gets the fantasy blocks.
-  loader: async ({ context, deps }) => {
+  loader: async ({ context, deps, location }) => {
     if (!context.account) return { home: null };
+    const { ids } = revealOf(location.state, deps.show);
     const home = await getHome({
-      data: deps.show.length > 0 ? { show: deps.show } : {},
+      data: ids.length > 0 ? { show: ids } : {},
     });
     if (isRefusal(home)) throw new Error(`getHome: ${home.error}`);
     return { home };
@@ -53,21 +51,13 @@ function SignedInHome({
   username: string;
 }) {
   const router = useRouter();
-  const navigate = Route.useNavigate();
+  const { reveal } = useRevealed(Route.useSearch().show);
   return (
     <AppShell active="home">
       {home.hasGame ? (
         <HomeScreen
           home={home}
-          show={(ids) =>
-            void navigate({
-              search: (prev) => ({
-                show: [...new Set([...shownIds(prev.show), ...ids])].join(","),
-              }),
-              replace: true,
-              resetScroll: false,
-            })
-          }
+          show={(ids) => reveal({ ids })}
           markWatched={(sessionIds) =>
             markSessionsWatched({ data: { sessionIds } })
           }

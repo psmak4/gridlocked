@@ -143,14 +143,16 @@ test("hidden until the race is watched", async ({ page, request }) => {
   const showIt = page.getByRole("button", { name: "Show it" });
   await hydrated(showIt);
   await showIt.click();
-  await expect(page).toHaveURL(/[?&]show=/);
+  await expect(page).not.toHaveURL(/show=/);
   await expect(list(page).getByRole("listitem")).toHaveCount(4);
-  await page.goto(page.url().replace(/\?.*$/, ""));
-  await expect(page.getByText("Round 1 — standings are in")).toBeVisible();
+  // The address, opened fresh, is covered: the reveal stays with the page.
+  const copy = await page.context().newPage();
+  await copy.goto(page.url());
+  await expect(copy.getByText("Round 1 — standings are in")).toBeVisible();
 
   // Mark as watched: every page.
-  await watch(page);
-  await expect(list(page).getByRole("listitem")).toHaveCount(4);
-  await page.reload();
-  await expect(list(page).getByRole("listitem")).toHaveCount(4);
+  await watch(copy);
+  await expect(list(copy).getByRole("listitem")).toHaveCount(4);
+  await copy.reload();
+  await expect(list(copy).getByRole("listitem")).toHaveCount(4);
 });
