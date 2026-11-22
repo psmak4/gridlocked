@@ -13,11 +13,14 @@ import {
   gameFinalizeKey,
   gameFinalizePayload,
   gameOpenFinalKey,
+  resultsPostKey,
+  resultsPostPayload,
   scoreKey,
   scoreSessionPayload,
   scoreStepKey,
   type GameFinalizePayload,
   type GameOpenPayload,
+  type ResultsPostPayload,
   type ScoreSessionPayload,
 } from "@/jobs/kinds";
 import { postResults } from "@/community/session-threads";
@@ -445,7 +448,7 @@ async function isRunning(db: Db, runId: string): Promise<boolean> {
  */
 export function createScoreHandlers(
   options: { batchSize?: number } = {},
-): Record<"score_session" | "game_finalize", JobHandler> {
+): Record<"score_session" | "game_finalize" | "results_post", JobHandler> {
   const { batchSize } = options;
 
   const score: JobHandler = async (job, ctx) => {
@@ -532,9 +535,16 @@ export function createScoreHandlers(
         publish: async (tx) => {
           await recomputeTotals(tx, now, { gameId, fromEventId: eventId });
           await recomputeStandings(tx, now, { gameId, eventId });
-          // The session thread's results post (M7), with the totals it
-          // points to: once per session, so a re-score adds nothing.
-          await postResults(tx, now, sessionId);
+          // The session thread's results post (M7), queued with the totals
+          // it points to. Its own job, so a post that fails never holds the
+          // scores back; `postResults` writes once per session.
+          const posting: ResultsPostPayload = { sessionId };
+          await enqueue(tx, {
+            kind: "results_post",
+            dedupeKey: resultsPostKey(sessionId),
+            runAt: now,
+            payload: posting,
+          });
           await tx
             .update(gameEvents)
             .set({ status: "scored", updatedAt: now })
@@ -562,5 +572,11 @@ export function createScoreHandlers(
     });
   };
 
-  return { score_session: score, game_finalize: finalize };
+  // The results post `score_session` queued as it published.
+  const post: JobHandler = async (job, ctx) => {
+    const { sessionId } = resultsPostPayload.parse(job.payload);
+    await postResults(ctx.db as Db, ctx.clock.now(), sessionId);
+  };
+
+  return { score_session: score, game_finalize: finalize, results_post: post };
 }

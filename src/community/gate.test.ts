@@ -155,7 +155,18 @@ describe("the posting gate (checkPost)", () => {
         createdAt: ago(60),
       });
     await restrict("mute", later(60));
-    expect(await reply(tl1, "hello")).toEqual({ ok: false, error: "muted" });
+    expect(await reply(tl1, "hello")).toEqual({
+      ok: false,
+      error: "muted",
+      until: later(60).toISOString(),
+    });
+    // A second, open-ended mute means no end to name.
+    await restrict("mute", null);
+    expect(await reply(tl1, "hello")).toEqual({
+      ok: false,
+      error: "muted",
+      until: null,
+    });
 
     const other = await seedViewer(t.db, { trustLevel: 1 });
     await t.db.insert(userRestrictions).values({

@@ -5,6 +5,8 @@ import { AppShell, NoGame } from "@/components/app-shell";
 import { HomeScreen } from "@/components/play/home-screen";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/identity/auth-client";
+import { pushOff } from "@/lib/push-actions";
+import { signOutHere } from "@/lib/sign-out";
 import { getHome, markSessionsWatched } from "@/server/play";
 import { isRefusal } from "@/play/refusal";
 import { revealOf } from "@/lib/shown-ids";
@@ -77,7 +79,10 @@ function SignedInHome({
           type="button"
           variant="quiet"
           onClick={async () => {
-            await authClient.signOut();
+            await signOutHere({
+              forgetPush: pushOff,
+              signOut: () => authClient.signOut(),
+            });
             window.location.assign("/");
           }}
         >

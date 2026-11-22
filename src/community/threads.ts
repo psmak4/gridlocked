@@ -104,6 +104,7 @@ export async function createThread(
           spoilerSafeTitle: spoilers ? SPOILER_THREAD_TITLE : null,
           containsSpoilers: spoilers,
           sessionId: input.sessionId ?? null,
+          createdAt: now,
         },
         postId,
         mentioned,

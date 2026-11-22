@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import {
   lockRound,
@@ -313,6 +313,62 @@ describe("the scoring pipeline (DM 4.8)", () => {
       expect(replies).toEqual([
         { author: SYSTEM_USER_ID, body: RESULTS_POST_BODY },
       ]);
+    });
+
+    it("a results post that fails doesn't stop the scores from being saved, and is retried", async () => {
+      // Every reply the system tries to post fails until the trigger goes.
+      const block = async () => {
+        await t.db.execute(
+          sql.raw(`create or replace function gl_block_results() returns trigger
+            language plpgsql as $$ begin raise exception 'posts are down'; end $$`),
+        );
+        await t.db.execute(
+          sql.raw(`create trigger gl_block_results before insert on posts for each row
+            when (new.author_user_id = '${SYSTEM_USER_ID}' and not new.is_opening)
+            execute function gl_block_results()`),
+        );
+      };
+      const unblock = () =>
+        t.db.execute(sql.raw("drop trigger gl_block_results on posts"));
+      const replies = async () => {
+        const [thread] = await t.db
+          .select({ id: threads.id })
+          .from(threads)
+          .where(
+            and(
+              eq(threads.sessionId, await raceId()),
+              eq(threads.kind, "session"),
+            ),
+          );
+        return t.db
+          .select({ body: posts.body })
+          .from(posts)
+          .where(
+            and(eq(posts.threadId, thread!.id), eq(posts.isOpening, false)),
+          );
+      };
+      await replay({
+        actions: [
+          { at: iso(1), run: block },
+          {
+            at: iso(1.4),
+            run: async () => {
+              // The race is scored, though its post couldn't be written.
+              const [run, ...more] = await runs(await raceId());
+              expect(more).toEqual([]);
+              expect(run).toMatchObject({
+                status: "succeeded",
+                isCurrent: true,
+              });
+              expect(await statusOf(round1.id)).toBe("scored");
+              expect(await replies()).toEqual([]);
+              await unblock();
+            },
+          },
+        ],
+        until: iso(1.5),
+      });
+      expect(await replies()).toEqual([{ body: RESULTS_POST_BODY }]);
     });
 
     it("the event becomes scored, then final after the +48h check", async () => {
