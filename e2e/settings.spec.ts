@@ -229,9 +229,10 @@ test.describe("settings", () => {
 
   test("delete: the wrong username keeps the button disabled, the email link finishes, and sign-in then fails", async ({
     page,
-    request,
   }) => {
-    const account = await createAccount(request);
+    // Signed up in the browser that confirms: from another, the
+    // confirmation resets the sign-up (M9 Task 1).
+    const account = await createAccount(page.request);
     await verifyByEmail(page, account.email);
     await page.goto("/settings");
     await page.getByRole("link", { name: /^Delete my account/ }).click();
@@ -286,7 +287,7 @@ test.describe("settings", () => {
     page,
     request,
   }) => {
-    const account = await createAccount(request);
+    const account = await createAccount(page.request);
     await verifyByEmail(page, account.email);
     // As if a new version of the terms needed accepting again.
     const cleared = await request.post("/api/test/clear-acceptances", {
