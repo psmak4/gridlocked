@@ -11,14 +11,14 @@ import { moderate } from "@/community/moderate";
 import { users } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { startImpersonation } from "@/identity/impersonation";
-import { banUser, setRole, unbanUser } from "@/identity/roles";
+import { banUserAs, setRoleAs, unbanUserAs } from "@/identity/roles";
 import { clearTrustLock, setTrustLevel } from "@/identity/trust";
 import { IdentityError, type Viewer } from "@/identity/viewer";
-import { StaffError, type StaffErrorCode } from "@/staff/errors";
+import { StaffError, staffReason, type StaffErrorCode } from "@/staff/errors";
 import { staffTime } from "@/staff/time";
 import { findUsers, userDetail } from "@/staff/users";
 import { withAuth } from "./session";
-import type { StaffFnDef } from "./staff-fn";
+import { staffActor, type StaffFnDef } from "./staff-fn";
 
 const reason = z.string().max(2000);
 const userId = z.uuid();
@@ -111,12 +111,13 @@ export const SET_ROLE = {
     role: z.enum(["user", "moderator", "admin"]),
     reason,
   }),
-  handler: ({ db, now, viewer }, input) =>
+  handler: ({ db, now, viewer, requestId }, input) =>
     asStaff(() =>
-      setRole(db, now, viewer, {
+      setRoleAs(db, now, {
         targetUserId: input.userId,
         role: input.role,
         reason: input.reason,
+        actor: staffActor(viewer, requestId),
       }),
     ),
 } satisfies StaffFnDef<
@@ -132,15 +133,16 @@ export const BAN = {
     days: z.number().int().min(1).max(3650).nullable(),
     reason,
   }),
-  handler: ({ db, now, viewer }, input) =>
+  handler: ({ db, now, viewer, requestId }, input) =>
     asStaff(() =>
-      banUser(db, now, viewer, {
+      banUserAs(db, now, {
         targetUserId: input.userId,
         until:
           input.days === null
             ? null
             : new Date(now.getTime() + input.days * 86_400_000),
         reason: input.reason,
+        actor: staffActor(viewer, requestId),
       }),
     ),
 } satisfies StaffFnDef<
@@ -151,11 +153,12 @@ export const BAN = {
 export const UNBAN = {
   role: "admin",
   input: z.strictObject({ userId, reason }),
-  handler: ({ db, now, viewer }, input) =>
+  handler: ({ db, now, viewer, requestId }, input) =>
     asStaff(() =>
-      unbanUser(db, now, viewer, {
+      unbanUserAs(db, now, {
         targetUserId: input.userId,
         reason: input.reason,
+        actor: staffActor(viewer, requestId),
       }),
     ),
 } satisfies StaffFnDef<{ userId: string; reason: string }, void>;
@@ -222,6 +225,8 @@ export const RESTRICT = {
     reason,
   }),
   handler: async ({ db, now, viewer, requestId }, input) => {
+    // A blank reason is refused in the screen's words before anything else.
+    const reason = staffReason(input.reason);
     await requireActable(db, viewer, input.userId);
     const timed = input.action === "mute" || input.action === "chat_ban";
     const result = await moderate(
@@ -237,7 +242,7 @@ export const RESTRICT = {
         action: input.action,
         targetType: "user",
         targetId: input.userId,
-        reason: input.reason,
+        reason,
         ...(timed && input.hours
           ? { until: new Date(now.getTime() + input.hours * 3_600_000) }
           : {}),
@@ -265,6 +270,7 @@ export const IMPERSONATE = {
   role: "admin",
   input: z.strictObject({ userId, reason }),
   handler: async ({ viewer }, input) => {
+    staffReason(input.reason);
     const headers = getRequest().headers;
     await asStaff(() =>
       withAuth((auth, db, now) =>

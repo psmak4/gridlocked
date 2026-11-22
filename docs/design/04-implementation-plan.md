@@ -348,6 +348,32 @@ Target dates assume steady work and are yours to move. The ordering is what matt
     - restoring a removed thread always reopens it, even one that was locked; restore the status it had;
     - an action can close a queue item about a different target; check that they match;
     - a reported chat message archived before anyone acts on it can't be acted on, and its item stays open; close it when the archive runs.
+- **Plan:** [plans/M8-staff-tools.md](../plans/M8-staff-tools.md), written 2026-11-21. **Decisions 1–5 made 2026-11-21**, all as recommended:
+  - prices publish themselves when an event becomes final;
+  - usage meters come from a daily `usage-snapshot.yml` with a read-only `VERCEL_USAGE_TOKEN` you create;
+  - the rulesets editor waits;
+  - feature flags cover chat and push only;
+  - `pnpm staff` and the Staff action workflow stay as the way in when a screen is broken.
+- **Result (2026-11-22): met.**
+  - **The tasks:** all 15 tasks are merged (PRs #272–#286). #286 holds Task 15's exit tests and the three staff-layer fixes they found. The final review, a self-review, found no Critical or Important issues; its three Minors are carried to M9.
+  - **The exit:**
+    - **Every staff write is audited with a reason.** `src/staff/staff-writes.test.ts` runs each of the 24 staff writes. A blank reason is refused with `reason_required` and writes nothing. A valid call writes one audit row per change, with the reason and the request id. The two writes that only move a job earlier refuse a reason. The test also checks that every POST on the staff screens is in its list.
+    - **Every wave 5 board, by an admin and a moderator.** `e2e/fantasy/staff-exit.spec.ts` runs at desktop and phone size on the replay-mode build. The admin:
+      - moves a lock;
+      - turns push off and on;
+      - corrects a result;
+      - loses a review item to a second admin ("Someone else dealt with this first.");
+      - approves a re-score;
+      - checks each step in the audit log.
+
+      Every staff screen then passes axe. The moderator removes a reported post and can't reach the calendar.
+    - **The key tests:** a lock never moves into the past, and two staff can't resolve the same item.
+  - **What the exit tests found**, fixed in #286:
+    - role, ban and unban audit rows had no request id;
+    - a blank reason on moderation, restrict and view-as-user answered "invalid" or a server error, not "Give a reason".
+  - **The staging deploy:** Deploy staging run 44985482695 (main at 9021c93) applied M8's migrations (53 in all, `usage_snapshots` included) and deployed the site. #286's fixes reach staging with the next deploy, which needs your OK.
+  - **The staff walk-through on staging** (22 Nov, with your OK): with your admin account, unlocked with your own code, round 23's lock (Abu Dhabi) moved from 14:00 to 13:00 UTC and back to following Qualifying, and push notifications went off and back on. Each change has its reason, and all four rows are in the audit log. Nothing else on staging changed.
+  - **Tests:** `pnpm test` runs 2,725 tests, and `pnpm e2e` runs 176 (95 `chromium`, 81 `fantasy`).
 
 ### M9 — Hardening and closed beta (beta 15 Feb – 5 Mar)
 - **Goal:** prove it on real people with replayed 2026 weekends.
@@ -400,6 +426,14 @@ Target dates assume steady work and are yours to move. The ordering is what matt
     - a thread page loads every post, and session threads are the big ones; measure it in the budget run;
     - a session added after its event's threads opened gets no thread;
     - "You're muted for now" doesn't say until when.
+- **Carried from M8:**
+  - **Usage meters:** add `VERCEL_USAGE_TOKEN` (read-only) to the staging environment; until then `usage-snapshot.yml`'s daily run fails. Then check the Vercel function CPU row against a Hobby account's real usage names, which are unverified.
+  - **A lock moved earlier on staging can be up to 6 hours late to show.** The site has no AWS keys, so moving a lock earlier doesn't bring the lock job forward, and the 6-hourly safety tick catches it. Saves are still refused from the new time, so no team counts late. Give the site the keys, or have the save queue the tick another way.
+  - **The scoring dry run runs inside the request.** A long one could hit Vercel's function time limit; measure it in the budget run.
+  - **The final review's Minors:**
+    - the poll schedule and the after-race re-checks have no upper bounds, so an admin can save a very long gap;
+    - every staff page counts open moderation items by loading the whole open queue;
+    - an admin can ban another admin (the last admin is kept), though view-as-user already refuses admins; decide whether bans should too.
 - **Approval needed:**
   - the production Neon project;
   - the production Vercel project and domain;
