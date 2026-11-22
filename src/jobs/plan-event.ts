@@ -1,5 +1,5 @@
 import { and, asc, eq, ne } from "drizzle-orm";
-import { events, sessions } from "@/db/schema";
+import { events, jobs, sessions, threads } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { getSetting } from "@/settings";
 import { mondayOf } from "@/community/session-threads";
@@ -33,7 +33,8 @@ const ROSTER_DELAY_MS = 30 * MINUTE_MS;
  *   `finalizer_checks` setting (the last one finalizes the event);
  * - `roster:<event>:fp2|fp3` 30 minutes after that practice session ends;
  * - `open_threads:<event>` at 00:00 UTC on the Monday of the first session's
- *   week: the forum's session threads (M7).
+ *   week: the forum's session threads (M7). Once that job has run, each
+ *   session with no thread yet gets `open_threads:<event>:<session>`.
  *
  * A cancelled event, and a cancelled session, get nothing. A job that is
  * running or has finished is left alone by `enqueue`, and a job planned
@@ -73,12 +74,44 @@ export async function planEventJobs(db: Db, eventId: string): Promise<void> {
     const first = planned[0];
     if (first) {
       const payload: OpenThreadsPayload = { eventId };
+      const runAt = mondayOf(first.scheduledStart);
       await enqueue(tx, {
         kind: "open_threads",
         dedupeKey: openThreadsKey(eventId),
-        runAt: mondayOf(first.scheduledStart),
+        runAt,
         payload,
       });
+      // Once the event's threads have opened, `enqueue` leaves that job
+      // alone, so a session added since gets a job of its own (M9 Task 3).
+      // It opens every thread still missing, at once if the Monday passed.
+      const [opened] = await tx
+        .select({ status: jobs.status })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.kind, "open_threads"),
+            eq(jobs.dedupeKey, openThreadsKey(eventId)),
+          ),
+        );
+      // A pending or failed one will still run, and opens them all then.
+      if (opened && opened.status !== "pending" && opened.status !== "failed") {
+        const withThread = await tx
+          .select({ sessionId: threads.sessionId })
+          .from(threads)
+          .where(
+            and(eq(threads.eventId, eventId), eq(threads.kind, "session")),
+          );
+        const has = new Set(withThread.map((r) => r.sessionId));
+        for (const session of planned) {
+          if (has.has(session.id)) continue;
+          await enqueue(tx, {
+            kind: "open_threads",
+            dedupeKey: openThreadsKey(eventId, session.id),
+            runAt,
+            payload,
+          });
+        }
+      }
     }
 
     // The first practice session of each kind (a format never has two).

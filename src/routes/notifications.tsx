@@ -3,6 +3,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
 import { NotificationsScreen } from "@/components/notifications-screen";
 import { PushSheet } from "@/components/push-sheet";
+import { openNotification } from "@/lib/open-notification";
 import { loadPush, pushOff, pushOn } from "@/lib/push-actions";
 import { useHydrated } from "@/lib/use-hydrated";
 import { privateHeaders } from "@/lib/private-headers";
@@ -31,10 +32,12 @@ function NotificationsRoute() {
           await markReadFn({ data: { all: true } });
           await router.invalidate();
         }}
-        open={async (item) => {
-          if (item.unread) await markReadFn({ data: { ids: [item.id] } });
-          window.location.assign(item.href);
-        }}
+        open={(item) =>
+          openNotification(item, {
+            markRead: (id) => markReadFn({ data: { ids: [id] } }),
+            go: (href) => window.location.assign(href),
+          })
+        }
         onPush={hydrated ? () => setPushOpen(true) : undefined}
       />
       <PushSheet

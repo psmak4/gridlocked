@@ -52,3 +52,17 @@ describe("forum words", () => {
     );
   });
 });
+
+describe("the mute's words", () => {
+  it('"You\'re muted until <time>" names the end, and "until lifted" when there\'s none', () => {
+    expect(
+      refusalWords(
+        { ok: false, error: "muted", until: "2026-06-08T19:00:00.000Z" },
+        "Europe/London",
+      ),
+    ).toBe("You're muted until 8 Jun, 20:00, so you can't post.");
+    expect(refusalWords({ ok: false, error: "muted", until: null })).toBe(
+      "You're muted until it's lifted, so you can't post.",
+    );
+  });
+});

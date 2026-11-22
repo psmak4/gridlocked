@@ -4,6 +4,7 @@
  * anything tied to a session the reader hasn't revealed reads in its
  * spoiler-safe form. A push payload is always the safe form (Task 14).
  */
+import { dayTimeLabel } from "@/lib/settings-words";
 import type { BroadcastKind, NotificationKind } from "./kinds";
 
 export type AnyNotificationKind = NotificationKind | BroadcastKind;
@@ -14,6 +15,11 @@ export type NotificationData = {
   actor?: string | null;
   title?: string;
   safeTitle?: string | null;
+  /**
+   * A spoiler thread with no session: when it started (ISO 8601). Its title
+   * is hidden through the watch window that follows.
+   */
+  spoilerSince?: string;
   driver?: string;
   status?: string;
   event?: string;
@@ -44,12 +50,6 @@ const LABELS: Record<AnyNotificationKind, string> = {
   announcement: "NEWS",
 };
 
-const dateWords = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
-});
-
 const signed = (n: number) =>
   n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0";
 
@@ -59,7 +59,8 @@ const leaderVerb = (sessionKind: string | undefined) =>
     ? "took pole"
     : "won";
 
-function moderationText(d: NotificationData): string {
+function moderationText(d: NotificationData, timeZone: string): string {
+  const until = (iso: string) => dayTimeLabel(new Date(iso), timeZone);
   switch (d.action) {
     case "remove":
       return "A moderator removed one of your posts. Tap to see why.";
@@ -69,11 +70,11 @@ function moderationText(d: NotificationData): string {
       return "A moderator sent you a warning. Tap to see why.";
     case "mute":
       return d.until
-        ? `A moderator muted you until ${dateWords.format(Date.parse(d.until))}. Tap to see why.`
+        ? `A moderator muted you until ${until(d.until)}. Tap to see why.`
         : "A moderator muted you. Tap to see why.";
     case "chat_ban":
       return d.until
-        ? `You can't use live chat until ${dateWords.format(Date.parse(d.until))}. Tap to see why.`
+        ? `You can't use live chat until ${until(d.until)}. Tap to see why.`
         : "You can't use live chat for now. Tap to see why.";
     case "unmute":
       return "You can post again.";
@@ -86,12 +87,14 @@ function moderationText(d: NotificationData): string {
 
 /**
  * The label and text for one notification. `revealed` is false while the
- * notification's session is hidden from the reader.
+ * notification's session is hidden from the reader. Times read in the
+ * reader's `timeZone`.
  */
 export function notificationText(
   kind: AnyNotificationKind,
   d: NotificationData,
   revealed: boolean,
+  timeZone = "UTC",
 ): NotificationLine {
   const label = LABELS[kind];
   const title = !revealed && d.safeTitle ? d.safeTitle : (d.title ?? "");
@@ -135,7 +138,7 @@ export function notificationText(
           : `Your ${d.event} score was corrected.`,
       };
     case "moderation":
-      return { label, text: moderationText(d) };
+      return { label, text: moderationText(d, timeZone) };
     case "scores_in": {
       const session = d.session ?? "Session";
       if (!revealed) {

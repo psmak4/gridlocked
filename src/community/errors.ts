@@ -29,6 +29,8 @@ export type CommunityRefusal = {
   error: CommunityErrorCode;
   /** For `rate_limited` and `slow_mode`: when trying again can work. */
   retryAfterSeconds?: number;
+  /** For `muted`: when the mute ends (ISO 8601), or null if it has no end. */
+  until?: string | null;
 };
 
 export const refuse = (

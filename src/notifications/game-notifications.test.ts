@@ -9,7 +9,14 @@ import { createTeam } from "@/game/teams";
 import type { Viewer } from "@/identity/viewer";
 import { lockReminderKey } from "@/jobs/kinds";
 import { createLeague, joinLeague } from "@/leagues/leagues";
-import { remindLock } from "./lock-reminder";
+import { enqueue } from "@/jobs/queue";
+import { runDue } from "@/jobs/runner";
+import { simulatedClock } from "@/lib/clock";
+import {
+  createLockReminderHandler,
+  LOCK_REMINDER_BATCH,
+  remindLock,
+} from "./lock-reminder";
 import { inbox } from "./read";
 
 // The game's notifications: a team joining your league, and the lock reminders.
@@ -133,6 +140,65 @@ describe("game notifications (wave 4)", () => {
     expect(await rows(owner.userId)).toHaveLength(1);
     const [hour] = await inbox(t.db, before(1), owner);
     expect(hour!.text).toBe(`${event!.name} locks in 1 hour. Check your team.`);
+  });
+
+  it("the lock reminder writes owners in batches of 500, one transaction each, and a second run writes none twice", async () => {
+    for (const n of [1, 2, 3]) {
+      const fan = await seedViewer(t.db, { username: `fan${n}` });
+      await createTeam(t.db, NOW, {
+        gameId,
+        userId: fan.userId,
+        name: `Fan Racing ${n}`,
+      });
+    }
+    const [event] = await t.db
+      .select({ lockAt: events.lockAt })
+      .from(events)
+      .where(eq(events.id, firstEventId));
+    const at = new Date(event!.lockAt.getTime() - 24 * HOUR);
+    const key = lockReminderKey(gameId, firstEventId, 24);
+    const remind = (dedupeKey: string) =>
+      enqueue(t.db, {
+        kind: "lock_reminder",
+        dedupeKey,
+        runAt: at,
+        payload: { gameId, eventId: firstEventId, hours: 24 },
+      });
+    const run = () =>
+      runDue(
+        t.db,
+        simulatedClock(at),
+        { lock_reminder: createLockReminderHandler({ batch: 2 }) },
+        { maxJobs: 20, leaseMs: 60_000 },
+      );
+
+    await remind(key);
+    await run();
+    // Five owners, two at a time: three jobs, each its own transaction.
+    const chain = await t.db
+      .select({ key: jobs.dedupeKey, status: jobs.status })
+      .from(jobs)
+      .where(eq(jobs.kind, "lock_reminder"));
+    expect(chain.map((j) => j.status)).toEqual([
+      "succeeded",
+      "succeeded",
+      "succeeded",
+    ]);
+    expect(chain.filter((j) => j.key.startsWith(`${key}:after:`))).toHaveLength(
+      2,
+    );
+    const all = () =>
+      t.db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.kind, "lock_reminder"));
+    expect((await all()).map((r) => r.count)).toEqual([1, 1, 1, 1, 1]);
+
+    // The same reminder again (a sweep, a retry) writes nobody twice.
+    await remind(`${key}:again`);
+    await run();
+    expect((await all()).map((r) => r.count)).toEqual([1, 1, 1, 1, 1]);
+    expect(LOCK_REMINDER_BATCH).toBe(500);
   });
 
   it("no reminder once the lock has passed", async () => {

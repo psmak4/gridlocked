@@ -88,6 +88,7 @@ export async function reply(
         authorUserId: threads.authorUserId,
         sessionId: threads.sessionId,
         containsSpoilers: threads.containsSpoilers,
+        createdAt: threads.createdAt,
       });
     if (!thread) return refuse("thread_locked");
     await t.insert(posts).values({
