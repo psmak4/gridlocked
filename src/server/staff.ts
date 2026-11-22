@@ -10,59 +10,29 @@ import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { AUDIT_GROUPS, type AuditGroup } from "@/audit/actions";
 import { auditActors, auditPage } from "@/audit/read";
-import { enqueueCalendarSync } from "@/jobs/sync-calendar";
-import type { TickDb } from "@/jobs/tick";
 import { staffArea, type StaffArea } from "@/staff/area";
+import { calendarList, calendarSeason, eventDetail } from "@/staff/calendar";
 import {
-  calendarList,
-  calendarSeason,
-  cancelEvent,
-  eventDetail,
-  followLockSession,
-  setLockAt,
-  setSessionStatus,
-  setSessionTimes,
-  STAFF_SESSION_STATUSES,
-} from "@/staff/calendar";
-import {
-  AVAILABILITY_STATUSES,
   availabilityFor,
   nextEventId,
   seasonDrivers,
   seatEvents,
   seatTable,
-  setAvailability,
 } from "@/staff/availability";
-import { REASON_MAX, StaffError } from "@/staff/errors";
-import { correctResult, revokeOverride } from "@/staff/results";
-import { CORRECTION_FIELDS, correctionSummary } from "@/staff/result-words";
-import { changeSeats, recordSubstitution } from "@/staff/roster";
-import {
-  approveDryRun,
-  discardGameDryRun,
-  dryRunSummary,
-  rulesetVersions,
-  scoringGame,
-  startDryRun,
-} from "@/staff/scoring";
-import { moderate, type ModTargetType } from "@/community/moderate";
+import { StaffError } from "@/staff/errors";
+import { correctionSummary } from "@/staff/result-words";
+import { dryRunSummary, rulesetVersions, scoringGame } from "@/staff/scoring";
 import { modItem, modQueue } from "@/community/queue-read";
-import { nextPrices, setAdminPrice } from "@/staff/prices";
+import { nextPrices } from "@/staff/prices";
 import * as USERS from "./staff-users";
+import * as WRITES from "./staff-writes";
 import { getSetting } from "@/settings";
-import { EDITABLE_SETTINGS, setSetting } from "@/settings/write";
 import { usageMeters } from "@/staff/usage";
-import {
-  openReviewCount,
-  resolveReviewItem,
-  reviewItem,
-  reviewList,
-} from "@/staff/review";
-import { checkProviderAgain, sessionResults } from "@/staff/session-results";
+import { openReviewCount, reviewItem, reviewList } from "@/staff/review";
+import { sessionResults } from "@/staff/session-results";
 import { staffTime } from "@/staff/time";
-import { webDueStore } from "./due-store";
 import { getViewer, withRequestNow } from "./session";
-import { staffActor, staffFn, staffInput } from "./staff-fn";
+import { staffFn, staffInput } from "./staff-fn";
 
 /**
  * Who is in the staff area, for the layout's guard and the menu. Not a
@@ -122,9 +92,6 @@ export const getAuditLog = createServerFn({ method: "GET" })
 
 // --- The calendar (Task 5) ---------------------------------------------------
 
-const reasonText = z.string().max(REASON_MAX);
-const instant = z.iso.datetime().transform((s) => new Date(s));
-
 export const calendarInput = z.strictObject({
   season: z.number().int().min(1950).max(2100).optional(),
 });
@@ -179,116 +146,22 @@ export const getCalendarEvent = createServerFn({ method: "GET" })
 /** Sync now: the season's calendar sync, due at once. */
 export const syncCalendarNow = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({ season: z.number().int().min(1950).max(2100) }),
-      handler: async ({ db, now }, input) => {
-        const store = await webDueStore();
-        const { created } = await enqueueCalendarSync(
-          db as TickDb,
-          now,
-          input.season,
-          store ?? undefined,
-        );
-        return { created };
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.SYNC_CALENDAR_NOW));
 
 /** The panel's lock: follow the session, or a time set by hand. */
 export const saveLock = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.discriminatedUnion("mode", [
-        z.strictObject({
-          mode: z.literal("follow"),
-          eventId: z.uuid(),
-          reason: reasonText,
-        }),
-        z.strictObject({
-          mode: z.literal("hand"),
-          eventId: z.uuid(),
-          lockAt: instant,
-          reason: reasonText,
-        }),
-      ]),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        const actor = staffActor(viewer, requestId);
-        const store = (await webDueStore()) ?? undefined;
-        if (input.mode === "hand") {
-          await setLockAt(db, now, actor, input, store);
-        } else {
-          await followLockSession(db, now, actor, input, store);
-        }
-        return null;
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.SAVE_LOCK));
 
 /** A session's times and status, each saved only if it changed. */
 export const saveSession = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        sessionId: z.uuid(),
-        start: instant.optional(),
-        end: instant.optional(),
-        status: z.enum(STAFF_SESSION_STATUSES).optional(),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        const actor = staffActor(viewer, requestId);
-        const store = (await webDueStore()) ?? undefined;
-        const { sessionId, reason } = input;
-        if (!input.start !== !input.end) throw new StaffError("invalid");
-        if (!input.start && !input.status) throw new StaffError("invalid");
-        if (input.start && input.end) {
-          await setSessionTimes(
-            db,
-            now,
-            actor,
-            { sessionId, start: input.start, end: input.end, reason },
-            store,
-          );
-        }
-        if (input.status) {
-          await setSessionStatus(
-            db,
-            now,
-            actor,
-            { sessionId, status: input.status, reason },
-            store,
-          );
-        }
-        return null;
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.SAVE_SESSION));
 
 /** Mark cancelled: an event called off before its lock. */
 export const cancelCalendarEvent = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({ eventId: z.uuid(), reason: reasonText }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        await cancelEvent(
-          db,
-          now,
-          staffActor(viewer, requestId),
-          input,
-          (await webDueStore()) ?? undefined,
-        );
-        return null;
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.CANCEL_CALENDAR_EVENT));
 
 // --- Drivers, seats and availability (Task 6) -------------------------------
 
@@ -326,80 +199,17 @@ export const getSeats = createServerFn({ method: "GET" })
 /** Move a driver from a date: one `changeSeats` change. */
 export const moveDriver = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        fromEventId: z.uuid(),
-        driverId: z.uuid(),
-        constructorId: z.uuid().nullable(),
-        carNumber: z.number().int().min(0).max(999).optional(),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        if (input.constructorId && input.carNumber === undefined) {
-          throw new StaffError("invalid");
-        }
-        const { eventsSynced } = await changeSeats(db, now, {
-          fromEventId: input.fromEventId,
-          changes: [
-            {
-              driverId: input.driverId,
-              constructorId: input.constructorId,
-              carNumber: input.carNumber,
-            },
-          ],
-          reason: input.reason,
-          actor: staffActor(viewer, requestId),
-        });
-        return { eventsSynced };
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.MOVE_DRIVER));
 
 /** Add a new driver: a substitution for one event (`recordSubstitution`). */
 export const addDriver = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        eventId: z.uuid(),
-        inDriverId: z.uuid(),
-        constructorId: z.uuid(),
-        carNumber: z.number().int().min(0).max(999),
-        outDriverId: z.uuid().nullable(),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        const { changed } = await recordSubstitution(db, now, {
-          ...input,
-          actor: staffActor(viewer, requestId),
-        });
-        return { changed };
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.ADD_DRIVER));
 
 /** One driver's availability for an event; the note players see is the reason. */
 export const saveAvailability = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        eventId: z.uuid(),
-        driverId: z.uuid(),
-        status: z.enum(AVAILABILITY_STATUSES),
-        note: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) =>
-        setAvailability(db, now, staffActor(viewer, requestId), {
-          ...input,
-          reason: input.note,
-        }),
-    }),
-  );
+  .handler(staffFn(WRITES.SAVE_AVAILABILITY));
 
 // --- Session results and corrections (Task 7) -------------------------------
 
@@ -450,50 +260,17 @@ export const getSessionResults = createServerFn({ method: "GET" })
 /** Add a correction: one change to one driver's row, re-scoring the session. */
 export const saveCorrection = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        sessionId: z.uuid(),
-        driverId: z.uuid(),
-        what: z.enum(CORRECTION_FIELDS),
-        value: z.string().max(40),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        await correctResult(db, now, staffActor(viewer, requestId), input);
-        return {};
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.SAVE_CORRECTION));
 
 /** Revoke a correction, so the driver goes back to the provider's row. */
 export const revokeCorrection = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({ overrideId: z.uuid(), reason: reasonText }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        await revokeOverride(db, now, staffActor(viewer, requestId), input);
-        return {};
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.REVOKE_CORRECTION));
 
 /** Check provider again: the session's next poll, due at once. */
 export const checkProvider = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({ sessionId: z.uuid() }),
-      handler: async ({ db, now }, input) => {
-        const store = await webDueStore();
-        return checkProviderAgain(db, now, input, store ?? undefined);
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.CHECK_PROVIDER));
 
 // --- Scoring: the dry run, approval and ruleset versions (Task 8) -----------
 
@@ -534,54 +311,20 @@ function withoutKey<T extends object, K extends keyof T>(
   return rest;
 }
 
-const gameReason = z.strictObject({ gameId: z.uuid(), reason: reasonText });
-
 /** Start a dry run: what re-scoring the whole game would change. */
 export const startScoringDryRun = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: gameReason,
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        const report = await startDryRun(
-          db,
-          now,
-          staffActor(viewer, requestId),
-          input,
-        );
-        return { sessions: report.sessions, teamsChanged: report.teamsChanged };
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.START_SCORING_DRY_RUN));
 
 /** Approve and re-score, naming the dry run the board showed. */
 export const approveScoring = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        gameId: z.uuid(),
-        dryRunId: z.uuid(),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) =>
-        approveDryRun(db, now, staffActor(viewer, requestId), input),
-    }),
-  );
+  .handler(staffFn(WRITES.APPROVE_SCORING));
 
 /** Discard the dry run: nothing is re-scored. */
 export const discardScoring = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: gameReason,
-      handler: async ({ db, now, viewer, requestId }, input) =>
-        discardGameDryRun(db, now, staffActor(viewer, requestId), input),
-    }),
-  );
+  .handler(staffFn(WRITES.DISCARD_SCORING));
 
 // --- Prices: the next event's list, and one price set by hand (Task 9) -------
 
@@ -603,23 +346,7 @@ export const getPrices = createServerFn({ method: "GET" })
 /** **Change one by hand**: the new price in $M, to one decimal place. */
 export const savePrice = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        gameId: z.uuid(),
-        eventId: z.uuid(),
-        assetId: z.uuid(),
-        price: z.string().regex(/^\d{1,3}(\.\d)?$/),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) =>
-        setAdminPrice(db, now, staffActor(viewer, requestId), {
-          ...input,
-          price: Math.round(Number(input.price) * 10),
-        }),
-    }),
-  );
+  .handler(staffFn(WRITES.SAVE_PRICE));
 
 // --- The review queue (Task 10) ---------------------------------------------
 
@@ -665,19 +392,7 @@ export const getReviewItem = createServerFn({ method: "GET" })
 /** Resolve an item with one of its actions, at the version the screen read. */
 export const resolveReview = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        id: z.uuid(),
-        version: z.number().int().positive(),
-        actionId: z.string().min(1).max(64),
-        reason: reasonText,
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) =>
-        resolveReviewItem(db, now, staffActor(viewer, requestId), input),
-    }),
-  );
+  .handler(staffFn(WRITES.RESOLVE_REVIEW));
 
 // --- The moderation queue (Task 11) -----------------------------------------
 
@@ -727,53 +442,7 @@ export const getModItem = createServerFn({ method: "GET" })
  */
 export const moderateItem = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "moderator",
-      input: z.strictObject({
-        id: z.uuid(),
-        version: z.number().int().min(0),
-        action: z.string().min(1).max(32),
-        reason: reasonText,
-        title: z.string().trim().min(1).max(120).optional(),
-      }),
-      handler: async ({ db, now, viewer, requestId }, input) => {
-        const item = await modItem(db, input.id);
-        if (!item) throw new StaffError("not_found");
-        const chosen = item.actions.find((a) => a.action === input.action);
-        if (!chosen) throw new StaffError("invalid");
-        if (chosen.on === "author" && !item.author.userId) {
-          throw new StaffError("invalid");
-        }
-        const result = await moderate(
-          db,
-          now,
-          {
-            userId: viewer.userId,
-            kind: viewer.role === "admin" ? "admin" : "moderator",
-            label: null,
-            requestId,
-          },
-          {
-            action: chosen.action,
-            targetType:
-              chosen.on === "author" ? "user" : (item.type as ModTargetType),
-            targetId:
-              chosen.on === "author" ? item.author.userId! : item.targetId,
-            reason: input.reason,
-            ...(chosen.hours
-              ? { until: new Date(now.getTime() + chosen.hours * 3_600_000) }
-              : {}),
-            ...(chosen.needsTitle ? { title: input.title ?? "" } : {}),
-            queueItemId: item.id,
-            version: input.version,
-          },
-        );
-        if (!result.ok) throw new StaffError(result.error);
-        return { changed: result.changed, label: chosen.label };
-      },
-    }),
-  );
+  .handler(staffFn(WRITES.MODERATE_ITEM));
 
 // --- Users (Task 12) ---------------------------------------------------------
 
@@ -789,31 +458,31 @@ export const getUser = createServerFn({ method: "GET" })
 
 export const saveUserRole = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.SET_ROLE));
+  .handler(staffFn(WRITES.STAFF_WRITES.saveUserRole));
 
 export const banAccount = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.BAN));
+  .handler(staffFn(WRITES.STAFF_WRITES.banAccount));
 
 export const unbanAccount = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.UNBAN));
+  .handler(staffFn(WRITES.STAFF_WRITES.unbanAccount));
 
 export const saveTrustLevel = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.SET_TRUST));
+  .handler(staffFn(WRITES.STAFF_WRITES.saveTrustLevel));
 
 export const releaseTrustLock = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.CLEAR_TRUST_LOCK));
+  .handler(staffFn(WRITES.STAFF_WRITES.releaseTrustLock));
 
 export const restrictUser = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.RESTRICT));
+  .handler(staffFn(WRITES.STAFF_WRITES.restrictUser));
 
 export const viewAsUser = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(staffFn(USERS.IMPERSONATE));
+  .handler(staffFn(WRITES.STAFF_WRITES.viewAsUser));
 
 // --- Settings (Task 13) ------------------------------------------------------
 
@@ -839,31 +508,4 @@ export const getStaffSettings = createServerFn({ method: "GET" })
  */
 export const saveStaffSettings = createServerFn({ method: "POST" })
   .validator(staffInput)
-  .handler(
-    staffFn({
-      role: "admin",
-      input: z.strictObject({
-        reason: reasonText,
-        values: z.strictObject({
-          feature_flags: z.unknown().optional(),
-          poll_schedule: z.unknown().optional(),
-          finalizer_checks: z.unknown().optional(),
-        }),
-      }),
-      handler: async ({ db, now, viewer, requestId }, { reason, values }) =>
-        db.transaction(async (tx) => {
-          const changed: string[] = [];
-          for (const key of EDITABLE_SETTINGS) {
-            if (values[key] === undefined) continue;
-            const done = await setSetting(
-              tx as unknown as typeof db,
-              now,
-              staffActor(viewer, requestId),
-              { key, value: values[key], reason },
-            );
-            if (done.changed) changed.push(key);
-          }
-          return { changed };
-        }),
-    }),
-  );
+  .handler(staffFn(WRITES.SAVE_STAFF_SETTINGS));

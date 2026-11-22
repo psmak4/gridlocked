@@ -118,3 +118,8 @@ export function staffFn<I, T>(def: StaffFnDef<I, T>) {
 export function staffActor(viewer: Viewer, requestId: string): StaffActor {
   return { kind: "admin", label: null, userId: viewer.userId, requestId };
 }
+
+/** A staff function's definition, typed from its input schema. */
+export function staffDef<I, T>(def: StaffFnDef<I, T>): StaffFnDef<I, T> {
+  return def;
+}
