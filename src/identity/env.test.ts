@@ -98,4 +98,15 @@ describe("parseAuthEnv", () => {
       parseAuthEnv({ ...base, SIGN_UP_ALLOWED_EMAILS: "  " }).signUpAllowlist,
     ).toBeNull();
   });
+
+  it("keeps Discord entries beside addresses (M9 Task 1)", () => {
+    expect(
+      parseAuthEnv({
+        BETTER_AUTH_SECRET: SECRET,
+        BETTER_AUTH_URL: "https://a.test",
+        TURNSTILE_SECRET_KEY: TURNSTILE,
+        SIGN_UP_ALLOWED_EMAILS: "owner@x.test, discord:123456789012345678",
+      }).signUpAllowlist,
+    ).toEqual(["owner@x.test", "discord:123456789012345678"]);
+  });
 });

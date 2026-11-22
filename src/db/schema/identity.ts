@@ -31,6 +31,8 @@ export const LEGAL_DOCUMENT_KINDS = [
   "terms",
   "privacy",
   "community_rules",
+  // The closed beta's notice (M9 decision 5); published once you approve it.
+  "beta",
 ] as const;
 export const PRIVACY_REQUEST_KINDS = ["export", "delete"] as const;
 export const PRIVACY_REQUEST_STATUSES = [

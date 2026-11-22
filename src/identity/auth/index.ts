@@ -32,7 +32,7 @@ import type { AuthEnv } from "../env";
 import type { EmailSender } from "../email/sender";
 import type { EmailTemplate } from "../email/templates";
 import { databaseHooks } from "./database-hooks";
-import { requestHooks } from "./request-hooks";
+import { requestHooks, type AddressProof } from "./request-hooks";
 import {
   ACCESS_ROLES,
   CAPTCHA_PATHS,
@@ -44,6 +44,7 @@ import {
   accessControl,
   auditUserChange,
   logAuthEvent,
+  resetHalfMadeSignUp,
   revokeUnprovenSignIns,
 } from "./shared";
 
@@ -116,6 +117,7 @@ export function createAuth(db: Db, deps: AuthDeps) {
   // Auth ran, so the after-hook can compare with the database. Keyed by the
   // request object, so it lives and dies with the request.
   const emailBefore = new WeakMap<Request, { id: string; email: string }>();
+  const proofs = new WeakMap<Request, AddressProof>();
   // An impersonated session being signed out, by token, so the after-hook
   // can audit the stop once the sign-out has worked.
   const endingImpersonations = new Map<
@@ -199,9 +201,15 @@ export function createAuth(db: Db, deps: AuthDeps) {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       expiresIn: EMAIL_LINK_SECONDS,
-      // Runs only for an unverified account, before it is marked verified and
-      // before the sign-in this link makes.
-      beforeEmailVerification: async (user) => {
+      // Runs only for an unverified account, once the link is checked,
+      // before it is marked verified and before the sign-in this link makes.
+      // From a browser not signed in to the account, the half-made sign-up
+      // goes too (M9 Task 1); the gate then sends the owner to finish it.
+      beforeEmailVerification: async (user, request) => {
+        const proof = request && proofs.get(request);
+        if (proof?.signedIn !== user.id) {
+          await resetHalfMadeSignUp(db, now(), user.id);
+        }
         await revokeUnprovenSignIns(db, now(), user.id);
       },
       sendVerificationEmail: async ({ user, url }) => {
@@ -235,6 +243,7 @@ export function createAuth(db: Db, deps: AuthDeps) {
       now,
       mail,
       emailBefore,
+      proofs,
       endingImpersonations,
       readablePaths: () => readablePaths,
     }),

@@ -10,10 +10,19 @@ import type { AuthEnv } from "../env";
 import {
   IMPERSONATION_SECONDS,
   SIGN_UP_CLOSED,
+  allowedDiscord,
   allowedToSignUp,
+  listsDiscord,
   ensureProfile,
   sessionTokenIn,
 } from "./shared";
+
+/**
+ * Sign-ups the user hook let through only because the invite list names
+ * Discord accounts, keyed by the request's context, until the account hook
+ * sees which Discord id it is.
+ */
+const awaitingDiscordId = new WeakSet<object>();
 
 /** Better Auth's `databaseHooks`: what runs around its own row writes. */
 export function databaseHooks({
@@ -63,13 +72,42 @@ export function databaseHooks({
         },
       },
     },
+    account: {
+      create: {
+        // The invite list's Discord entries (M9 decision 2): a sign-up the
+        // user hook let through on that promise joins only with a listed
+        // Discord id. Refusing here rolls back the user Better Auth made for
+        // it a moment ago, in the same transaction.
+        before: async (account, context) => {
+          if (!context || !awaitingDiscordId.has(context)) return;
+          awaitingDiscordId.delete(context);
+          if (
+            account.providerId === "discord" &&
+            allowedDiscord(env, account.accountId)
+          ) {
+            return;
+          }
+          throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
+        },
+      },
+    },
     user: {
       create: {
-        before: async (user) => {
+        before: async (user, context) => {
           const email = user.email.toLowerCase();
-          if (/\.invalid$/.test(email) || !allowedToSignUp(env, email)) {
+          if (/\.invalid$/.test(email)) {
             throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
           }
+          if (allowedToSignUp(env, email)) return;
+          // A Discord sign-up whose address isn't listed may still be
+          // invited by its Discord id: the account hook below decides, in
+          // the same transaction, once the id is known.
+          const oauth = context?.path?.startsWith("/callback/") ?? false;
+          if (context && oauth && listsDiscord(env)) {
+            awaitingDiscordId.add(context);
+            return;
+          }
+          throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
         },
         after: async (user, context) => {
           await ensureProfile(db, now(), user.id);

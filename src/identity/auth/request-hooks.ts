@@ -4,8 +4,9 @@ import {
   createAuthMiddleware,
   getSessionFromCtx,
 } from "better-auth/api";
-import { eq } from "drizzle-orm";
-import { authSessions, users } from "@/db/schema";
+import { createHash } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
+import { authSessions, authVerifications, users } from "@/db/schema";
 import { hasStaffRole } from "../roles";
 import type { Db } from "@/db/types";
 import type { AuthEnv } from "../env";
@@ -21,6 +22,7 @@ import {
   allowedToSignUp,
   auditImpersonationStop,
   auditUserChange,
+  resetHalfMadeSignUp,
   tokenClaims,
 } from "./shared";
 
@@ -31,6 +33,11 @@ export type RequestHookContext = {
   mail: Mail;
   /** For a /verify-email request: who held the token's address before Better Auth ran. */
   emailBefore: WeakMap<Request, { id: string; email: string }>;
+  /**
+   * For a request that proves an address: who the browser was signed in as
+   * (null: no one), and for a magic link, the unverified account it names.
+   */
+  proofs: WeakMap<Request, AddressProof>;
   /** An impersonated session being signed out, by token. */
   endingImpersonations: Map<
     string,
@@ -40,6 +47,8 @@ export type RequestHookContext = {
   readablePaths: () => Set<string>;
 };
 
+export type AddressProof = { signedIn: string | null; unverified?: string };
+
 /** Better Auth's `hooks`: the request middleware before and after every endpoint. */
 export function requestHooks({
   db,
@@ -47,9 +56,23 @@ export function requestHooks({
   now,
   mail,
   emailBefore,
+  proofs,
   endingImpersonations,
   readablePaths,
 }: RequestHookContext) {
+  type Ctx = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+  const signedInAs = async (ctx: Ctx): Promise<string | null> => {
+    const token = await ctx.getSignedCookie(
+      ctx.context.authCookies.sessionToken.name,
+      ctx.context.secret,
+    );
+    if (!token) return null;
+    const [row] = await db
+      .select({ userId: authSessions.userId })
+      .from(authSessions)
+      .where(eq(authSessions.token, token));
+    return row?.userId ?? null;
+  };
   return {
     // The same refusal as sign-up, so a reply says nothing about whether
     // an account exists and carries no address.
@@ -117,6 +140,33 @@ export function requestHooks({
             });
           }
         }
+      }
+      // Who proves an address, and from where: a half-made sign-up is reset
+      // when the proof comes from a browser not signed in to it. Nothing is
+      // changed here, before the proof is checked.
+      if (
+        ctx.request &&
+        (ctx.path === "/verify-email" || ctx.path === "/magic-link/verify")
+      ) {
+        const proof: AddressProof = { signedIn: await signedInAs(ctx) };
+        const token: unknown = ctx.query?.token;
+        if (ctx.path === "/magic-link/verify" && typeof token === "string") {
+          // The plugin's own lookup (storeToken "hashed").
+          const hashed = createHash("sha256").update(token).digest("base64url");
+          const [pending] = await db
+            .select({ value: authVerifications.value })
+            .from(authVerifications)
+            .where(eq(authVerifications.identifier, `magic-link:${hashed}`));
+          const email = magicLinkEmail(pending?.value);
+          const [named] = email
+            ? await db
+                .select({ id: users.id, emailVerified: users.emailVerified })
+                .from(users)
+                .where(eq(sql`lower(${users.email})`, email.toLowerCase()))
+            : [];
+          if (named && !named.emailVerified) proof.unverified = named.id;
+        }
+        proofs.set(ctx.request, proof);
       }
       if (ctx.path === "/verify-email") {
         const claims = tokenClaims(ctx.query?.token);
@@ -197,6 +247,21 @@ export function requestHooks({
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/magic-link/verify") {
+        // The plugin strips an unverified account's links, password and
+        // sessions; what the first browser agreed to goes too. Only once
+        // the link has worked: the account is verified now.
+        const proof = ctx.request && proofs.get(ctx.request);
+        if (!proof?.unverified || proof.signedIn === proof.unverified) return;
+        const [row] = await db
+          .select({ emailVerified: users.emailVerified })
+          .from(users)
+          .where(eq(users.id, proof.unverified));
+        if (row?.emailVerified) {
+          await resetHalfMadeSignUp(db, now(), proof.unverified);
+        }
+        return;
+      }
       if (ctx.path === "/sign-out") {
         // `stopImpersonating` audits its own stop; this is the other way
         // an impersonation ends early.
@@ -277,4 +342,20 @@ export function requestHooks({
       }
     }),
   };
+}
+
+/** The address a magic-link record names, if it is one. */
+function magicLinkEmail(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const record: unknown = JSON.parse(value);
+    return typeof record === "object" &&
+      record !== null &&
+      "email" in record &&
+      typeof record.email === "string"
+      ? record.email
+      : null;
+  } catch {
+    return null;
+  }
 }

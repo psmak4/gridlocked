@@ -204,7 +204,7 @@ export async function getViewer(
       complete:
         user.username !== null &&
         profile.ageConfirmedAt !== null &&
-        (await pendingDocuments(db, user.id)).length === 0,
+        (await pendingDocuments(db, now, user.id)).length === 0,
     };
     // An admin looking through the account is not the user being here: no
     // visit is recorded, so it can't raise their trust level (DM 6.5), and a

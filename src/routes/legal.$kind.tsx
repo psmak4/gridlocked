@@ -11,6 +11,7 @@ const DOCUMENTS: Record<string, string> = {
   terms: "Terms",
   privacy: "Privacy Policy",
   community_rules: "Community rules",
+  beta: "Beta notice",
 };
 
 export const Route = createFileRoute("/legal/$kind")({
