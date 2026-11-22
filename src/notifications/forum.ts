@@ -14,14 +14,22 @@ export type NotifiedThread = {
   spoilerSafeTitle: string | null;
   containsSpoilers: boolean;
   sessionId: string | null;
+  createdAt: Date;
 };
 
-/** The title values: a spoiler thread with no session always reads safe. */
+/**
+ * The title values. A spoiler thread with no session keeps when it started:
+ * its full title shows once that watch window has passed, as on the forum
+ * (M9 Task 3).
+ */
 function titleData(thread: NotifiedThread) {
   const safe = thread.containsSpoilers ? thread.spoilerSafeTitle : null;
   return {
-    title: safe && !thread.sessionId ? safe : thread.title,
+    title: thread.title,
     safeTitle: safe,
+    ...(safe && !thread.sessionId
+      ? { spoilerSince: thread.createdAt.toISOString() }
+      : {}),
   };
 }
 
@@ -81,6 +89,7 @@ export async function threadForNotify(
       spoilerSafeTitle: threads.spoilerSafeTitle,
       containsSpoilers: threads.containsSpoilers,
       sessionId: threads.sessionId,
+      createdAt: threads.createdAt,
     })
     .from(threads)
     .where(eq(threads.id, threadId));

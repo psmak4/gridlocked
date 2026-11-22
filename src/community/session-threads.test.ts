@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { SYSTEM_USER_ID } from "@/identity/system";
 import { planEventJobs } from "@/jobs/plan-event";
+import { runDue } from "@/jobs/runner";
 import { simulatedClock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
 import { syncCalendar } from "@/reference/sync-calendar";
@@ -24,6 +25,7 @@ import { sendChat } from "./chat";
 import { threadPage } from "./read";
 import {
   chatWindow,
+  createOpenThreadsHandler,
   openSessionThreads,
   postResults,
   threadMode,
@@ -114,6 +116,54 @@ describe("session threads", () => {
     expect(new Set(openings.map((p) => p.author))).toEqual(
       new Set([SYSTEM_USER_ID]),
     );
+  });
+
+  it("a session added after its event's threads opened gets its thread", async () => {
+    await t.close();
+    t = await createTestDb();
+    const four = await seedEventSessions(t.db, ...STARTS.slice(0, 4));
+    const [first] = await t.db
+      .select({ eventId: sessions.eventId })
+      .from(sessions)
+      .where(eq(sessions.id, four[0]!));
+    eventId = first!.eventId;
+    const run = (at: Date) =>
+      runDue(
+        t.db,
+        simulatedClock(at),
+        { open_threads: createOpenThreadsHandler() },
+        { maxJobs: 10, leaseMs: 60_000 },
+      );
+    await planEventJobs(t.db, eventId);
+    await run(MONDAY);
+    expect(await sessionThreads()).toHaveLength(4);
+
+    // The race is added on the Wednesday, after the threads opened.
+    const wednesday = new Date("2026-06-03T09:00:00Z");
+    await t.db.insert(sessions).values({
+      id: newId(),
+      eventId,
+      kind: "race",
+      scheduledStart: STARTS[4]!,
+      startConfirmed: true,
+      scheduledEnd: new Date(STARTS[4]!.getTime() + 120 * MIN),
+      timeSource: "provider",
+      status: "scheduled",
+    });
+    await planEventJobs(t.db, eventId);
+    await run(wednesday);
+    const rows = await sessionThreads();
+    expect(rows.map((r) => r.title)).toEqual([
+      "Monaco GP · Practice 1",
+      "Monaco GP · Practice 2",
+      "Monaco GP · Practice 3",
+      "Monaco GP · Qualifying",
+      "Monaco GP · Race",
+    ]);
+    // Planning again with every session's thread open queues nothing more.
+    const before = (await t.db.select().from(jobs)).length;
+    await planEventJobs(t.db, eventId);
+    expect(await t.db.select().from(jobs)).toHaveLength(before);
   });
 
   it("running the job twice makes no second thread", async () => {

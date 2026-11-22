@@ -8,7 +8,8 @@ import { and, count, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { broadcasts, notifications, profiles, users } from "@/db/schema";
 import type { Db } from "@/db/types";
 import type { Viewer } from "@/identity/viewer";
-import { revealedSessions } from "@/spoilers/reveal";
+import { dayTimeLabel, zoneOrUtc } from "@/lib/settings-words";
+import { isRevealed, revealedSessions } from "@/spoilers/reveal";
 import { readerOf } from "@/play/weekend";
 import type { AnyNotificationKind, NotificationData } from "./text";
 import { notificationText } from "./text";
@@ -25,6 +26,8 @@ export type InboxItem = {
   text: string;
   href: string;
   createdAt: string;
+  /** "8 Jun, 22:02": when, in the reader's own zone. */
+  time: string;
   unread: boolean;
 };
 
@@ -134,6 +137,19 @@ export async function inbox(
   ]);
   const shown = (sessionId: string | null) =>
     sessionId === null || revealed.has(sessionId);
+  const zone = zoneOrUtc(viewer.profile.timezone);
+  const protection = viewer.profile.spoilerProtection;
+  // A spoiler thread with no session: hidden through the window after it
+  // started, as the forum hides it.
+  const personalShown = (sessionId: string | null, d: NotificationData) =>
+    sessionId !== null || !d.spoilerSince
+      ? shown(sessionId)
+      : isRevealed({
+          sessionStart: new Date(d.spoilerSince),
+          now,
+          watched: false,
+          protection,
+        });
 
   const items: InboxItem[] = [
     ...personal.map((n): InboxItem => {
@@ -142,7 +158,12 @@ export async function inbox(
         count: n.count,
         actor: n.actor,
       };
-      const line = notificationText(n.kind, data, shown(n.sessionId));
+      const line = notificationText(
+        n.kind,
+        data,
+        personalShown(n.sessionId, data),
+        zone,
+      );
       return {
         id: n.id,
         source: "personal",
@@ -150,12 +171,13 @@ export async function inbox(
         ...line,
         href: notificationHref({ ...n, data }),
         createdAt: n.createdAt.toISOString(),
+        time: dayTimeLabel(n.createdAt, zone),
         unread: n.readAt === null,
       };
     }),
     ...everyone.map((b): InboxItem => {
       const data = b.data as NotificationData;
-      const line = notificationText(b.kind, data, shown(b.sessionId));
+      const line = notificationText(b.kind, data, shown(b.sessionId), zone);
       return {
         id: b.id,
         source: "broadcast",
@@ -163,6 +185,7 @@ export async function inbox(
         ...line,
         href: notificationHref({ kind: b.kind, data }),
         createdAt: b.createdAt.toISOString(),
+        time: dayTimeLabel(b.createdAt, zone),
         unread: broadcastsReadAt === null || b.createdAt > broadcastsReadAt,
       };
     }),

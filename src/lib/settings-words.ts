@@ -64,6 +64,24 @@ export function dayLabel(date: Date, timeZone: string, now: Date): string {
   }).format(date);
 }
 
+/**
+ * "8 Jun, 20:00" in `timeZone` (an unknown zone reads as UTC; none given is
+ * the runtime's own). Built from parts, so every ICU says it the same way.
+ */
+export function dayTimeLabel(date: Date, timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: timeZone === undefined ? undefined : zoneOrUtc(timeZone),
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("day")} ${part("month")}, ${part("hour")}:${part("minute")}`;
+}
+
 /** "Mar 2026", for when someone joined. */
 export function monthLabel(date: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {

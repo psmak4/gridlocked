@@ -9,6 +9,7 @@ import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import {
   broadcasts,
   notifications,
+  profiles,
   pushSubscriptions,
   users,
 } from "@/db/schema";
@@ -16,6 +17,7 @@ import type { Db } from "@/db/types";
 import { getSetting } from "@/settings";
 import type { Viewer } from "@/identity/viewer";
 import { newId } from "@/lib/ids";
+import { zoneOrUtc } from "@/lib/settings-words";
 import {
   pushBroadcastKey,
   pushFanoutPayload,
@@ -151,12 +153,14 @@ async function personalSends(db: Db, ids: string[]): Promise<Send[]> {
       threadId: notifications.threadId,
       postId: notifications.postId,
       data: notifications.data,
+      timeZone: profiles.timezone,
       actor: sql<
         string | null
       >`coalesce(${users.displayUsername}, ${users.username})`,
     })
     .from(notifications)
     .leftJoin(users, eq(users.id, notifications.actorUserId))
+    .leftJoin(profiles, eq(profiles.userId, notifications.userId))
     .where(inArray(notifications.id, ids));
   const sends: Send[] = [];
   for (const n of rows) {
@@ -166,7 +170,13 @@ async function personalSends(db: Db, ids: string[]): Promise<Send[]> {
       count: n.count,
       actor: n.actor,
     };
-    const line = notificationText(n.kind, data, false);
+    // In the recipient's zone: a mute's end reads as their clock says it.
+    const line = notificationText(
+      n.kind,
+      data,
+      false,
+      zoneOrUtc(n.timeZone ?? "UTC"),
+    );
     const payload: PushPayload = {
       title: line.label,
       body: line.text,

@@ -86,7 +86,10 @@ const tierOf = (level: number): Tier =>
 const secondsUntil = (from: Date, to: Date) =>
   Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 1000));
 
-/** The trust level and active restriction kinds, in one query (DM 5.9). */
+/**
+ * The trust level, the active restriction kinds and when a mute ends, in one
+ * query (DM 5.9).
+ */
 async function standing(db: Db, now: Date, userId: string) {
   const [row] = await db
     .select({
@@ -94,6 +97,10 @@ async function standing(db: Db, now: Date, userId: string) {
       restrictions: sql<
         RestrictionKind[]
       >`coalesce(array_agg(distinct ${userRestrictions.kind}) filter (where ${userRestrictions.id} is not null), '{}')`,
+      // When the mute ends: null while any mute is open-ended.
+      muteUntil: sql<
+        string | null
+      >`case when bool_or(${userRestrictions.kind} = 'mute' and ${userRestrictions.until} is null) then null else max(${userRestrictions.until}) filter (where ${userRestrictions.kind} = 'mute') end`,
     })
     .from(profiles)
     .leftJoin(
@@ -138,7 +145,10 @@ export async function checkPost(
   const me = await standing(db, now, viewer.userId);
   if (!me) return refuse("forbidden");
   const restricted = new Set(me.restrictions);
-  if (restricted.has("mute")) return refuse("muted");
+  if (restricted.has("mute")) {
+    const until = me.muteUntil === null ? null : new Date(me.muteUntil);
+    return { ...refuse("muted"), until: until?.toISOString() ?? null };
+  }
   if (input.kind === "chat" && restricted.has("chat_ban")) {
     return refuse("chat_banned");
   }
