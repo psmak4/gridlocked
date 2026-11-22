@@ -28,6 +28,8 @@ import {
 } from "@/replay/game-script";
 import { SCORED_KINDS } from "@/results/validate";
 import type { ChatArchiveStore } from "@/community/archive";
+import { createEmailFlushHandler } from "@/identity/email/outbox";
+import { createPushFanoutHandler } from "@/notifications/push";
 import { createPipelineHandlers } from "../pipeline";
 import { createPipelineClients } from "../pipeline/clients";
 import { createReplayFetch, type ReplaySession } from "./fixture-fetch";
@@ -147,6 +149,10 @@ export async function startLiveReplay(
           chatArchiveStore: opts.chatArchiveStore,
         }),
         ...createGameHandlers(),
+        // As production's tick has them, with no sender: sign-up stages its
+        // email with a flush job (M9 Task 2), which leaves the row queued.
+        email_flush: createEmailFlushHandler(null),
+        push_fanout: createPushFanoutHandler(null),
       };
     },
     mode: "replay",
