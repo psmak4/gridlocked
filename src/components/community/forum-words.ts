@@ -2,6 +2,7 @@
 // share them. Refusals have no canvas copy of their own; these say what
 // happened and what to do, in the design system's voice.
 import type { CommunityErrorCode, CommunityRefusal } from "@/community/errors";
+import { dayTimeLabel } from "@/lib/settings-words";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -62,8 +63,19 @@ const WORDS: Record<CommunityErrorCode, string> = {
   captcha_failed: "The bot check didn't pass. Try it again.",
 };
 
-/** A refusal in words, with the wait when there is one. */
-export function refusalWords(refusal: CommunityRefusal): string {
+/**
+ * A refusal in words, with the wait when there is one. A mute names its end
+ * in `timeZone` (the browser's when not given: the person's own screen).
+ */
+export function refusalWords(
+  refusal: CommunityRefusal,
+  timeZone?: string,
+): string {
+  if (refusal.error === "muted" && refusal.until !== undefined) {
+    return refusal.until === null
+      ? "You're muted until it's lifted, so you can't post."
+      : `You're muted until ${dayTimeLabel(new Date(refusal.until), timeZone)}, so you can't post.`;
+  }
   const after = refusal.retryAfterSeconds;
   if (after !== undefined && refusal.error === "rate_limited") {
     return `You're posting fast. Try again in ${wait(after)}.`;

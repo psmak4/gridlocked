@@ -15,6 +15,8 @@ import {
 } from "@/components/sign-up-fields";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/identity/auth-client";
+import { pushOff } from "@/lib/push-actions";
+import { signOutHere } from "@/lib/sign-out";
 import { privateHeaders } from "@/lib/private-headers";
 import { finishSignUp } from "@/server/account";
 
@@ -130,7 +132,10 @@ function FinishSigningUp() {
             size="l"
             block
             onClick={async () => {
-              await authClient.signOut();
+              await signOutHere({
+                forgetPush: pushOff,
+                signOut: () => authClient.signOut(),
+              });
               window.location.assign("/");
             }}
           >

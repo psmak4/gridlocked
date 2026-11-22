@@ -49,6 +49,7 @@ export type PipelineHandlers = Record<
   | "roster_check"
   | "score_session"
   | "game_finalize"
+  | "results_post"
   | "game_checks"
   | "identity_daily"
   | "privacy_export"

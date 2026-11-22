@@ -7,14 +7,6 @@ import { EmptyState } from "./ui/empty-state";
 const eyebrow =
   "text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase";
 
-const timeWords = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "UTC",
-});
-
 /**
  * wave 4's Notifications board: the list, newest first, an unread dot on the
  * new ones, and "Mark all as read". Opening one marks it read on the way.
@@ -114,7 +106,7 @@ export function NotificationsScreen({
                       dateTime={item.createdAt}
                       className="text-[13px] text-ink-muted"
                     >
-                      {timeWords.format(Date.parse(item.createdAt))}
+                      {item.time}
                     </time>
                   </span>
                 </a>

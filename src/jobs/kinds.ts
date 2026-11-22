@@ -7,7 +7,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * `src/community/session-threads.ts` and `src/community/daily.ts`).
  * `game_lock` and `game_open` are the game layer's (handlers in
  * `src/game/jobs.ts`), `score_session` and `game_finalize` the scoring
- * pipeline's (handlers in `src/game/score-jobs.ts`), and `game_checks` the
+ * pipeline's (handlers in `src/game/score-jobs.ts`, with `results_post`, the
+ * session thread's results link), and `game_checks` the
  * daily checks (handler in `src/game/corrections.ts`). `email_flush` sends the
  * queued account emails (handler in `src/identity/email/outbox.ts`). `identity_daily` is the day's
  * trust, purge, prune and export-expiry steps (handler in `src/identity/daily.ts`), and
@@ -44,6 +45,7 @@ export const JOB_KINDS = [
   "community_daily",
   "lock_reminder",
   "push_fanout",
+  "results_post",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -302,7 +304,19 @@ export const privacyExportKey = (requestId: string) =>
 /** An event's session threads, opened on the Monday of its week (M7). */
 export const openThreadsPayload = z.object({ eventId: z.string().min(1) });
 export type OpenThreadsPayload = z.infer<typeof openThreadsPayload>;
-export const openThreadsKey = (eventId: string) => `open_threads:${eventId}`;
+export const openThreadsKey = (eventId: string, sessionId?: string) =>
+  sessionId === undefined
+    ? `open_threads:${eventId}`
+    : `open_threads:${eventId}:${sessionId}`;
+
+/**
+ * A session thread's results post, queued in the transaction that publishes
+ * the session's scores (M9 Task 3), so a post that fails retries alone.
+ */
+export const resultsPostPayload = z.object({ sessionId: z.string().min(1) });
+export type ResultsPostPayload = z.infer<typeof resultsPostPayload>;
+export const resultsPostKey = (sessionId: string) =>
+  `results_post:${sessionId}`;
 
 /** The hours before a lock that owners are reminded at (wave 4: LOCK). */
 export const LOCK_REMINDER_HOURS = [24, 1] as const;
@@ -313,6 +327,8 @@ export const lockReminderPayload = z.object({
   gameId: z.string().min(1),
   eventId: z.string().min(1),
   hours: z.union([z.literal(24), z.literal(1)]),
+  /** A later batch: the owners after this user id (M9 Task 3). */
+  afterUserId: z.string().min(1).optional(),
 });
 export type LockReminderPayload = z.infer<typeof lockReminderPayload>;
 

@@ -194,6 +194,56 @@ describe("notifications (DM 5.11)", () => {
     expect(await unreadCount(t.db, at(0), author)).toBe(1);
   });
 
+  it("notification times show in the viewer's zone", async () => {
+    const fan = await replier(1);
+    const mod = await seedViewer(t.db, { username: "mod", role: "moderator" });
+    const done = await moderate(t.db, at(2), staffActor(mod), {
+      action: "mute",
+      targetType: "user",
+      targetId: fan.userId,
+      reason: "Cool off",
+      until: new Date("2026-06-08T20:00:00Z"),
+    });
+    expect(done.ok).toBe(true);
+    const inSydney: Viewer = {
+      ...fan,
+      profile: { ...fan.profile, timezone: "Australia/Sydney" },
+    };
+    const [item] = await inbox(t.db, at(3), inSydney);
+    // 12:02 and 20:00 UTC are 22:02 that day and 06:00 the next in Sydney.
+    expect(item).toMatchObject({
+      text: "A moderator muted you until 9 Jun, 06:00. Tap to see why.",
+      time: "8 Jun, 22:02",
+    });
+    const [inLondon] = await inbox(t.db, at(3), {
+      ...fan,
+      profile: { ...fan.profile, timezone: "Europe/London" },
+    });
+    expect(inLondon!.time).toBe("8 Jun, 13:02");
+  });
+
+  it("a spoiler thread with no session shows its full title once its watch window has passed", async () => {
+    const started = await createThread(t.db, at(0), author, {
+      categoryId: await categoryId(t.db, "general"),
+      title: "Leclerc wins at home",
+      body: "What a race.",
+      containsSpoilers: true,
+    });
+    if (!started.ok) throw new Error(started.error);
+    const fan = await replier(1);
+    const done = await reply(t.db, at(1), fan, {
+      threadId: started.threadId,
+      body: "Finally.",
+    });
+    if (!done.ok) throw new Error(done.error);
+
+    const [during] = await inbox(t.db, at(2), author);
+    expect(during!.text).not.toContain("Leclerc");
+    const weekLater = new Date(at(0).getTime() + 7 * DAY + 60_000);
+    const [after] = await inbox(t.db, weekLater, author);
+    expect(after!.text).toBe("fan1 replied in “Leclerc wins at home”");
+  });
+
   describe("broadcasts", () => {
     let ids: string[];
     beforeEach(async () => {

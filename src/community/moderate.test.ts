@@ -287,7 +287,11 @@ describe("moderation actions (DM 5.9)", () => {
       threadId,
       body: "Still here",
     });
-    expect(during).toEqual({ ok: false, error: "muted" });
+    expect(during).toEqual({
+      ok: false,
+      error: "muted",
+      until: tomorrow.toISOString(),
+    });
     const after = await reply(
       t.db,
       new Date(tomorrow.getTime() + 60_000),
