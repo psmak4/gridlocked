@@ -104,6 +104,10 @@ export const AUDIT_ACTIONS = {
     label: "Unproven sign-in removed",
     group: "security",
   },
+  "user.sign_up.reset": {
+    label: "Half-made sign-up reset",
+    group: "security",
+  },
   "user.purge_incomplete": {
     label: "Unfinished sign-up removed",
     group: "security",

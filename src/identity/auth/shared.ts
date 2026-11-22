@@ -6,7 +6,13 @@ import { admin, username } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements } from "better-auth/plugins/admin/access";
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { authAccounts, authSessions, profiles } from "@/db/schema";
+import {
+  authAccounts,
+  authSessions,
+  legalAcceptances,
+  profiles,
+  users,
+} from "@/db/schema";
 import { writeAudit } from "@/audit/log";
 import { ROLE_PERMISSIONS } from "../roles";
 import type { Db } from "@/db/types";
@@ -146,10 +152,34 @@ export const ACCESS_ROLES = {
 /** Why a sign-up is refused. No address in it: errors reach logs. */
 export const SIGN_UP_CLOSED = "Sign-up isn't open for this address.";
 
-/** `SIGN_UP_ALLOWED_EMAILS`, when set, names every address an account may have. */
+/** An invite-list entry naming a Discord account rather than an address. */
+const DISCORD_ENTRY = "discord:";
+
+/**
+ * `SIGN_UP_ALLOWED_EMAILS`, when set, names every address an account may have
+ * (and, as `discord:<id>`, the Discord accounts that may sign up without one).
+ */
 export function allowedToSignUp(env: AuthEnv, address: string): boolean {
   const allowlist = env.signUpAllowlist;
-  return allowlist === null || allowlist.includes(address.trim().toLowerCase());
+  const wanted = address.trim().toLowerCase();
+  return (
+    allowlist === null ||
+    (!wanted.startsWith(DISCORD_ENTRY) && allowlist.includes(wanted))
+  );
+}
+
+/** Whether the invite list names this Discord account (M9 decision 2). */
+export function allowedDiscord(env: AuthEnv, discordId: string): boolean {
+  const allowlist = env.signUpAllowlist;
+  return allowlist === null || allowlist.includes(DISCORD_ENTRY + discordId);
+}
+
+/** Whether the invite list names any Discord account at all. */
+export function listsDiscord(env: AuthEnv): boolean {
+  return (
+    env.signUpAllowlist?.some((entry) => entry.startsWith(DISCORD_ENTRY)) ??
+    false
+  );
 }
 
 /**
@@ -268,6 +298,54 @@ export async function revokeUnprovenSignIns(
         count: linked.length,
         providers: linked.map((a) => a.providerId),
       },
+      reason: null,
+      requestId: null,
+    });
+  });
+}
+
+/**
+ * A sign-up whose address isn't proved yet may not be the address owner's
+ * (M5's carry-over, M9 Task 1). When the proof comes from a browser that
+ * isn't signed in to the account, everything the first browser chose goes:
+ * the password, the age and terms record, the username and name. The owner
+ * then finishes signing up as themselves (`/welcome`). The username isn't
+ * kept in the history: it was never the owner's to hold. Call it while the
+ * account is still unverified, and only once the proof has been checked.
+ */
+export async function resetHalfMadeSignUp(
+  db: Db,
+  now: Date,
+  userId: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    await t
+      .delete(authAccounts)
+      .where(
+        and(
+          eq(authAccounts.userId, userId),
+          eq(authAccounts.providerId, "credential"),
+        ),
+      );
+    await t
+      .update(profiles)
+      .set({ ageConfirmedAt: null })
+      .where(eq(profiles.userId, userId));
+    await t.delete(legalAcceptances).where(eq(legalAcceptances.userId, userId));
+    await t
+      .update(users)
+      .set({ username: null, displayUsername: null, name: "" })
+      .where(eq(users.id, userId));
+    await writeAudit(t, now, {
+      actorUserId: null,
+      actorKind: "system",
+      actorLabel: "email proof",
+      action: "user.sign_up.reset",
+      entityType: "user",
+      entityId: userId,
+      before: null,
+      after: null,
       reason: null,
       requestId: null,
     });

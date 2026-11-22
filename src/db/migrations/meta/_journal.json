@@ -372,6 +372,13 @@
       "when": 1795261357026,
       "tag": "0052_usage_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795333651862,
+      "tag": "0053_legal_beta",
+      "breakpoints": true
     }
   ]
 }

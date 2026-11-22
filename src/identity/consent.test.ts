@@ -78,7 +78,7 @@ describe("consent (DM 6.2, 6.8)", () => {
     });
 
   it("the migration seeds draft-1 of all three documents", async () => {
-    const docs = await currentDocuments(t.db);
+    const docs = await currentDocuments(t.db, TEST_NOW);
     expect(docs.map((d) => [d.kind, d.version, d.url])).toEqual([
       ["community_rules", "draft-1", "/legal/community_rules"],
       ["privacy", "draft-1", "/legal/privacy"],
@@ -99,7 +99,7 @@ describe("consent (DM 6.2, 6.8)", () => {
       "privacy",
       "terms",
     ]);
-    expect(await pendingDocuments(t.db, user.id)).toEqual([]);
+    expect(await pendingDocuments(t.db, TEST_NOW, user.id)).toEqual([]);
   });
 
   it.each([
@@ -192,7 +192,7 @@ describe("consent (DM 6.2, 6.8)", () => {
     expect((await profileOf(userId)).ageConfirmedAt).toEqual(TEST_NOW);
     expect(await acceptedKinds(userId)).toHaveLength(3);
     // Again changes nothing.
-    await completeSignUp(t.db, new Date(TEST_NOW.getTime() + DAY), {
+    await completeSignUp(t.db, new Date(TEST_NOW.getTime() - 2 * DAY), {
       userId,
       ageConfirmed: true,
       accepted: true,
@@ -256,23 +256,23 @@ describe("consent (DM 6.2, 6.8)", () => {
       const first = await viewerFor(cookie);
       expect(first!.complete).toBe(true);
 
-      await publish("2", true, new Date(TEST_NOW.getTime() + 2 * DAY));
+      await publish("2", true, new Date(TEST_NOW.getTime() - DAY));
       const after = await viewerFor(cookie);
       expect(after!.complete).toBe(false);
       expect(() => requireComplete(after)).toThrow(IdentityError);
 
       await acceptDocuments(t.db, TEST_NOW, {
         userId: first!.userId,
-        documentIds: (await pendingDocuments(t.db, first!.userId)).map(
-          (d) => d.id,
-        ),
+        documentIds: (
+          await pendingDocuments(t.db, TEST_NOW, first!.userId)
+        ).map((d) => d.id),
       });
       expect((await viewerFor(cookie))!.complete).toBe(true);
     });
 
     it("a version without it leaves the viewer complete", async () => {
       const cookie = await signedUp();
-      await publish("2", false, new Date(TEST_NOW.getTime() + 2 * DAY));
+      await publish("2", false, new Date(TEST_NOW.getTime() - DAY));
       const viewer = await viewerFor(cookie);
       expect(viewer!.complete).toBe(true);
       expect(() => requireComplete(viewer)).not.toThrow();
@@ -288,7 +288,7 @@ describe("consent (DM 6.2, 6.8)", () => {
       .select()
       .from(legalDocuments)
       .where(eq(legalDocuments.kind, "terms"));
-    await publish("2", true, new Date(TEST_NOW.getTime() + DAY));
+    await publish("2", true, new Date(TEST_NOW.getTime() - 2 * DAY));
     await expect(
       acceptDocuments(t.db, TEST_NOW, { userId, documentIds: [old!.id] }),
     ).rejects.toMatchObject({ code: "invalid_document" });
@@ -322,18 +322,18 @@ describe("consent (DM 6.2, 6.8)", () => {
         ageConfirmed: true,
         accepted: true,
       });
-      await publish("2", true, new Date(TEST_NOW.getTime() + DAY));
-      const pending = await pendingDocuments(t.db, userId);
+      await publish("2", true, new Date(TEST_NOW.getTime() - 2 * DAY));
+      const pending = await pendingDocuments(t.db, TEST_NOW, userId);
       expect(pending.map((d) => [d.kind, d.version])).toEqual([["terms", "2"]]);
 
       await acceptDocuments(t.db, TEST_NOW, {
         userId,
         documentIds: pending.map((d) => d.id),
       });
-      expect(await pendingDocuments(t.db, userId)).toEqual([]);
+      expect(await pendingDocuments(t.db, TEST_NOW, userId)).toEqual([]);
       // Later versions that need nothing don't undo that.
-      await publish("3", false, new Date(TEST_NOW.getTime() + 2 * DAY));
-      expect(await pendingDocuments(t.db, userId)).toEqual([]);
+      await publish("3", false, new Date(TEST_NOW.getTime() - DAY));
+      expect(await pendingDocuments(t.db, TEST_NOW, userId)).toEqual([]);
     });
 
     it("without it doesn't", async () => {
@@ -343,14 +343,14 @@ describe("consent (DM 6.2, 6.8)", () => {
         ageConfirmed: true,
         accepted: true,
       });
-      await publish("2", false, new Date(TEST_NOW.getTime() + DAY));
-      expect(await pendingDocuments(t.db, userId)).toEqual([]);
+      await publish("2", false, new Date(TEST_NOW.getTime() - 2 * DAY));
+      expect(await pendingDocuments(t.db, TEST_NOW, userId)).toEqual([]);
     });
 
     it("someone who never accepted is asked for the latest", async () => {
       const userId = await seedUser(t.db);
-      await publish("2", false, new Date(TEST_NOW.getTime() + DAY));
-      const pending = await pendingDocuments(t.db, userId);
+      await publish("2", false, new Date(TEST_NOW.getTime() - 2 * DAY));
+      const pending = await pendingDocuments(t.db, TEST_NOW, userId);
       expect(pending.map((d) => `${d.kind}:${d.version}`)).toEqual([
         "community_rules:draft-1",
         "privacy:draft-1",
@@ -376,7 +376,7 @@ describe("consent (DM 6.2, 6.8)", () => {
         id: newId(),
         token: `tok-${id}`,
         userId: id,
-        expiresAt: new Date(TEST_NOW.getTime() + DAY),
+        expiresAt: new Date(TEST_NOW.getTime() - 2 * DAY),
       });
       return id;
     };

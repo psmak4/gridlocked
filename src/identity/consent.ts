@@ -10,6 +10,7 @@ import {
   exists,
   isNull,
   lt,
+  lte,
   ne,
   or,
   sql,
@@ -40,12 +41,21 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Newest first: by publication, then by id so a tie is still an order. */
 const newestFirst = [desc(legalDocuments.publishedAt), desc(legalDocuments.id)];
 
-/** The latest version of each kind. */
-export async function currentDocuments(db: Db): Promise<LegalDocument[]> {
-  const all = await db
+/** Published by `now`: a version dated later isn't in force yet. */
+async function publishedDocuments(db: Db, now: Date): Promise<LegalDocument[]> {
+  return db
     .select()
     .from(legalDocuments)
+    .where(lte(legalDocuments.publishedAt, now))
     .orderBy(...newestFirst);
+}
+
+/** The latest version of each kind in force at `now`. */
+export async function currentDocuments(
+  db: Db,
+  now: Date,
+): Promise<LegalDocument[]> {
+  const all = await publishedDocuments(db, now);
   const latest = new Map<Kind, LegalDocument>();
   for (const doc of all) if (!latest.has(doc.kind)) latest.set(doc.kind, doc);
   return [...latest.values()].sort((a, b) => a.kind.localeCompare(b.kind));
@@ -59,12 +69,10 @@ export async function currentDocuments(db: Db): Promise<LegalDocument[]> {
  */
 export async function pendingDocuments(
   db: Db,
+  now: Date,
   userId: string,
 ): Promise<LegalDocument[]> {
-  const all = await db
-    .select()
-    .from(legalDocuments)
-    .orderBy(...newestFirst);
+  const all = await publishedDocuments(db, now);
   const accepted = new Set(
     (
       await db
@@ -168,7 +176,7 @@ async function completeSignUpTransaction(
       if (!profile) throw new IdentityError("unauthenticated");
     }
 
-    const documents = await currentDocuments(t);
+    const documents = await currentDocuments(t, now);
     if (documents.length > 0) {
       await t
         .insert(legalAcceptances)
@@ -194,7 +202,7 @@ export async function acceptDocuments(
   input: { userId: string; documentIds: string[] },
 ): Promise<void> {
   if (input.documentIds.length === 0) return;
-  const current = new Set((await currentDocuments(db)).map((d) => d.id));
+  const current = new Set((await currentDocuments(db, now)).map((d) => d.id));
   if (!input.documentIds.every((id) => current.has(id))) {
     throw new IdentityError("invalid_document");
   }

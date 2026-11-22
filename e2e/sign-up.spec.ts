@@ -10,6 +10,7 @@ import {
   newUsername,
   ownAddress,
   PASSWORD,
+  signInButton,
 } from "./helpers/accounts";
 
 // Runs against the VITE_LOCAL_DB=1 build, at phone size (playwright.config).
@@ -149,6 +150,61 @@ test.describe("signing up", () => {
     await page.getByRole("button", { name: "Finish" }).click();
     await expect(page).toHaveURL("/");
     await expect(page.getByText(`Signed in as ${username}`)).toBeVisible();
+  });
+
+  test("a second browser confirming the address finishes sign-up with its own username and age", async ({
+    page,
+    browser,
+  }) => {
+    // The first browser signs up with an address it may not own.
+    const email = newEmail();
+    await page.goto("/sign-up/email");
+    await hydrated(page.getByRole("button", { name: "Create account" }));
+    await fillEmailForm(page, { email, username: newUsername() });
+    await page.getByRole("checkbox", { name: "I'm 16 or older" }).check();
+    await page.getByRole("checkbox", { name: /I agree to the Terms/ }).check();
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(heading(page)).toHaveText("Check your email");
+
+    // The owner opens the link somewhere else.
+    const owner = await browser.newContext();
+    try {
+      const ownerPage = await owner.newPage();
+      await ownAddress(ownerPage);
+      const link = linkIn(
+        await emailTo(ownerPage.request, email, "Confirm your email"),
+      );
+      await ownerPage.goto(link);
+      await expect(ownerPage).toHaveURL(/\/welcome$/);
+      await expect(heading(ownerPage)).toHaveText("Finish signing up");
+      await hydrated(
+        ownerPage.getByRole("button", { name: "Finish signing up" }),
+      );
+      const username = newUsername();
+      await ownerPage.getByLabel("Username").fill(username);
+      await ownerPage
+        .getByRole("checkbox", { name: "I'm 16 or older" })
+        .check();
+      await ownerPage
+        .getByRole("checkbox", { name: /I agree to the Terms/ })
+        .check();
+      await ownerPage
+        .getByRole("button", { name: "Finish signing up" })
+        .click();
+      await expect(ownerPage).toHaveURL(/\/welcome\/favorites$/);
+    } finally {
+      await owner.close();
+    }
+
+    // The first browser's password no longer signs in.
+    await page.goto("/sign-in");
+    await hydrated(signInButton(page));
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(PASSWORD);
+    await signInButton(page).click();
+    await expect(
+      page.getByText("That email and password don't match."),
+    ).toBeVisible();
   });
 
   test("a person who skips Finish signing up can't reach home", async ({
