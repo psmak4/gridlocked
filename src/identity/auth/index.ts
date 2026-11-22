@@ -20,7 +20,7 @@ import {
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import * as schema from "@/db/schema";
 import { newId } from "@/lib/ids";
-import { queueEmail } from "../email/outbox";
+import { queueEmail, sendStagedEmail, stageEmail } from "../email/outbox";
 import {
   checkUsername,
   isValidUsernameFormat,
@@ -31,8 +31,10 @@ import type { Db } from "@/db/types";
 import type { AuthEnv } from "../env";
 import type { EmailSender } from "../email/sender";
 import type { EmailTemplate } from "../email/templates";
+import { afterAuthCommit } from "./after-commit";
 import { databaseHooks } from "./database-hooks";
 import { requestHooks, type AddressProof } from "./request-hooks";
+import { captureTransactions } from "./transactions";
 import {
   ACCESS_ROLES,
   CAPTCHA_PATHS,
@@ -42,10 +44,10 @@ import {
   MAGIC_LINK_SECONDS,
   TOTP_PERIOD_SECONDS,
   accessControl,
-  auditUserChange,
   logAuthEvent,
   resetHalfMadeSignUp,
   revokeUnprovenSignIns,
+  unprovenLinks,
 } from "./shared";
 
 export {
@@ -68,51 +70,62 @@ export type AuthDeps = {
   sender: EmailSender | null;
 };
 
-/** Queues an account email once the current transaction commits. */
+/** Queues an account email: with Better Auth's transaction, if one is open. */
 export type Mail = (
   to: string,
   template: EmailTemplate,
   url: string,
   lifetimeSeconds?: number,
-) => ReturnType<typeof queueAfterTransactionHook>;
+) => Promise<void>;
 
 export function createAuth(db: Db, deps: AuthDeps) {
   const { env, now, sender } = deps;
-  // Sign-up calls its email callback inside its transaction. The outbox
-  // needs its own, so the mail waits for the commit (on one connection, as in
-  // tests and local runs, it would wait for ever otherwise). A failure is
-  // logged by name only and doesn't fail the request: the reply must not
-  // depend on the address.
-  const mail: Mail = (
+  // Better Auth's own transaction, where it has one (sign-up, a reset).
+  const transactions = captureTransactions(db);
+  // Sign-up calls its email callback inside its transaction: the outbox row
+  // is written there, so it commits with the account (M9 Task 2), and is sent
+  // once that commits; if the send never happens, the flush sends it.
+  // Elsewhere the email is queued and sent at once. A failure is logged by
+  // name only and doesn't fail the request: the reply must not depend on
+  // the address.
+  const mail: Mail = async (
     to: string,
     template: EmailTemplate,
     url: string,
     lifetimeSeconds?: number,
-  ) =>
-    queueAfterTransactionHook(
+  ) => {
+    const at = now();
+    const email = {
+      to,
+      template,
+      payload: { url },
+      ...(lifetimeSeconds !== undefined && {
+        expiresAt: new Date(at.getTime() + lifetimeSeconds * 1000),
+      }),
+    };
+    const onError = (error: unknown) => {
+      console.error(
+        `better-auth email failed: ${error instanceof Error ? error.name : "unknown"}`,
+      );
+    };
+    const tx = transactions.current();
+    if (!tx) {
+      try {
+        await queueEmail(db, at, email, sender);
+      } catch (error) {
+        onError(error);
+      }
+      return;
+    }
+    const id = await stageEmail(tx, at, email);
+    if (!id) return;
+    await queueAfterTransactionHook(
       async () => {
-        await queueEmail(
-          db,
-          now(),
-          {
-            to,
-            template,
-            payload: { url },
-            ...(lifetimeSeconds !== undefined && {
-              expiresAt: new Date(now().getTime() + lifetimeSeconds * 1000),
-            }),
-          },
-          sender,
-        );
+        await sendStagedEmail(db, now(), id, sender);
       },
-      {
-        onError: (error) => {
-          console.error(
-            `better-auth email failed: ${error instanceof Error ? error.name : "unknown"}`,
-          );
-        },
-      },
+      { onError },
     );
+  };
   // For a /verify-email request: who held the token's address before Better
   // Auth ran, so the after-hook can compare with the database. Keyed by the
   // request object, so it lives and dies with the request.
@@ -140,7 +153,11 @@ export function createAuth(db: Db, deps: AuthDeps) {
     // One build serves every host in local mode, so the address comes from
     // the request there; otherwise it is the one configured address.
     baseURL: env.baseUrl ?? { allowedHosts: ["localhost:*"] },
-    database: drizzleAdapter(db, { provider: "pg", schema, transaction: true }),
+    database: drizzleAdapter(transactions.db, {
+      provider: "pg",
+      schema,
+      transaction: true,
+    }),
     user: {
       modelName: "users",
       // Deletion anonymizes (DM 6.7); Better Auth's is a hard delete.
@@ -189,12 +206,18 @@ export function createAuth(db: Db, deps: AuthDeps) {
       sendResetPassword: async ({ user, url }) => {
         await mail(user.email, "password_reset", url, EMAIL_LINK_SECONDS);
       },
+      // After the reset has committed, with every session already ended.
+      // `user` is as it was before the reset. The work is kept as a job, so
+      // a failure here retries instead of being lost (M9 Task 2).
       onPasswordReset: async ({ user }) => {
-        // `user` is as it was before the reset.
-        if (!user.emailVerified) {
-          await revokeUnprovenSignIns(db, now(), user.id);
-        }
-        await auditUserChange(db, now(), "user.password.update", user.id);
+        await afterAuthCommit(db, now(), {
+          event: "password_reset",
+          at: now().toISOString(),
+          userId: user.id,
+          revokeAccountIds: user.emailVerified
+            ? []
+            : await unprovenLinks(db, user.id),
+        });
       },
     },
     emailVerification: {
@@ -248,7 +271,7 @@ export function createAuth(db: Db, deps: AuthDeps) {
       readablePaths: () => readablePaths,
     }),
     disabledPaths: DISABLED_AUTH_PATHS,
-    databaseHooks: databaseHooks({ db, env, now }),
+    databaseHooks: databaseHooks({ db, env, now, transactions }),
     // `tanstackStartCookies` must stay last.
     plugins: [
       admin({

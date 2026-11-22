@@ -10,6 +10,7 @@ import { isNotFound, isRedirect } from "@tanstack/react-router";
 // Not `@/identity/viewer`: this module is in the client bundle too (the
 // compiler drops only the `.server` body), and that one imports the schema.
 import { IdentityError } from "@/identity/identity-error";
+import { errorCode } from "@/lib/error-code";
 
 /** What the browser gets for anything that isn't a refusal or a redirect. */
 export const SERVER_ERROR = "server_error";
@@ -45,7 +46,11 @@ export function scrubServerFnError(error: unknown): unknown {
     error instanceof Error && error.cause instanceof Error
       ? ` (cause: ${errorName(error.cause)})`
       : "";
-  console.error(`server function failed: ${name}${cause}`);
+  // Better Auth's refusals carry a constant code; it says what failed.
+  const code = errorCode(error);
+  console.error(
+    `server function failed: ${name}${code ? ` [${code}]` : ""}${cause}`,
+  );
   return new Error(SERVER_ERROR);
 }
 

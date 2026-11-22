@@ -1,12 +1,12 @@
 /** Better Auth's database hooks (split out of `auth.ts` in M7). */
 import type { BetterAuthOptions } from "better-auth";
-import { queueAfterTransactionHook } from "@better-auth/core/context";
 import { APIError } from "better-auth/api";
 import { eq } from "drizzle-orm";
 import { authSessions } from "@/db/schema";
-import { completeSignUp } from "../consent";
 import type { Db } from "@/db/types";
 import type { AuthEnv } from "../env";
+import { afterAuthCommit } from "./after-commit";
+import type { AuthTransactions } from "./transactions";
 import {
   IMPERSONATION_SECONDS,
   SIGN_UP_CLOSED,
@@ -29,10 +29,12 @@ export function databaseHooks({
   db,
   env,
   now,
+  transactions,
 }: {
   db: Db;
   env: AuthEnv;
   now: () => Date;
+  transactions: AuthTransactions;
 }): NonNullable<BetterAuthOptions["databaseHooks"]> {
   return {
     session: {
@@ -79,6 +81,26 @@ export function databaseHooks({
         // Discord id. Refusing here rolls back the user Better Auth made for
         // it a moment ago, in the same transaction.
         before: async (account, context) => {
+          // Only the email form carries the two boxes (checked in the user
+          // hook's request). The sign-up password is the account's last
+          // row: what the boxes record is kept as a job in the same
+          // transaction, and done once it commits (M9 Task 2).
+          if (
+            context?.path === "/sign-up/email" &&
+            account.providerId === "credential"
+          ) {
+            await afterAuthCommit(
+              db,
+              now(),
+              {
+                event: "sign_up",
+                at: now().toISOString(),
+                userId: account.userId,
+              },
+              transactions.current(),
+            );
+            return;
+          }
           if (!context || !awaitingDiscordId.has(context)) return;
           awaitingDiscordId.delete(context);
           if (
@@ -109,29 +131,16 @@ export function databaseHooks({
           }
           throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
         },
-        after: async (user, context) => {
-          await ensureProfile(db, now(), user.id);
-          // Only the email form carries the two boxes (checked in the
-          // before-hook). Recording them opens a transaction of our own, so
-          // it waits for Better Auth's to commit. If it is lost, the
-          // account stays incomplete and `Viewer.complete` catches it.
-          if (context?.path !== "/sign-up/email") return;
-          await queueAfterTransactionHook(
-            async () => {
-              await completeSignUp(db, now(), {
-                userId: user.id,
-                ageConfirmed: true,
-                accepted: true,
-              });
-            },
-            {
-              onError: (error) => {
-                console.error(
-                  `better-auth sign-up completion failed: ${error instanceof Error ? error.name : "unknown"}`,
-                );
-              },
-            },
-          );
+        // After the commit, so a failure here must not fail a sign-up that
+        // has happened: every session read makes the profile anyway.
+        after: async (user) => {
+          try {
+            await ensureProfile(db, now(), user.id);
+          } catch (error) {
+            console.error(
+              `better-auth profile failed: ${error instanceof Error ? error.name : "unknown"}`,
+            );
+          }
         },
       },
     },

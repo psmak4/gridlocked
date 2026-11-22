@@ -11,7 +11,9 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * daily checks (handler in `src/game/corrections.ts`). `email_flush` sends the
  * queued account emails (handler in `src/identity/email/outbox.ts`). `identity_daily` is the day's
  * trust, purge, prune and export-expiry steps (handler in `src/identity/daily.ts`), and
- * `privacy_export` builds one data export (handler in `src/identity/export.ts`).
+ * `privacy_export` builds one data export (handler in `src/identity/export.ts`), and
+ * `identity_after_commit` retries work that follows a Better Auth commit (handler in
+ * `src/identity/after-commit.ts`).
  * `lock_reminder` tells team owners a lock is near (handler in
  * `src/notifications/lock-reminder.ts`), and `push_fanout` sends Web Push
  * for new notifications (handler in `src/notifications/push.ts`). `normalize` and `validate`
@@ -37,6 +39,7 @@ export const JOB_KINDS = [
   "email_flush",
   "identity_daily",
   "privacy_export",
+  "identity_after_commit",
   "open_threads",
   "community_daily",
   "lock_reminder",

@@ -20,11 +20,12 @@ import {
   STAFF_SESSION_UNVERIFIED,
   UPDATE_USER_FIELDS,
   allowedToSignUp,
-  auditImpersonationStop,
-  auditUserChange,
-  resetHalfMadeSignUp,
+  impersonationStopEntry,
   tokenClaims,
+  userChangeEntry,
 } from "./shared";
+import { afterAuthCommit } from "./after-commit";
+import type { AuditEntry } from "@/audit/log";
 
 export type RequestHookContext = {
   db: Db;
@@ -61,6 +62,13 @@ export function requestHooks({
   readablePaths,
 }: RequestHookContext) {
   type Ctx = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+  /** An audit for work Better Auth has committed, kept as a job. */
+  const keepAudit = (entry: AuditEntry) =>
+    afterAuthCommit(db, now(), {
+      event: "audit",
+      at: now().toISOString(),
+      entry,
+    });
   const signedInAs = async (ctx: Ctx): Promise<string | null> => {
     const token = await ctx.getSignedCookie(
       ctx.context.authCookies.sessionToken.name,
@@ -246,6 +254,8 @@ export function requestHooks({
         throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
       }
     }),
+    // The after-hook runs once Better Auth's work has committed, so its
+    // audits are kept as jobs: a failure retries them (M9 Task 2).
     after: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/magic-link/verify") {
         // The plugin strips an unverified account's links, password and
@@ -258,7 +268,11 @@ export function requestHooks({
           .from(users)
           .where(eq(users.id, proof.unverified));
         if (row?.emailVerified) {
-          await resetHalfMadeSignUp(db, now(), proof.unverified);
+          await afterAuthCommit(db, now(), {
+            event: "sign_up_reset",
+            at: now().toISOString(),
+            userId: proof.unverified,
+          });
         }
         return;
       }
@@ -276,12 +290,14 @@ export function requestHooks({
         if (failed instanceof APIError && Number(failed.statusCode) >= 400) {
           return;
         }
-        await auditImpersonationStop(db, now(), {
-          adminUserId: ended.impersonatedBy,
-          targetUserId: ended.userId,
-          sessionId: ended.id,
-          via: "sign-out",
-        });
+        await keepAudit(
+          impersonationStopEntry({
+            adminUserId: ended.impersonatedBy,
+            targetUserId: ended.userId,
+            sessionId: ended.id,
+            via: "sign-out",
+          }),
+        );
         return;
       }
       if (ctx.path === "/verify-email") {
@@ -296,10 +312,12 @@ export function requestHooks({
           .from(users)
           .where(eq(users.id, held.id));
         if (!row || row.email === held.email) return;
-        await auditUserChange(db, now(), "user.email.update", held.id, {
-          before: { email: held.email },
-          after: { email: row.email, stage: "applied", applied: true },
-        });
+        await keepAudit(
+          userChangeEntry("user.email.update", held.id, {
+            before: { email: held.email },
+            after: { email: row.email, stage: "applied", applied: true },
+          }),
+        );
         return;
       }
       const returned = ctx.context.returned;
@@ -321,14 +339,16 @@ export function requestHooks({
           .from(users)
           .where(eq(users.id, user.id));
         const applied = row?.email === newEmail;
-        await auditUserChange(db, now(), "user.email.update", user.id, {
-          before: { email: user.email },
-          after: {
-            email: newEmail,
-            stage: applied ? "applied" : "requested",
-            applied,
-          },
-        });
+        await keepAudit(
+          userChangeEntry("user.email.update", user.id, {
+            before: { email: user.email },
+            after: {
+              email: newEmail,
+              stage: applied ? "applied" : "requested",
+              applied,
+            },
+          }),
+        );
         if (user.emailVerified) {
           const origin = new URL(ctx.context.baseURL).origin;
           await mail(
@@ -338,7 +358,7 @@ export function requestHooks({
           );
         }
       } else {
-        await auditUserChange(db, now(), "user.password.update", user.id);
+        await keepAudit(userChangeEntry("user.password.update", user.id));
       }
     }),
   };

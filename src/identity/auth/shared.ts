@@ -5,18 +5,20 @@
 import { admin, username } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements } from "better-auth/plugins/admin/access";
-import { and, eq, inArray, ne } from "drizzle-orm";
-import {
-  authAccounts,
-  authSessions,
-  legalAcceptances,
-  profiles,
-  users,
-} from "@/db/schema";
-import { writeAudit } from "@/audit/log";
+import { errorCode } from "@/lib/error-code";
 import { ROLE_PERMISSIONS } from "../roles";
-import type { Db } from "@/db/types";
 import type { AuthEnv } from "../env";
+
+export {
+  auditImpersonationStop,
+  auditUserChange,
+  ensureProfile,
+  impersonationStopEntry,
+  resetHalfMadeSignUp,
+  revokeUnprovenSignIns,
+  unprovenLinks,
+  userChangeEntry,
+} from "../account-writes";
 
 /**
  * Anyone with a confirmed address can sign in by an emailed link: the
@@ -189,167 +191,50 @@ export function listsDiscord(env: AuthEnv): boolean {
 export const UPDATE_USER_FIELDS: ReadonlySet<string> = new Set<string>();
 
 /**
- * Makes the user's `profiles` row if it is missing; safe to call again. The
- * sign-up hook calls it, and so does every session read, so a hook that was
- * lost (a crash between the two writes) repairs itself.
+ * What Better Auth logs, as value-free codes. Its messages are mostly fixed
+ * strings, but some carry a value (a URL, a provider's answer), so only the
+ * ones listed here are named; any other is `unlisted`.
  */
-export async function ensureProfile(
-  db: Db,
-  now: Date,
-  userId: string,
-): Promise<void> {
-  await db
-    .insert(profiles)
-    .values({
-      userId,
-      status: "active",
-      avatarSeed: crypto.randomUUID(),
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing();
-}
+const AUTH_LOG_EVENTS: Readonly<Record<string, string>> = {
+  "Invalid password": "invalid_password",
+  "User not found": "user_not_found",
+  "Password not found": "password_not_found",
+  "Credential account not found": "credential_not_found",
+  "Username or password not found": "username_or_password_not_found",
+  "Reset Password: User not found": "reset_user_not_found",
+  "Password is too short": "password_too_short",
+  "Password is too long": "password_too_long",
+  "Email is the same": "email_unchanged",
+  "Failed to create session": "session_not_created",
+  "Failed to get user info": "oauth_user_info_failed",
+  "OAuth callback missing authorization code": "oauth_code_missing",
+  "Invalid OAuth callback query": "oauth_query_invalid",
+  "Failed to run background task:": "background_task_failed",
+  "Failed to run an after-commit hook for work that could not roll back":
+    "after_commit_hook_failed",
+  "Better auth was unable to query your database.\nError: ":
+    "database_unreachable",
+};
 
 /**
  * Better Auth's loggers print the error object, and a database error's
  * message carries the query's parameters: an email address. This one writes
- * the level and the error's name, and drops every message and argument.
+ * the level and a code (the error's constant code, else the event's), and the
+ * error's name, and drops every message and argument.
  */
 export function logAuthEvent(
   level: string,
-  _message: string,
+  message: string,
   ...args: unknown[]
 ): void {
   const failure = args.find((arg) => arg instanceof Error);
-  const line = `better-auth ${level}: ${failure?.name ?? "event"}`;
+  const event =
+    typeof message === "string" ? AUTH_LOG_EVENTS[message.trim()] : undefined;
+  const code = errorCode(failure) ?? event ?? "unlisted";
+  const line = `better-auth ${level}: ${code}${failure ? ` (${failure.name})` : ""}`;
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.log(line);
-}
-
-/** One `audit_log` row for something a user did to their own sign-in details. */
-export function auditUserChange(
-  db: Db,
-  now: Date,
-  action: "user.email.update" | "user.password.update",
-  userId: string,
-  change: {
-    before: Record<string, unknown> | null;
-    after: Record<string, unknown> | null;
-  } = { before: null, after: null },
-): Promise<string> {
-  return writeAudit(db, now, {
-    actorUserId: userId,
-    actorKind: "user",
-    actorLabel: null,
-    action,
-    entityType: "user",
-    entityId: userId,
-    ...change,
-    reason: null,
-    requestId: null,
-  });
-}
-
-/**
- * Better Auth's magic link strips every link and session an unverified account
- * gathered before its address was proved (revokeUnprovenAccountAccess); a
- * verification link or a reset does not. Without this, someone who signed in
- * with Discord on an address they don't own (Discord allows an unverified
- * email) keeps that way in after the owner proves the address. Credentials
- * stay: a reset or sign-up password is the owner's to choose. Call it while
- * the account is still unverified.
- */
-export async function revokeUnprovenSignIns(
-  db: Db,
-  now: Date,
-  userId: string,
-): Promise<void> {
-  await db.transaction(async (tx) => {
-    const t = tx as unknown as Db;
-    const linked = await t
-      .select({ id: authAccounts.id, providerId: authAccounts.providerId })
-      .from(authAccounts)
-      .where(
-        and(
-          eq(authAccounts.userId, userId),
-          ne(authAccounts.providerId, "credential"),
-        ),
-      );
-    // Every session goes, links or not: nothing that predates the proof is
-    // known to be the owner's. The sign-in the proof makes comes after.
-    await t.delete(authSessions).where(eq(authSessions.userId, userId));
-    if (linked.length === 0) return;
-    await t.delete(authAccounts).where(
-      inArray(
-        authAccounts.id,
-        linked.map((a) => a.id),
-      ),
-    );
-    await writeAudit(t, now, {
-      actorUserId: null,
-      actorKind: "system",
-      actorLabel: "email proof",
-      action: "user.accounts.revoke_unproven",
-      entityType: "user",
-      entityId: userId,
-      before: null,
-      after: {
-        count: linked.length,
-        providers: linked.map((a) => a.providerId),
-      },
-      reason: null,
-      requestId: null,
-    });
-  });
-}
-
-/**
- * A sign-up whose address isn't proved yet may not be the address owner's
- * (M5's carry-over, M9 Task 1). When the proof comes from a browser that
- * isn't signed in to the account, everything the first browser chose goes:
- * the password, the age and terms record, the username and name. The owner
- * then finishes signing up as themselves (`/welcome`). The username isn't
- * kept in the history: it was never the owner's to hold. Call it while the
- * account is still unverified, and only once the proof has been checked.
- */
-export async function resetHalfMadeSignUp(
-  db: Db,
-  now: Date,
-  userId: string,
-): Promise<void> {
-  await db.transaction(async (tx) => {
-    const t = tx as unknown as Db;
-    await t
-      .delete(authAccounts)
-      .where(
-        and(
-          eq(authAccounts.userId, userId),
-          eq(authAccounts.providerId, "credential"),
-        ),
-      );
-    await t
-      .update(profiles)
-      .set({ ageConfirmedAt: null })
-      .where(eq(profiles.userId, userId));
-    await t.delete(legalAcceptances).where(eq(legalAcceptances.userId, userId));
-    await t
-      .update(users)
-      .set({ username: null, displayUsername: null, name: "" })
-      .where(eq(users.id, userId));
-    await writeAudit(t, now, {
-      actorUserId: null,
-      actorKind: "system",
-      actorLabel: "email proof",
-      action: "user.sign_up.reset",
-      entityType: "user",
-      entityId: userId,
-      before: null,
-      after: null,
-      reason: null,
-      requestId: null,
-    });
-  });
 }
 
 /**
@@ -370,32 +255,6 @@ export function tokenClaims(
   } catch {
     return null;
   }
-}
-
-/** The audit row for an impersonation that ended (DM 6.4, 6.6). */
-export function auditImpersonationStop(
-  db: Db,
-  now: Date,
-  input: {
-    adminUserId: string;
-    targetUserId: string;
-    sessionId: string;
-    via: "stop" | "sign-out";
-  },
-): Promise<string> {
-  return writeAudit(db, now, {
-    actorUserId: input.adminUserId,
-    impersonatingUserId: input.targetUserId,
-    actorKind: "admin",
-    actorLabel: null,
-    action: "user.impersonate.stop",
-    entityType: "user",
-    entityId: input.targetUserId,
-    before: null,
-    after: { sessionId: input.sessionId, via: input.via },
-    reason: null,
-    requestId: null,
-  });
 }
 
 /** Better Auth stores imported secrets base32 behind this prefix. */
