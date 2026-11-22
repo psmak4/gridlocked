@@ -50,6 +50,14 @@ I read M9's scope and its four carry-over lists, the HLD sections above, and the
 11. **Staging has a variable named `VERCEL_TOKEN`** as well as a secret of that name (names only, checked 2026-11-22). Variables print in plain text. Unless that value is already revoked, rotate it and delete the variable. Nothing in the repository reads a `VERCEL_TOKEN` variable.
 
 ## Decisions (yours)
+**Answered 2026-11-22: every decision went the recommended way.**
+1. The beta runs on a `beta` branch of the staging Neon project, in replay mode, after the 2026 season.
+2. Testers sign in with Discord only, from an invite list.
+3. Sentry, free, through a pinned `@sentry/tanstackstart-react`.
+4. Nightly `pg_dump`s, encrypted with `age`, kept in Neon Object Storage.
+5. A beta notice that I draft and you approve.
+6. Production is created in Task 15.
+
 These change what gets built. Each has my recommendation first.
 
 1. **Where the closed beta runs.**
