@@ -46,6 +46,7 @@ import { Route as StaffPricesRouteImport } from './routes/staff.prices'
 import { Route as StaffReviewRouteImport } from './routes/staff.review'
 import { Route as StaffScoringRouteImport } from './routes/staff.scoring'
 import { Route as StaffSeatsRouteImport } from './routes/staff.seats'
+import { Route as StaffSettingsRouteImport } from './routes/staff.settings'
 import { Route as StaffUsersRouteImport } from './routes/staff.users'
 import { Route as TThreadIdRouteImport } from './routes/t.$threadId'
 import { Route as TeamIndexRouteImport } from './routes/team.index'
@@ -259,6 +260,11 @@ const StaffSeatsRoute = StaffSeatsRouteImport.update({
   path: '/seats',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffSettingsRoute = StaffSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => StaffRoute,
+} as any)
 const StaffUsersRoute = StaffUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -427,6 +433,7 @@ export interface FileRoutesByFullPath {
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
+  '/staff/settings': typeof StaffSettingsRoute
   '/staff/users': typeof StaffUsersRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
@@ -492,6 +499,7 @@ export interface FileRoutesByTo {
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
+  '/staff/settings': typeof StaffSettingsRoute
   '/staff/users': typeof StaffUsersRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
@@ -559,6 +567,7 @@ export interface FileRoutesById {
   '/staff/review': typeof StaffReviewRouteWithChildren
   '/staff/scoring': typeof StaffScoringRoute
   '/staff/seats': typeof StaffSeatsRoute
+  '/staff/settings': typeof StaffSettingsRoute
   '/staff/users': typeof StaffUsersRouteWithChildren
   '/t/$threadId': typeof TThreadIdRoute
   '/welcome/favorites': typeof WelcomeFavoritesRoute
@@ -627,6 +636,7 @@ export interface FileRouteTypes {
     | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
+    | '/staff/settings'
     | '/staff/users'
     | '/t/$threadId'
     | '/welcome/favorites'
@@ -692,6 +702,7 @@ export interface FileRouteTypes {
     | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
+    | '/staff/settings'
     | '/staff/users'
     | '/t/$threadId'
     | '/welcome/favorites'
@@ -758,6 +769,7 @@ export interface FileRouteTypes {
     | '/staff/review'
     | '/staff/scoring'
     | '/staff/seats'
+    | '/staff/settings'
     | '/staff/users'
     | '/t/$threadId'
     | '/welcome/favorites'
@@ -1107,6 +1119,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffSeatsRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/settings': {
+      id: '/staff/settings'
+      path: '/settings'
+      fullPath: '/staff/settings'
+      preLoaderRoute: typeof StaffSettingsRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/staff/users': {
       id: '/staff/users'
       path: '/users'
@@ -1355,6 +1374,7 @@ interface StaffRouteChildren {
   StaffReviewRoute: typeof StaffReviewRouteWithChildren
   StaffScoringRoute: typeof StaffScoringRoute
   StaffSeatsRoute: typeof StaffSeatsRoute
+  StaffSettingsRoute: typeof StaffSettingsRoute
   StaffUsersRoute: typeof StaffUsersRouteWithChildren
   StaffIndexRoute: typeof StaffIndexRoute
   StaffResultsSessionIdRoute: typeof StaffResultsSessionIdRoute
@@ -1368,6 +1388,7 @@ const StaffRouteChildren: StaffRouteChildren = {
   StaffReviewRoute: StaffReviewRouteWithChildren,
   StaffScoringRoute: StaffScoringRoute,
   StaffSeatsRoute: StaffSeatsRoute,
+  StaffSettingsRoute: StaffSettingsRoute,
   StaffUsersRoute: StaffUsersRouteWithChildren,
   StaffIndexRoute: StaffIndexRoute,
   StaffResultsSessionIdRoute: StaffResultsSessionIdRoute,

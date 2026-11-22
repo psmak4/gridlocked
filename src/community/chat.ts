@@ -133,13 +133,14 @@ export async function chatState(db: Db, threadId: string) {
 
 type ChatState = NonNullable<Awaited<ReturnType<typeof chatState>>>;
 
-const modeOf = (now: Date, s: ChatState) =>
+const modeOf = (now: Date, s: ChatState, chatOn: boolean) =>
   threadMode(
     now,
     s.sessionStatus
       ? { status: s.sessionStatus, awaitingResults: s.awaitingResults }
       : null,
     s,
+    chatOn,
   );
 
 /**
@@ -158,7 +159,8 @@ export async function sendChat(
   if (body.length === 0) return refuse("too_long");
   const state = await chatState(db, input.threadId);
   if (!state || state.status === "removed") return refuse("not_found");
-  if (modeOf(now, state) !== "chat") return refuse("chat_closed");
+  const chatOn = (await getSetting(db, "feature_flags")).chat;
+  if (modeOf(now, state, chatOn) !== "chat") return refuse("chat_closed");
 
   const gate = await checkPost(db, now, v, {
     kind: "chat",
@@ -178,7 +180,7 @@ export async function sendChat(
     );
     const fresh = await chatState(t, input.threadId);
     if (!fresh || fresh.status !== "open") return refuse("thread_locked");
-    if (modeOf(now, fresh) !== "chat") return refuse("chat_closed");
+    if (modeOf(now, fresh, chatOn) !== "chat") return refuse("chat_closed");
     if (slow > 0) {
       const [last] = await t
         .select({ createdAt: chatMessages.createdAt })

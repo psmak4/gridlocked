@@ -3,7 +3,13 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
 import { seedViewer } from "../../tests/helpers/community";
 import { seedEventSessions } from "../../tests/helpers/sessions";
-import { jobs, notificationPreferences, pushSubscriptions } from "@/db/schema";
+import {
+  jobs,
+  notificationPreferences,
+  notifications,
+  pushSubscriptions,
+  settings,
+} from "@/db/schema";
 import type { Viewer } from "@/identity/viewer";
 import { newId } from "@/lib/ids";
 import {
@@ -137,6 +143,24 @@ describe("Web Push (DM 5.11)", () => {
     expect(done).toMatchObject({ sent: 0, skipped: 2 });
     expect(lines).toEqual(["push: no VAPID keys, 2 sends skipped"]);
     expect(await subs()).toHaveLength(2);
+  });
+
+  it("with push off, push_fanout sends nothing and in-app notifications are still written", async () => {
+    await device(1);
+    await t.db
+      .insert(settings)
+      .values({ key: "feature_flags", value: { chat: true, push: false } });
+    const id = await warned();
+    expect(id).toBeTruthy();
+    expect(
+      await t.db.select().from(notifications).where(eq(notifications.id, id!)),
+    ).toHaveLength(1);
+    const { sender, sent } = fakeSender();
+    const done = await fanOut(t.db, sender, NOW, { notificationIds: [id!] });
+    expect(sent).toHaveLength(0);
+    expect(done).toMatchObject({ sent: 0 });
+    // The device stays: push is only paused.
+    expect(await subs()).toHaveLength(1);
   });
 
   it("a kind turned off for push sends nothing", async () => {

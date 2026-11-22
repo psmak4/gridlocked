@@ -557,6 +557,16 @@ These sit in a small `settings` table (key, Zod-validated value, `updated_by`, `
 - **Finalizer checks:** +2 h, +6 h, +24 h and +48 h after the race (HLD §4.4).
 - **Provider rate limits,** set below each provider's published limits (HLD §4.1).
 - **Validator thresholds,** such as expected cars per constructor.
+- **Feature flags (M8):** `feature_flags = { chat, push }`, both on by default.
+  - Chat off: every session thread is in discussion mode, nobody can send, and the chat refresh answers 404.
+  - Push off: the fan-out sends nothing and queues no further pages. In-app notifications are still written, and devices stay subscribed.
+  - Notification emails and ads aren't flags. The settings screen shows them locked off, with the reason (HLD §10, §16).
+
+**Staff edits (M8).** The settings screen edits three keys only: `feature_flags`, `poll_schedule` and `finalizer_checks`.
+- Every edit takes a reason and is checked by the key's schema. The poll schedule must have at least one gap, and every number must be a whole number over 0.
+- An edit writes the audit row `setting.update`, with only the fields that changed, before and after. Flags are recorded as On and Off.
+- The same value again writes nothing.
+- The audit row's `entity_id` is a fixed id made from the key, because `settings.key` isn't a uuid.
 
 ### 2.12 Indexes beyond keys
 - `jobs (run_at) WHERE status = 'pending'`: the claim query and the due-times file.

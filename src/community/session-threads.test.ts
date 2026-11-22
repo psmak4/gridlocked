@@ -9,6 +9,7 @@ import {
   jobs,
   posts,
   sessions,
+  settings,
   threads,
 } from "@/db/schema";
 import { SYSTEM_USER_ID } from "@/identity/system";
@@ -16,6 +17,10 @@ import { planEventJobs } from "@/jobs/plan-event";
 import { simulatedClock } from "@/lib/clock";
 import { newId } from "@/lib/ids";
 import { syncCalendar } from "@/reference/sync-calendar";
+import { chatRefreshResponse } from "@/server/chat-refresh";
+import type { ServerDb } from "@/server/db";
+import { seedViewer } from "../../tests/helpers/community";
+import { sendChat } from "./chat";
 import { threadPage } from "./read";
 import {
   chatWindow,
@@ -190,6 +195,39 @@ describe("session threads", () => {
     expect(
       await t.db.select().from(posts).where(eq(posts.threadId, race!.id)),
     ).toHaveLength(1);
+  });
+
+  it("with chat off, a session thread in its window is in discussion mode and the refresh answers 404", async () => {
+    await openSessionThreads(t.db, MONDAY, eventId);
+    const [race] = await t.db
+      .select()
+      .from(threads)
+      .where(eq(threads.sessionId, ids[4]!));
+    const live = new Date(STARTS[4]!.getTime() + 10 * MIN);
+    // Chat on: the window is open.
+    expect(
+      (await threadPage(t.db, live, null, { threadId: race!.id }))?.mode,
+    ).toBe("chat");
+
+    await t.db
+      .insert(settings)
+      .values({ key: "feature_flags", value: { chat: false, push: true } });
+    expect(
+      (await threadPage(t.db, live, null, { threadId: race!.id }))?.mode,
+    ).toBe("discussion");
+    const fan = await seedViewer(t.db, { trustLevel: 2, username: "fan" });
+    expect(
+      await sendChat(t.db, live, fan, { threadId: race!.id, body: "Go!" }),
+    ).toMatchObject({ ok: false, error: "chat_closed" });
+    const windowStart = new Date(Math.floor(live.getTime() / 3000) * 3000);
+    const refresh = await chatRefreshResponse(
+      new Request(
+        `http://localhost/api/chat/${race!.id}?after=${windowStart.toISOString()}`,
+      ),
+      race!.id,
+      (fn) => fn(t.db as unknown as ServerDb, live),
+    );
+    expect(refresh.status).toBe(404);
   });
 
   it("a page read before chat opens says when it does", async () => {

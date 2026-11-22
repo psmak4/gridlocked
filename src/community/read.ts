@@ -30,6 +30,7 @@ import {
   type ThreadStatus,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
+import { getSetting } from "@/settings";
 import type { SessionKind } from "@/reference/calendar-types";
 import type { Viewer } from "@/identity/viewer";
 import { SESSION_LABELS, readerOf } from "@/play/weekend";
@@ -526,6 +527,7 @@ export async function threadPage(
         ? { status: t.sessionStatus, awaitingResults: t.awaitingResults }
         : null,
       t,
+      (await getSetting(db, "feature_flags")).chat,
     ),
     opensChatAt:
       t.chatOpensAt && t.chatOpensAt > now && t.sessionStatus !== "cancelled"
