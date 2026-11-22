@@ -396,4 +396,8 @@ The screens are on the canvas [Gridlocked wave 5](https://claude.ai/artifact/1jE
 - **Who sees what:** a moderator's menu has Moderation and Users only; everything else, the audit log included, is admin-only.
 - **Reasons:** every staff write takes one, required, at most 500 characters. The label says who sees it: "Reason (saved in the audit log)", or "Reason (players see this)" for corrections and availability notes.
 - **Two staff at once:** a resolve that lost the race says "Someone else dealt with this first." and shows the item as it now stands.
+- **A screen above your role** (a moderator opening the calendar, say) shows "Your role can't do this." in place of the screen. The menu doesn't link to it.
+- **A blank reason** is refused with "Give a reason" on every write, including moderation and restrictions, before anything else is checked (M8 Task 15).
+- **Role changes** are in Users' ACCOUNT group: "Change role" stays disabled until another role is picked.
+- **The exit check** (`e2e/fantasy/staff-exit.spec.ts`, 1440 and 390 wide) walks every board once as an admin and a moderator, and runs axe on each staff screen.
 
