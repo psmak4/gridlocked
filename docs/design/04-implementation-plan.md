@@ -355,7 +355,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - feature flags cover chat and push only;
   - `pnpm staff` and the Staff action workflow stay as the way in when a screen is broken.
 - **Result (2026-11-22): met.**
-  - **The tasks:** all 15 tasks are merged (PRs #272–#286). #286 holds Task 15's exit tests, three staff-layer fixes they found, and the final review's fixes.
+  - **The tasks:** all 15 tasks are merged (PRs #272–#286). #286 holds Task 15's exit tests and the three staff-layer fixes they found. The final review, a self-review, found no Critical or Important issues; its three Minors are carried to M9.
   - **The exit:**
     - **Every staff write is audited with a reason.** `src/staff/staff-writes.test.ts` runs each of the 24 staff writes. A blank reason is refused with `reason_required` and writes nothing. A valid call writes one audit row per change, with the reason and the request id. The two writes that only move a job earlier refuse a reason. The test also checks that every POST on the staff screens is in its list.
     - **Every wave 5 board, by an admin and a moderator.** `e2e/fantasy/staff-exit.spec.ts` runs at desktop and phone size on the replay-mode build. The admin:
@@ -430,6 +430,10 @@ Target dates assume steady work and are yours to move. The ordering is what matt
   - **Usage meters:** add `VERCEL_USAGE_TOKEN` (read-only) to the staging environment; until then `usage-snapshot.yml`'s daily run fails. Then check the Vercel function CPU row against a Hobby account's real usage names, which are unverified.
   - **A lock moved earlier on staging can be up to 6 hours late to show.** The site has no AWS keys, so moving a lock earlier doesn't bring the lock job forward, and the 6-hourly safety tick catches it. Saves are still refused from the new time, so no team counts late. Give the site the keys, or have the save queue the tick another way.
   - **The scoring dry run runs inside the request.** A long one could hit Vercel's function time limit; measure it in the budget run.
+  - **The final review's Minors:**
+    - the poll schedule and the after-race re-checks have no upper bounds, so an admin can save a very long gap;
+    - every staff page counts open moderation items by loading the whole open queue;
+    - an admin can ban another admin (the last admin is kept), though view-as-user already refuses admins; decide whether bans should too.
 - **Approval needed:**
   - the production Neon project;
   - the production Vercel project and domain;
