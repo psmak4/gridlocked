@@ -127,6 +127,16 @@ export const settingSchemas = {
     visitor: z.number().nonnegative(),
     threshold: z.number().positive(),
   }),
+  /**
+   * A hosted replay's clock (M9 Task 5): running, the replay's instant is
+   * real time minus `seconds`; paused, it stays at `at`, where it stopped.
+   * It never moves back (`src/replay/hosted-clock.ts`). Only a replay
+   * database (one with `simulated_clock`) reads it.
+   */
+  replay_offset: z.discriminatedUnion("mode", [
+    z.strictObject({ mode: z.literal("running"), seconds: z.number().int() }),
+    z.strictObject({ mode: z.literal("paused"), at: z.iso.datetime() }),
+  ]),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -188,4 +198,6 @@ export const settingDefaults: { [K in SettingKey]: SettingValue<K> } = {
     visitor: 0,
     threshold: 5,
   },
+  // No row: the clock stays where `simulated_clock` says, as app_now() reads it.
+  replay_offset: { mode: "paused", at: "1970-01-01T00:00:00.000Z" },
 };

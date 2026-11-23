@@ -23,6 +23,8 @@ export const STAFF_ERROR_CODES = [
   "item_mismatch",
   "last_admin",
   "cannot_impersonate",
+  "not_replay",
+  "clock_backwards",
   "server_error",
 ] as const;
 export type StaffErrorCode = (typeof STAFF_ERROR_CODES)[number];
@@ -85,5 +87,9 @@ export const STAFF_ERROR_WORDS: Record<StaffErrorCode, string> = {
     "This is the last active admin. Make someone else an admin first.",
   cannot_impersonate:
     "You can't view the site as an admin, a banned account or yourself.",
+  not_replay:
+    "This site runs on real time, so there's no replay clock to move.",
+  clock_backwards:
+    "The replay clock only moves forward. Pick a time after where it stands.",
   server_error: "Something went wrong on our side. Try again.",
 };

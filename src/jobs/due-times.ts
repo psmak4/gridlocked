@@ -4,6 +4,11 @@
  * with nothing due never opens a database connection. The file is rebuilt from
  * the job table after every wake, by the safety tick, and whenever a caller
  * outside a tick moves the earliest due time earlier.
+ *
+ * On a hosted replay (M9 Task 5) it also carries the replay's clock, so the
+ * tick can turn its real minute into the replay's instant without the
+ * database: `replay` is the floor (`simulated_clock` when it was written) and
+ * the offset's seconds, null while paused.
  */
 import { sql } from "drizzle-orm";
 import type { ClockDb } from "@/lib/resolve-clock";
@@ -12,11 +17,15 @@ import type { ClockDb } from "@/lib/resolve-clock";
 export const DUE_BUCKET = "scheduler";
 export const DUE_KEY = "due-times.json";
 
+/** A hosted replay's clock, as the file carries it (M9 Task 5). */
+export type DueReplay = { floor: string; seconds: number | null };
+
 /** The published shape (M1). `next_due_at` is null when nothing is due. */
 export type DueFile = {
   version: 1;
   generated_at: string;
   next_due_at: string | null;
+  replay?: DueReplay;
 };
 
 export type ParsedDueFile =
@@ -60,7 +69,7 @@ export function parseDueFile(text: string | null): ParsedDueFile {
   if (typeof data !== "object" || data === null) {
     return { ok: false, reason: "malformed" };
   }
-  const { version, generated_at, next_due_at } = data as Record<
+  const { version, generated_at, next_due_at, replay } = data as Record<
     string,
     unknown
   >;
@@ -70,7 +79,20 @@ export function parseDueFile(text: string | null): ParsedDueFile {
   if (next_due_at !== null && !isInstant(next_due_at)) {
     return { ok: false, reason: "malformed" };
   }
-  return { ok: true, file: { version: 1, generated_at, next_due_at } };
+  const file: DueFile = { version: 1, generated_at, next_due_at };
+  if (replay !== undefined) {
+    const r = replay as Record<string, unknown> | null;
+    if (
+      typeof r !== "object" ||
+      r === null ||
+      !isInstant(r.floor) ||
+      !(r.seconds === null || Number.isInteger(r.seconds))
+    ) {
+      return { ok: false, reason: "malformed" };
+    }
+    file.replay = { floor: r.floor, seconds: r.seconds as number | null };
+  }
+  return { ok: true, file };
 }
 
 /**
@@ -87,7 +109,11 @@ export function decideTick(parsed: ParsedDueFile, now: Date): TickDecision {
   return { action: "wake" };
 }
 
-export function nextDueFile(dueAts: Date[], now: Date): DueFile {
+export function nextDueFile(
+  dueAts: Date[],
+  now: Date,
+  replay?: DueReplay,
+): DueFile {
   const earliest = dueAts.reduce<Date | null>(
     (min, t) => (min === null || t < min ? t : min),
     null,
@@ -96,6 +122,32 @@ export function nextDueFile(dueAts: Date[], now: Date): DueFile {
     version: 1,
     generated_at: now.toISOString(),
     next_due_at: earliest?.toISOString() ?? null,
+    ...(replay ? { replay } : {}),
+  };
+}
+
+/**
+ * The replay's clock for the file, on a hosted replay: a database with both
+ * `simulated_clock` and `replay_offset`. `now` is where the replay stands.
+ */
+async function replayOf(
+  db: ClockDb,
+  now: Date,
+): Promise<DueReplay | undefined> {
+  const { rows } = await db.execute(sql`
+    select value from settings
+     where key = 'replay_offset'
+       and exists (select 1 from settings where key = 'simulated_clock')
+  `);
+  const value = (rows[0] as { value?: unknown } | undefined)?.value as
+    { mode?: unknown; seconds?: unknown } | undefined;
+  if (!value) return undefined;
+  return {
+    floor: now.toISOString(),
+    seconds:
+      value.mode === "running" && Number.isInteger(value.seconds)
+        ? (value.seconds as number)
+        : null,
   };
 }
 
@@ -129,7 +181,11 @@ export async function publishDueTimes(
   now: Date,
 ): Promise<DueFile> {
   const earliest = await earliestDueAt(db);
-  const file = nextDueFile(earliest ? [earliest] : [], now);
+  const file = nextDueFile(
+    earliest ? [earliest] : [],
+    now,
+    await replayOf(db, now),
+  );
   await store.put(DUE_KEY, JSON.stringify(file));
   return file;
 }
@@ -155,6 +211,9 @@ export async function republishIfEarlier(
   }
   const stored = parsed.file.next_due_at;
   if (stored !== null && Date.parse(stored) <= runAt.getTime()) return false;
-  await store.put(DUE_KEY, JSON.stringify(nextDueFile([runAt], now)));
+  await store.put(
+    DUE_KEY,
+    JSON.stringify(nextDueFile([runAt], now, parsed.file.replay)),
+  );
   return true;
 }

@@ -468,6 +468,15 @@ const CASES: Record<
       },
     }),
   },
+  moveReplayClock: {
+    changes: 1,
+    // A replay database whose clock stands still (no offset yet): resuming
+    // it is one change.
+    prepare: async (db) => {
+      await setSimulatedClock(db, GAME_NOW);
+      return { now: GAME_NOW, input: { action: "resume", reason: REASON } };
+    },
+  },
   saveStaffSettings: {
     changes: 1,
     prepare: async () => ({

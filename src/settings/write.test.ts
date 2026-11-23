@@ -27,12 +27,50 @@ describe("setSetting (M8 Task 13)", () => {
     expect(await t.db.select().from(auditLog)).toEqual([]);
   };
 
-  it("the editable keys are the flags, the poll schedule and the finalizer checks", () => {
+  it("the editable keys are the flags, the poll schedule, the finalizer checks and the replay clock", () => {
     expect([...EDITABLE_SETTINGS]).toEqual([
       "feature_flags",
       "poll_schedule",
       "finalizer_checks",
+      "replay_offset",
     ]);
+  });
+
+  it("replay_offset is refused with not_replay on a real clock, nothing written", async () => {
+    await expect(
+      setSetting(t.db, NOW, ADMIN, {
+        key: "replay_offset",
+        value: { mode: "running", seconds: 60 },
+        reason: "Testing",
+      }),
+    ).rejects.toMatchObject({ code: "not_replay" });
+    await nothingWritten();
+  });
+
+  it("replay_offset holds simulated_clock where the replay stands, never earlier", async () => {
+    await t.db.insert(settings).values({
+      key: "simulated_clock",
+      value: { at: "2026-03-07T12:30:00.000Z" },
+    });
+    await setSetting(t.db, NOW, ADMIN, {
+      key: "replay_offset",
+      value: { mode: "paused", at: NOW.toISOString() },
+      reason: "Pause",
+    });
+    const rows = await t.db.select().from(settings);
+    expect(rows.find((r) => r.key === "simulated_clock")!.value).toEqual({
+      at: "2026-03-07T12:30:00.000Z",
+    });
+    await setSetting(t.db, new Date("2026-03-07T13:00:00Z"), ADMIN, {
+      key: "replay_offset",
+      value: { mode: "running", seconds: 60 },
+      reason: "Resume",
+    });
+    expect(
+      (await t.db.select().from(settings)).find(
+        (r) => r.key === "simulated_clock",
+      )!.value,
+    ).toEqual({ at: "2026-03-07T13:00:00.000Z" });
   });
 
   it("feature_flags defaults to chat and push on", async () => {

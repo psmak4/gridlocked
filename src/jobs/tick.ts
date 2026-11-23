@@ -4,7 +4,7 @@
  * passes the trigger's scheduled instant. Nothing here reads the time.
  */
 import type { Db } from "@/db/types";
-import { systemTimer, type Clock, type Timer } from "@/lib/clock";
+import { fixedClock, systemTimer, type Clock, type Timer } from "@/lib/clock";
 import {
   assertClockMode,
   resolveClock,
@@ -22,6 +22,7 @@ import {
 import { reapExpired } from "./queue";
 import { runDue, type JobHandler } from "./runner";
 import { ensureCalendarSync } from "./sync-calendar";
+import { fileInstant, hostedReplayNow } from "@/replay/hosted-clock";
 
 /** A database that can run jobs (Drizzle) and the clock queries (raw SQL). */
 export type TickDb = Db & ClockDb;
@@ -54,6 +55,15 @@ export type TickDeps = {
    */
   timer?: Timer;
   mode: ClockMode;
+  /**
+   * A hosted replay (M9 Task 5): `scheduledAt` is the trigger's REAL minute,
+   * and the tick runs on the replay's instant from `replay_offset`
+   * (`src/replay/hosted-clock.ts`), read from the due-times file while it
+   * sleeps and written to `simulated_clock` when it wakes. Ignored unless
+   * `mode` is `replay`. The replay harness leaves it off and passes the
+   * simulated minute itself.
+   */
+  hostedReplay?: boolean;
   /** Where a store read failure is reported. Defaults to `console.error`. */
   log?: (message: string) => void;
 };
@@ -130,15 +140,32 @@ export async function tick(
     return { action: "skip", reason: "store_unreadable" };
   }
 
-  const decision = decideTick(parseDueFile(text), scheduledAt);
+  const parsed = parseDueFile(text);
+  const hosted = deps.hostedReplay === true && deps.mode === "replay";
+  let db: TickDb | undefined;
+  let at = scheduledAt;
+  if (hosted) {
+    const replay = parsed.ok ? parsed.file.replay : undefined;
+    if (replay) {
+      at = fileInstant(replay, scheduledAt);
+    } else {
+      // A file from before the offset was set: the database knows.
+      db = deps.db();
+      await assertClockMode(db, deps.mode);
+      at = await hostedReplayNow(db, scheduledAt);
+    }
+  }
+  const decision = decideTick(parsed, at);
   if (decision.action === "sleep") return decision;
 
   const timer = deps.timer ?? systemTimer;
   const deadlineAt =
     opts.deadlineMs === undefined ? undefined : timer.now() + opts.deadlineMs;
-  const db = deps.db();
+  db ??= deps.db();
   await assertClockMode(db, deps.mode);
-  const clock = await resolveClock({ mode: deps.mode, db, scheduledAt });
+  const clock = hosted
+    ? fixedClock(await hostedReplayNow(db, scheduledAt))
+    : await resolveClock({ mode: deps.mode, db, scheduledAt });
   if (decision.action === "skip") {
     const file = await publishDueTimes(db, deps.store, clock.now());
     (deps.log ?? console.error)(
@@ -169,12 +196,15 @@ export async function tick(
  * caller forgot.
  */
 export async function safetyTick(
-  deps: Pick<TickDeps, "db" | "store" | "mode">,
+  deps: Pick<TickDeps, "db" | "store" | "mode" | "hostedReplay">,
   scheduledAt: Date,
 ): Promise<DueFile> {
   const db = deps.db();
   await assertClockMode(db, deps.mode);
-  const clock = await resolveClock({ mode: deps.mode, db, scheduledAt });
+  const clock =
+    deps.hostedReplay === true && deps.mode === "replay"
+      ? fixedClock(await hostedReplayNow(db, scheduledAt))
+      : await resolveClock({ mode: deps.mode, db, scheduledAt });
   await reapExpired(db, clock.now());
   await ensureCalendarSync(db, clock.now());
   return publishDueTimes(db, deps.store, clock.now());

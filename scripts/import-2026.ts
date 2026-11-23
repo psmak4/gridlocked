@@ -20,19 +20,21 @@
  * for an empty or staging database: one that has polled live data (any
  * `provider_requests` row) is refused unless `--force` is given, because the
  * recorded bodies would overwrite newer results. Unknown arguments are
- * refused too, so a mistyped `--dry-run` can't reach a real database. It runs
- * in system mode only: it checks the database has no `simulated_clock` row
- * (a replay database) and refuses a CLOCK_MODE other than system.
+ * refused too, so a mistyped `--dry-run` can't reach a real database.
+ *
+ * With CLOCK_MODE=replay it imports into a replay database for the hosted
+ * beta (M9 Task 5): one whose `simulated_clock` is set and that has never
+ * polled (`--force` doesn't change that), on the replay's clock. Otherwise it
+ * checks the database has no `simulated_clock` row. See `checkImportTarget`.
  */
 import { fileURLToPath } from "node:url";
-import { sql } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import {
-  assertClockMode,
   clockModeFromEnv,
   resolveClock,
   type ClockDb,
 } from "@/lib/resolve-clock";
+import { checkImportTarget } from "@/providers/import/import-target";
 import type { Db } from "@/db/types";
 import { importSeason2026 } from "@/providers/import/import-season";
 
@@ -72,24 +74,12 @@ async function main() {
       "DATABASE_URL is not set: pass it in the environment, or use --dry-run for an in-memory database",
     );
   }
-  if (clockModeFromEnv(process.env) !== "system") {
-    throw new Error("the import runs in system mode: unset CLOCK_MODE");
-  }
+  const mode = clockModeFromEnv(process.env);
 
   const target = await open(dryRun, url);
   try {
-    await assertClockMode(target.db, "system");
-    if (!force) {
-      const polled = await target.db.execute(
-        sql`select 1 from provider_requests limit 1`,
-      );
-      if (polled.rows.length > 0) {
-        throw new Error(
-          "this database has polled live data (provider_requests is not empty): the import would overwrite newer results. Use --force to import anyway",
-        );
-      }
-    }
-    const clock = await resolveClock({ mode: "system", db: target.db });
+    await checkImportTarget(target.db, mode, { force });
+    const clock = await resolveClock({ mode, db: target.db });
     const report = await importSeason2026(target.db, clock, FIXTURES);
     console.log(
       `${dryRun ? "dry run (in-memory database)" : "imported"}:\n${JSON.stringify(report, null, 2)}`,

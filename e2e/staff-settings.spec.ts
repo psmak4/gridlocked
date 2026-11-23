@@ -32,6 +32,8 @@ test("turn chat off with a reason, and the audit log shows On → Off with it", 
   await expect(
     page.getByText("Admins only. Every change goes in the audit log."),
   ).toBeVisible();
+  // Real time here: no replay clock to move (M9 Task 5).
+  await expect(page.getByRole("form", { name: "Replay clock" })).toHaveCount(0);
   const locked = page.locator('[data-slot="locked-feature"]');
   await expect(locked).toHaveCount(2);
   await expect(locked.first()).toContainText("Notification emails");
