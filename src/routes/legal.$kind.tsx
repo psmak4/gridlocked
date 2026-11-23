@@ -6,6 +6,7 @@ import {
   ScreenHeader,
   Title,
 } from "@/components/account-layout";
+import { LegalText } from "@/components/legal-document";
 
 const DOCUMENTS: Record<string, string> = {
   terms: "Terms",
@@ -33,14 +34,7 @@ function LegalDocument() {
       </ScreenHeader>
       <Body>
         <Title>{DOCUMENTS[kind]}</Title>
-        <p className="text-[14px] font-bold tracking-[0.12em] text-ink-muted">
-          DRAFT 1
-        </p>
-        <p className="text-[16px] leading-[24px]">
-          This document is still a draft. The version you accept is recorded
-          with the date you accepted it, and you will be asked again if it
-          changes in a way that matters.
-        </p>
+        <LegalText kind={kind} />
       </Body>
     </Screen>
   );

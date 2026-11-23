@@ -30,6 +30,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { writeAudit } from "@/audit/log";
+import { newId } from "@/lib/ids";
 import { checkUsername } from "./usernames";
 import { IdentityError } from "./viewer";
 
@@ -50,6 +51,37 @@ async function publishedDocuments(db: Db, now: Date): Promise<LegalDocument[]> {
     .orderBy(...newestFirst);
 }
 
+/**
+ * Publishes a version of a legal document from `now` on. Safe to run again:
+ * a version already there is left as it is, and the answer is false.
+ */
+export async function publishDocument(
+  db: Db,
+  now: Date,
+  doc: {
+    kind: Kind;
+    version: string;
+    url: string;
+    requiresReacceptance: boolean;
+  },
+): Promise<boolean> {
+  const added = await db
+    .insert(legalDocuments)
+    .values({
+      id: newId(),
+      kind: doc.kind,
+      version: doc.version,
+      url: doc.url,
+      requiresReacceptance: doc.requiresReacceptance,
+      publishedAt: now,
+    })
+    .onConflictDoNothing({
+      target: [legalDocuments.kind, legalDocuments.version],
+    })
+    .returning({ id: legalDocuments.id });
+  return added.length > 0;
+}
+
 /** The latest version of each kind in force at `now`. */
 export async function currentDocuments(
   db: Db,
@@ -59,6 +91,15 @@ export async function currentDocuments(
   const latest = new Map<Kind, LegalDocument>();
   for (const doc of all) if (!latest.has(doc.kind)) latest.set(doc.kind, doc);
   return [...latest.values()].sort((a, b) => a.kind.localeCompare(b.kind));
+}
+
+/** What the sign-up box names beyond the three: the beta notice, while one is in force. */
+export async function consentBoxes(
+  db: Db,
+  now: Date,
+): Promise<{ beta: boolean }> {
+  const kinds = (await currentDocuments(db, now)).map((d) => d.kind);
+  return { beta: kinds.includes("beta") };
 }
 
 /**

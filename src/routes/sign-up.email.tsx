@@ -19,16 +19,19 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { authClient } from "@/identity/auth-client";
 import { checkEmailState } from "@/lib/check-email-state";
+import { getConsentBoxes } from "@/server/account";
 import { PASSWORD_TOO_COMMON, TOO_COMMON_WORDS } from "@/lib/password-refusals";
 
 export const Route = createFileRoute("/sign-up/email")({
   head: () => ({ meta: [{ title: "Create your account · Gridlocked" }] }),
+  loader: () => getConsentBoxes(),
   component: SignUpWithEmail,
 });
 
 const MIN_PASSWORD = 10;
 
 function SignUpWithEmail() {
+  const { beta } = Route.useLoaderData();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -152,6 +155,7 @@ function SignUpWithEmail() {
             }}
             ageError={boxes.age}
             termsError={boxes.terms}
+            beta={beta}
           />
           <Turnstile onToken={setToken} resetKey={resetKey} />
           <FormMessage>{message}</FormMessage>

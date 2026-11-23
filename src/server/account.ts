@@ -11,6 +11,7 @@ import {
   setResponseHeader,
 } from "@tanstack/react-start/server";
 import { z } from "zod";
+import { consentBoxes } from "@/identity/consent";
 import { discordFrom } from "@/identity/env";
 import { stopImpersonating } from "@/identity/impersonation";
 import { verifyStaffSession } from "@/identity/staff-access";
@@ -121,6 +122,12 @@ export const getSignInOptions = createServerFn({ method: "GET" }).handler(
   async (): Promise<{ discord: boolean }> => ({
     discord: discordFrom(process.env) !== null,
   }),
+);
+
+/** Which documents the sign-up box names (the beta notice while one is in force). */
+export const getConsentBoxes = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ beta: boolean }> =>
+    withRequestNow((db, now) => consentBoxes(db, now)),
 );
 
 export type UsernameCheck = {
