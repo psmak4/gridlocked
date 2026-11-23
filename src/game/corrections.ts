@@ -12,7 +12,13 @@ import {
   sessions,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { gameChecksPayload, scoreSessionPayload } from "@/jobs/kinds";
+import {
+  dryRunPayload,
+  gameChecksPayload,
+  scoreSessionPayload,
+  type DryRunPayload,
+} from "@/jobs/kinds";
+import { enqueue } from "@/jobs/queue";
 import type { JobHandler } from "@/jobs/runner";
 import { recomputeStandings } from "@/leagues/standings";
 import { openReviewItem } from "@/reference/review";
@@ -214,6 +220,119 @@ export async function publishCorrectionVersion(
  * A second dry run started meanwhile takes over: this one throws. Whatever
  * throws marks its runs that are still `running` as `failed`.
  */
+type DryRunEvents = Map<string, { runId: string; sessionId: string }[]>;
+
+/**
+ * A dry run's start, in the caller's transaction: a `dry_run` run for every
+ * scored session, grouped by event, and the `game.dry_run` audit row.
+ */
+async function beginDryRun(
+  tx: Db,
+  now: Date,
+  actor: StaffActor,
+  input: { gameId: string; reason: string },
+): Promise<{ dryRunId: string; runIds: string[]; byEvent: DryRunEvents }> {
+  const { gameId } = input;
+  const meta = audit(actor, requireReason(input.reason));
+  const byEvent: DryRunEvents = new Map();
+  const runIds: string[] = [];
+  for (const { sessionId, eventId } of await scoredSessions(tx, gameId)) {
+    const started = await startRun(tx, now, {
+      gameId,
+      sessionId,
+      trigger: "admin",
+      mode: "dry_run",
+    });
+    if (!("runId" in started)) {
+      throw new Error(`dryRunGame: a dry run of ${sessionId} was skipped`);
+    }
+    runIds.push(started.runId);
+    const runs = byEvent.get(eventId) ?? [];
+    runs.push({ runId: started.runId, sessionId });
+    byEvent.set(eventId, runs);
+  }
+  const dryRunId = await writeAudit(tx, now, {
+    ...meta,
+    action: "game.dry_run",
+    entityType: "game",
+    entityId: gameId,
+    before: null,
+    after: { engineVersion: ENGINE_VERSION, runIds },
+  });
+  return { dryRunId, runIds, byEvent };
+}
+
+/**
+ * A dry run for the staff screen (M9 Task 7): its runs and audit row now, and
+ * one `dry_run` job per event, due at once, for the scoring, so a long one
+ * never runs inside the request. The screen shows it as running until every
+ * run has finished. Returns how many sessions and events it covers.
+ */
+export async function queueDryRun(
+  db: Db,
+  now: Date,
+  actor: StaffActor,
+  input: { gameId: string; reason: string; batchSize?: number },
+): Promise<{ dryRunId: string; sessions: number; events: number }> {
+  const { gameId, batchSize } = input;
+  return db.transaction(async (tx) => {
+    const { dryRunId, runIds, byEvent } = await beginDryRun(
+      tx,
+      now,
+      actor,
+      input,
+    );
+    for (const [eventId, runs] of byEvent) {
+      const payload: DryRunPayload = {
+        gameId,
+        eventId,
+        dryRunId,
+        runs,
+        ...(batchSize ? { batchSize } : {}),
+      };
+      await enqueue(tx, {
+        kind: "dry_run",
+        dedupeKey: `dry_run:${dryRunId}:${eventId}`,
+        runAt: now,
+        payload,
+        // A retry would find its runs already scored: one try, then the
+        // runs are failed and the screen offers a new dry run.
+        maxAttempts: 1,
+      });
+    }
+    return { dryRunId, sessions: runIds.length, events: byEvent.size };
+  });
+}
+
+/** The `dry_run` job: one event of a queued dry run. */
+export function createDryRunHandlers(): Record<"dry_run", JobHandler> {
+  return {
+    dry_run: async (job, ctx) => {
+      const db = ctx.db as Db;
+      const now = ctx.clock.now();
+      const { gameId, eventId, runs, batchSize } = dryRunPayload.parse(
+        job.payload,
+      );
+      const failAll = async () => {
+        for (const { runId } of runs) await failRun(db, now, runId);
+      };
+      try {
+        // Superseded: a newer dry run took over, and this one is set aside.
+        const report = await dryRunEvent(db, now, {
+          gameId,
+          eventId,
+          runs,
+          batchSize,
+        });
+        if (report === "superseded") await failAll();
+      } catch (error) {
+        await failAll();
+        throw error;
+      }
+    },
+  };
+}
+
 export async function dryRunGame(
   db: Db,
   now: Date,
@@ -229,36 +348,9 @@ export async function dryRunGame(
   biggest: Change[];
 }> {
   const { gameId, batchSize } = input;
-  const meta = audit(actor, requireReason(input.reason));
-
-  const byEvent = new Map<string, { runId: string; sessionId: string }[]>();
-  const { dryRunId, runIds } = await db.transaction(async (tx) => {
-    const ids: string[] = [];
-    for (const { sessionId, eventId } of await scoredSessions(tx, gameId)) {
-      const started = await startRun(tx, now, {
-        gameId,
-        sessionId,
-        trigger: "admin",
-        mode: "dry_run",
-      });
-      if (!("runId" in started)) {
-        throw new Error(`dryRunGame: a dry run of ${sessionId} was skipped`);
-      }
-      ids.push(started.runId);
-      const runs = byEvent.get(eventId) ?? [];
-      runs.push({ runId: started.runId, sessionId });
-      byEvent.set(eventId, runs);
-    }
-    const auditId = await writeAudit(tx, now, {
-      ...meta,
-      action: "game.dry_run",
-      entityType: "game",
-      entityId: gameId,
-      before: null,
-      after: { engineVersion: ENGINE_VERSION, runIds: ids },
-    });
-    return { dryRunId: auditId, runIds: ids };
-  });
+  const { dryRunId, runIds, byEvent } = await db.transaction((tx) =>
+    beginDryRun(tx, now, actor, input),
+  );
 
   const assets = new Set<string>();
   const teams = new Set<string>();

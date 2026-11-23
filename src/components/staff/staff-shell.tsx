@@ -7,7 +7,7 @@ import {
 } from "@/staff/menu";
 
 const focusRing =
-  "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
+  "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
 
 /**
  * The frame of the staff screens (wave 5): the staff side menu beside the

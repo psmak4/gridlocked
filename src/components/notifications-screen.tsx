@@ -78,7 +78,7 @@ export function NotificationsScreen({
                     open(item);
                   }}
                   className={cn(
-                    "flex min-h-[64px] items-start gap-space-3 rounded-radius-m px-[14px] py-space-3 text-ink no-underline outline-none hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+                    "flex min-h-[64px] items-start gap-space-3 rounded-radius-m px-[14px] py-space-3 text-ink no-underline outline-none hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
                     item.unread ? "bg-surface-raised" : "bg-surface",
                   )}
                 >

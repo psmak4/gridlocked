@@ -32,7 +32,7 @@ export const Route = createFileRoute("/staff/users")({
 
 const eyebrow = "text-[12px] font-bold tracking-[0.12em] text-ink-muted";
 const inputClass =
-  "min-h-[48px] w-full rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "min-h-[48px] w-full rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 export const ROLE_WORDS: Record<string, string> = {
   user: "User",
@@ -128,7 +128,7 @@ function UsersScreen() {
                           to="/staff/users/$username"
                           params={{ username: u.username }}
                           search={{ q }}
-                          className="flex min-h-[44px] items-center gap-space-2 font-bold text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                          className="flex min-h-[44px] items-center gap-space-2 font-bold text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                         >
                           {u.username}
                           {u.banned ? (

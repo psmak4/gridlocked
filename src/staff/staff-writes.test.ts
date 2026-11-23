@@ -41,7 +41,7 @@ import { openReviewItem } from "@/reference/review";
 import { setSimulatedClock } from "@/replay/clock-loop";
 import { reviewItem } from "./review";
 import { overrideResult } from "./results";
-import { startDryRun } from "./scoring";
+import { dryRunGame } from "@/game/corrections";
 import { STAFF_WRITES } from "@/server/staff-writes";
 import { runStaff, type StaffFnDef } from "@/server/staff-fn";
 
@@ -277,7 +277,7 @@ const CASES: Record<
     changes: 1,
     prepare: async (db) => {
       const { gameId, now } = await scoredWorld(db);
-      const { dryRunId } = await startDryRun(
+      const { dryRunId } = await dryRunGame(
         db as Db,
         now,
         { kind: "admin", label: "setup", requestId: "setup" },
@@ -293,7 +293,7 @@ const CASES: Record<
     changes: 1,
     prepare: async (db) => {
       const { gameId, now } = await scoredWorld(db);
-      await startDryRun(
+      await dryRunGame(
         db as Db,
         now,
         { kind: "admin", label: "setup", requestId: "setup" },

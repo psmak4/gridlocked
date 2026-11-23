@@ -15,6 +15,8 @@ import { SCORING_RUN_TRIGGERS } from "@/db/schema";
  * `privacy_export` builds one data export (handler in `src/identity/export.ts`), and
  * `identity_after_commit` retries work that follows a Better Auth commit (handler in
  * `src/identity/after-commit.ts`).
+ * `dry_run` scores one event of a dry run an admin started (handler in
+ * `src/game/corrections.ts`).
  * `lock_reminder` tells team owners a lock is near (handler in
  * `src/notifications/lock-reminder.ts`), and `push_fanout` sends Web Push
  * for new notifications (handler in `src/notifications/push.ts`). `normalize` and `validate`
@@ -46,6 +48,7 @@ export const JOB_KINDS = [
   "lock_reminder",
   "push_fanout",
   "results_post",
+  "dry_run",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
@@ -185,6 +188,21 @@ export const gameFinalizePayload = z.object({
     .optional(),
 });
 export type GameFinalizePayload = z.infer<typeof gameFinalizePayload>;
+
+/**
+ * One event of a dry run (M9 Task 7): the runs `queueDryRun` started for its
+ * sessions. `batchSize` is for tests.
+ */
+export const dryRunPayload = z.object({
+  gameId: z.string().min(1),
+  eventId: z.string().min(1),
+  dryRunId: z.string().min(1),
+  runs: z
+    .array(z.object({ runId: z.string().min(1), sessionId: z.string().min(1) }))
+    .min(1),
+  batchSize: z.number().int().positive().optional(),
+});
+export type DryRunPayload = z.infer<typeof dryRunPayload>;
 
 /** One game's daily checks (DM 4.8). */
 export const gameChecksPayload = z.object({ gameId: z.string().min(1) });

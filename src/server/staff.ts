@@ -22,7 +22,7 @@ import {
 import { StaffError } from "@/staff/errors";
 import { correctionSummary } from "@/staff/result-words";
 import { dryRunSummary, rulesetVersions, scoringGame } from "@/staff/scoring";
-import { modItem, modQueue } from "@/community/queue-read";
+import { modItem, modQueue, openModCount } from "@/community/queue-read";
 import { nextPrices } from "@/staff/prices";
 import * as USERS from "./staff-users";
 import * as WRITES from "./staff-writes";
@@ -48,7 +48,7 @@ export const getStaffArea = createServerFn({ method: "GET" }).handler(
     return withRequestNow(async (db) => ({
       ...area,
       counts: {
-        moderation: (await modQueue(db, { tab: "open" })).length,
+        moderation: await openModCount(db),
         ...(area.role === "admin" ? { review: await openReviewCount(db) } : {}),
       },
     }));

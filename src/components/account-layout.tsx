@@ -43,7 +43,7 @@ export function BackLink({
   return (
     <a
       href={href}
-      className="inline-flex min-h-[44px] items-center gap-[4px] rounded-radius-m px-space-2 text-[16px] font-bold text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+      className="inline-flex min-h-[44px] items-center gap-[4px] rounded-radius-m px-space-2 text-[16px] font-bold text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
     >
       <svg
         width="20"
@@ -133,7 +133,7 @@ export function Notice({ children }: { children: ReactNode }) {
 }
 
 export const linkClass =
-  "font-bold text-heat-text underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "font-bold text-heat-text underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 export const selectClass =
-  "min-h-[48px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "min-h-[48px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";

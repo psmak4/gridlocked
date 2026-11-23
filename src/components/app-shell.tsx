@@ -23,7 +23,7 @@ const ITEMS: (BottomNavItem & { id: ShellItem; href: string })[] = [
 ];
 
 const focusRing =
-  "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
+  "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
 
 /**
  * From 1024 px, the side menu replaces the bottom nav (wave 3): the wordmark,

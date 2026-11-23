@@ -40,7 +40,7 @@ export function FavoritesFields({
                     onChange({ ...value, team: picked ? "" : c.id })
                   }
                   className={cn(
-                    "flex min-h-[64px] cursor-pointer flex-col items-center justify-center gap-[6px] rounded-radius-m border-2 bg-surface-raised px-[2px] py-space-2 font-sans text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+                    "flex min-h-[64px] cursor-pointer flex-col items-center justify-center gap-[6px] rounded-radius-m border-2 bg-surface-raised px-[2px] py-space-2 font-sans text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
                     picked ? "border-ink" : "border-transparent",
                   )}
                 >

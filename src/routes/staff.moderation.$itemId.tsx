@@ -216,7 +216,7 @@ function ModerationPanel() {
                 value={title}
                 maxLength={120}
                 onChange={(e) => setTitle(e.target.value)}
-                className="min-h-[44px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] font-normal text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                className="min-h-[44px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] font-normal text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               />
             </label>
           ) : null}
@@ -245,7 +245,7 @@ function ModerationPanel() {
       <Link
         to="/staff/moderation"
         search={{ tab: open ? "open" : "done" }}
-        className="flex min-h-[44px] items-center self-start text-[16px] text-ink underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+        className="flex min-h-[44px] items-center self-start text-[16px] text-ink underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
       >
         Back to the queue
       </Link>

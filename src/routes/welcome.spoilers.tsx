@@ -91,7 +91,7 @@ function Spoilers() {
           {OPTIONS.map((option) => (
             <label
               key={option.title}
-              className="flex cursor-pointer flex-col items-start gap-[4px] rounded-radius-m border-2 border-transparent bg-surface-raised p-[14px] has-checked:border-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus-ring"
+              className="flex cursor-pointer flex-col items-start gap-[4px] rounded-radius-m border-2 border-transparent bg-surface-raised p-[14px] has-checked:border-ink has-focus-visible:outline-2 focus-visible:outline-solid has-focus-visible:outline-offset-2 has-focus-visible:outline-focus-ring"
             >
               <input
                 type="radio"

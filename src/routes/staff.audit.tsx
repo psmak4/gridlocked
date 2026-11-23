@@ -32,7 +32,7 @@ export const Route = createFileRoute("/staff/audit")({
 });
 
 const selectClass =
-  "min-h-[48px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "min-h-[48px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 const COLUMNS = ["When", "Who", "What", "On", "Change", "Reason"] as const;
 

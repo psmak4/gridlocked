@@ -207,7 +207,7 @@ export function ChatView({
                     .filter(Boolean)
                     .join(" ") || undefined
                 }
-                className="min-h-[48px] min-w-0 flex-1 rounded-radius-m border-2 border-line-strong bg-surface px-space-3 text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                className="min-h-[48px] min-w-0 flex-1 rounded-radius-m border-2 border-line-strong bg-surface px-space-3 text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               />
               <Button
                 type="submit"

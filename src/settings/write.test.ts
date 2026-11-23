@@ -130,6 +130,45 @@ describe("setSetting (M8 Task 13)", () => {
     await nothingWritten();
   });
 
+  it("a poll gap over 24 hours, more than 10 gaps, or a re-check over 168 hours is refused as invalid", async () => {
+    const refused = (
+      key: "poll_schedule" | "finalizer_checks",
+      value: object,
+    ) =>
+      expect(
+        setSetting(t.db, NOW, ADMIN, {
+          key,
+          value: value as never,
+          reason: "Testing",
+        }),
+      ).rejects.toMatchObject({ code: "invalid" });
+    await refused("poll_schedule", {
+      backoffMinutes: [5, 24 * 60 + 1],
+      giveUpAfterHours: 24,
+    });
+    await refused("poll_schedule", {
+      backoffMinutes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      giveUpAfterHours: 24,
+    });
+    await refused("finalizer_checks", { afterHours: [6, 169] });
+    await nothingWritten();
+
+    // The bounds themselves are allowed.
+    await setSetting(t.db, NOW, ADMIN, {
+      key: "poll_schedule",
+      value: {
+        backoffMinutes: [5, 15, 60, 120, 240, 360, 480, 600, 720, 24 * 60],
+        giveUpAfterHours: 24,
+      },
+      reason: "Testing",
+    });
+    await setSetting(t.db, NOW, ADMIN, {
+      key: "finalizer_checks",
+      value: { afterHours: [6, 168] },
+      reason: "Testing",
+    });
+  });
+
   it("setSetting with an unchanged value writes nothing", async () => {
     const done = await setSetting(t.db, NOW, ADMIN, {
       key: "poll_schedule",

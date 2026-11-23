@@ -152,7 +152,7 @@ function Calendar() {
                         <a
                           href={`/staff/calendar/${e.id}`}
                           aria-current={isSelected ? "page" : undefined}
-                          className="flex min-h-[44px] flex-col justify-center text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                          className="flex min-h-[44px] flex-col justify-center text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                         >
                           <span className="font-bold">{e.name}</span>
                           <span className="text-[14px] text-ink-muted">
