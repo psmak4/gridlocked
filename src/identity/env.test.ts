@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TEST_AUTH_SECRET } from "../../tests/helpers/auth";
-import { parseAuthEnv } from "./env";
+import { ConfigError, parseAuthEnv } from "./env";
 
 const SECRET = TEST_AUTH_SECRET;
 const TURNSTILE = "fake-turnstile-secret";
@@ -108,5 +108,44 @@ describe("parseAuthEnv", () => {
         SIGN_UP_ALLOWED_EMAILS: "owner@x.test, discord:123456789012345678",
       }).signUpAllowlist,
     ).toEqual(["owner@x.test", "discord:123456789012345678"]);
+  });
+
+  it("a missing or malformed setting throws ConfigError naming the variable, and its message never contains the value", () => {
+    const cases: [Record<string, string>, string, string | null][] = [
+      [{}, "BETTER_AUTH_SECRET", null],
+      [
+        { BETTER_AUTH_SECRET: "short-but-secret-value" },
+        "BETTER_AUTH_SECRET",
+        "short-but-secret-value",
+      ],
+      [
+        {
+          BETTER_AUTH_SECRET: SECRET,
+          BETTER_AUTH_URL: "not-a-url-but-private",
+        },
+        "BETTER_AUTH_URL",
+        "not-a-url-but-private",
+      ],
+      [
+        { VITE_LOCAL_DB: "1", BETTER_AUTH_URL: "local-not-a-url-private" },
+        "BETTER_AUTH_URL",
+        "local-not-a-url-private",
+      ],
+    ];
+    for (const [env, variable, value] of cases) {
+      let thrown: unknown;
+      try {
+        parseAuthEnv(env);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(ConfigError);
+      const error = thrown as ConfigError;
+      expect(error.variable).toBe(variable);
+      expect(error.message).toContain(variable);
+      if (value) {
+        expect(`${error.message} ${error.stack}`).not.toContain(value);
+      }
+    }
   });
 });

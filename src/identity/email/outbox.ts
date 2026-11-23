@@ -346,6 +346,88 @@ export async function queueEmail(
   return { status };
 }
 
+/**
+ * The first half of `queueEmail`, for a caller inside someone else's
+ * transaction (Better Auth's sign-up, M9 Task 2): the per-address limit, the
+ * queued row, and an `email_flush` job for the next minute, all on `tx`, so
+ * they commit or roll back with the work that asked for the email. Nothing is
+ * sent: once the transaction commits, `sendStagedEmail` sends it, and if that
+ * never happens the flush does. Gives back the row's id, or null past the
+ * per-address limit.
+ */
+export async function stageEmail(
+  tx: Db,
+  now: Date,
+  email: {
+    to: string;
+    template: EmailTemplate;
+    payload: EmailPayload;
+    expiresAt?: Date;
+  },
+): Promise<string | null> {
+  const to = email.to.trim();
+  const within = await consumeRateLimit(
+    tx,
+    now,
+    addressKey(email.template, to),
+    ADDRESS_LIMIT,
+  );
+  if (!within) return null;
+  const id = newId();
+  // As in `queueEmail`: a repeat while queued replaces the row.
+  await tx.execute(sql`
+    insert into email_outbox (id, to_email, template, payload, status, attempts, send_after, expires_at)
+    values (${id}, ${to}, ${email.template}, ${JSON.stringify(email.payload)}::jsonb, 'queued', 0, ${iso(now)}::timestamptz, ${iso(email.expiresAt ?? new Date(now.getTime() + DEFAULT_LIFETIME_MS))}::timestamptz)
+    on conflict (lower(to_email), template) where status = 'queued'
+    do update set id = excluded.id, to_email = excluded.to_email, payload = excluded.payload,
+      attempts = 0, last_error = null, send_after = excluded.send_after, expires_at = excluded.expires_at`);
+  const flushAt = startOfNextMinute(now);
+  await enqueue(tx, {
+    kind: "email_flush",
+    dedupeKey: emailFlushKey(flushAt),
+    runAt: flushAt,
+    payload: {},
+  });
+  return id;
+}
+
+/**
+ * Sends a row `stageEmail` queued, under the outbox lock, if it is still
+ * queued: a flush may have sent it already, or a repeat replaced it. With no
+ * sender it stays queued for the flush.
+ */
+export async function sendStagedEmail(
+  db: Db,
+  now: Date,
+  id: string,
+  sender: EmailSender | null,
+): Promise<void> {
+  if (!sender) return;
+  const caps = await getSetting(db, "email_caps");
+  const sent = await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    await t.execute(
+      sql`select pg_advisory_xact_lock(${sql.raw(String(OUTBOX_LOCK))})`,
+    );
+    const [row] = await t
+      .select()
+      .from(emailOutbox)
+      .where(and(eq(emailOutbox.id, id), eq(emailOutbox.status, "queued")));
+    if (!row) return false;
+    const { outcome, sendAfter } = await attempt(t, now, row, sender, caps);
+    if (sendAfter) {
+      await enqueue(t, {
+        kind: "email_flush",
+        dedupeKey: emailFlushKey(sendAfter),
+        runAt: sendAfter,
+        payload: {},
+      });
+    }
+    return outcome === "sent";
+  });
+  if (sent) await alertSafely(db, now, caps);
+}
+
 // --- Flushing ---------------------------------------------------------------
 
 /**

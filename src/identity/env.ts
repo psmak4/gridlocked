@@ -22,7 +22,9 @@ export type AuthEnv = {
   local: boolean;
 };
 
-const secret = z.string().min(32, "must be at least 32 characters");
+const secret = z
+  .string("must be set")
+  .min(32, "must be at least 32 characters");
 
 function fromList(value: string | undefined): string[] | null {
   const items = (value ?? "")
@@ -32,18 +34,38 @@ function fromList(value: string | undefined): string[] | null {
   return items.length > 0 ? items : null;
 }
 
-/** Problems are named by variable, never by value: a secret must not reach a log. */
-function fail(name: string, error: z.ZodError): never {
-  throw new Error(
-    `Invalid ${name}: ${error.issues.map((i) => i.message).join("; ")}`,
-  );
+/**
+ * A setting that is missing or malformed. It names the variable and what is
+ * wrong with it, never the value: a secret must not reach a log or Sentry.
+ */
+export class ConfigError extends Error {
+  constructor(
+    readonly variable: string,
+    problem: string,
+  ) {
+    super(`Invalid ${variable}: ${problem}`);
+    this.name = "ConfigError";
+  }
 }
+
+/** Our own messages only: Zod's issues can quote the input. */
+function fail(name: string, error: z.ZodError): never {
+  throw new ConfigError(name, error.issues.map((i) => i.message).join("; "));
+}
+
+const url = z.url("must be a URL");
 
 /** Discord sign-in is on when both variables are set. */
 export function discordFrom(env: Record<string, string | undefined>) {
   const clientId = env.DISCORD_CLIENT_ID?.trim();
   const clientSecret = env.DISCORD_CLIENT_SECRET?.trim();
   return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
+function parseUrl(value: string | undefined): string {
+  const parsed = url.safeParse(value);
+  if (!parsed.success) fail("BETTER_AUTH_URL", parsed.error);
+  return parsed.data;
 }
 
 export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
@@ -55,7 +77,7 @@ export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
       secret: given.success
         ? given.data
         : `${crypto.randomUUID()}${crypto.randomUUID()}`,
-      baseUrl: env.BETTER_AUTH_URL ? z.url().parse(env.BETTER_AUTH_URL) : null,
+      baseUrl: env.BETTER_AUTH_URL ? parseUrl(env.BETTER_AUTH_URL) : null,
       signUpAllowlist,
       discord: discordFrom(env),
       turnstileSecret: env.TURNSTILE_SECRET_KEY?.trim() || null,
@@ -64,8 +86,7 @@ export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
   }
   const parsedSecret = secret.safeParse(env.BETTER_AUTH_SECRET);
   if (!parsedSecret.success) fail("BETTER_AUTH_SECRET", parsedSecret.error);
-  const parsedUrl = z.url().safeParse(env.BETTER_AUTH_URL);
-  if (!parsedUrl.success) fail("BETTER_AUTH_URL", parsedUrl.error);
+  const baseUrl = parseUrl(env.BETTER_AUTH_URL);
   // Without it the bot check would be off in production, so it is required.
   const parsedTurnstile = z
     .string()
@@ -77,7 +98,7 @@ export function parseAuthEnv(env: Record<string, string | undefined>): AuthEnv {
   }
   return {
     secret: parsedSecret.data,
-    baseUrl: parsedUrl.data,
+    baseUrl,
     signUpAllowlist,
     discord: discordFrom(env),
     turnstileSecret: parsedTurnstile.data,

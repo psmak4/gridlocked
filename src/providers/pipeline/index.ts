@@ -2,6 +2,7 @@ import type { ChatArchiveStore } from "@/community/archive";
 import { createCommunityDailyHandler } from "@/community/daily";
 import { createOpenThreadsHandler } from "@/community/session-threads";
 import { createIdentityDailyHandler } from "@/identity/daily";
+import { createIdentityAfterCommitHandler } from "@/identity/after-commit";
 import type { EmailSender } from "@/identity/email/sender";
 import {
   createPrivacyExportHandler,
@@ -52,6 +53,7 @@ export type PipelineHandlers = Record<
   | "game_checks"
   | "identity_daily"
   | "privacy_export"
+  | "identity_after_commit"
   | "open_threads"
   | "community_daily",
   JobHandler
@@ -83,6 +85,8 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
       chatArchives: deps.chatArchiveStore,
       sender: deps.emailSender ?? null,
     }),
+    // Work after a Better Auth commit whose first try failed (M9 Task 2).
+    identity_after_commit: createIdentityAfterCommitHandler(),
     // The forum's: the threads in the database, archives in their bucket.
     open_threads: createOpenThreadsHandler(),
     community_daily: createCommunityDailyHandler({
