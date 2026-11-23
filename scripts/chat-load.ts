@@ -7,7 +7,7 @@
  * would be. It only reads: it sends no messages and no cookies.
  *
  *   CHAT_LOAD_URL=https://<staging host> CHAT_LOAD_THREAD=<thread id> \
- *   CHAT_LOAD_READERS=50 CHAT_LOAD_SECONDS=600 pnpm chat-load
+ *   CHAT_LOAD_SECONDS=600 pnpm chat-load --readers=50
  *
  * Expected (Task 16 step 5): about one function invocation a window (the
  * first request, a MISS), and `x-vercel-cache: HIT` for everyone after it.
@@ -33,7 +33,13 @@ const base = new URL(env("CHAT_LOAD_URL"));
 const thread = env("CHAT_LOAD_THREAD");
 if (!/^[0-9a-f-]{36}$/.test(thread))
   throw new Error("CHAT_LOAD_THREAD is a thread id");
-const readers = Number(env("CHAT_LOAD_READERS", "50"));
+// `--readers=150` overrides CHAT_LOAD_READERS (M9 Task 12 runs 50 and 150).
+const readersFlag = process.argv
+  .find((a) => a.startsWith("--readers="))
+  ?.slice("--readers=".length);
+const readers = Number(readersFlag ?? env("CHAT_LOAD_READERS", "50"));
+if (!Number.isInteger(readers) || readers < 1)
+  throw new Error("--readers is a whole number");
 const seconds = Number(env("CHAT_LOAD_SECONDS", "600"));
 const windowMs = Number(env("CHAT_LOAD_WINDOW_SECONDS", "3")) * 1000;
 
