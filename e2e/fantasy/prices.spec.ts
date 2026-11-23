@@ -107,7 +107,8 @@ test("a logged-out visitor gets a public cache header and covered changes", asyn
   const showIt = page.getByRole("button", { name: "Show it" });
   await hydrated(showIt);
   await showIt.click();
-  await expect(page).toHaveURL("/prices?show=changes");
+  // The address doesn't carry it (M9 Task 4).
+  await expect(page).toHaveURL("/prices");
   await expect(list(page, "Going up")).toContainText("▲");
   const shown = await page.request.get("/prices?show=changes");
   expect(shown.headers()["cache-control"]).toBe(

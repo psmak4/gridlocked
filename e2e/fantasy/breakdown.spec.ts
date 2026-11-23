@@ -62,7 +62,8 @@ test("open the breakdown from the team, switch sessions, open a driver's sheet",
   await page.getByRole("tab", { name: "Qualifying" }).click();
   await expect(page.getByText("Qualifying — scores are in")).toBeVisible();
   await page.getByRole("button", { name: "Show it" }).click();
-  await expect(page).toHaveURL(/[?&]show=/);
+  // For this history entry only: the address doesn't carry it (M9 Task 4).
+  await expect(page).not.toHaveURL(/show=/);
   const quali = sessionPoints(page, "Qualifying");
   await expect(quali.getByRole("listitem")).toHaveCount(7);
   await expect(page.locator('[data-slot="points-pill"]')).toHaveCount(1);

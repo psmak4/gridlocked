@@ -86,7 +86,12 @@ export async function chatRefreshResponse(
       state,
     );
     return new Response(
-      JSON.stringify({ messages, mode, now: now.toISOString() }),
+      JSON.stringify({
+        messages,
+        mode,
+        now: now.toISOString(),
+        windowStart: after,
+      }),
       {
         status: 200,
         headers: {

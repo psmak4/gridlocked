@@ -51,8 +51,8 @@ function PriceList({ rows, label }: { rows: PriceRow[]; label: string }) {
 type PricesScreenProps = {
   board: PriceBoard;
   signedIn: boolean;
-  /** "Show it": `/prices?show=changes`. */
-  showHref: string;
+  /** "Show it": the changes, on this page only. */
+  onShow: () => void;
   /** "Mark as watched" for the race that moved them; signed in only. */
   markWatched?: () => void;
 };
@@ -65,7 +65,7 @@ type PricesScreenProps = {
 export function PricesScreen({
   board,
   signedIn,
-  showHref,
+  onShow,
   markWatched,
 }: PricesScreenProps) {
   const [tab, setTab] = useState<Tab>(board.changesFrom ? "up" : "all");
@@ -151,9 +151,7 @@ export function PricesScreen({
           hidden
           title={`Round ${changesFrom!.round} — price changes are in`}
           body="Who went up and down gives the race away. You haven't marked it as watched."
-          onReveal={() => {
-            window.location.href = showHref;
-          }}
+          onReveal={onShow}
           onMarkWatched={markWatched}
         />
       ) : rows.length === 0 ? (

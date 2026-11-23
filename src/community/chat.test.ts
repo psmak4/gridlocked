@@ -5,7 +5,7 @@ import { seedViewer } from "../../tests/helpers/community";
 import { seedEventSessions } from "../../tests/helpers/sessions";
 import { chatMessages, sessions, threads } from "@/db/schema";
 import type { Viewer } from "@/identity/viewer";
-import { chatSince, chatUpTo, sendChat } from "./chat";
+import { chatGap, chatSince, chatUpTo, sendChat } from "./chat";
 import { openSessionThreads } from "./session-threads";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
@@ -63,6 +63,20 @@ describe("session chat (DM 5.5)", () => {
     expect(
       (await chatSince(t.db, threadId, first.id)).map((m) => m.id),
     ).toEqual([second.id]);
+  });
+
+  it("the gap fill reads a session thread after a message, and nothing else", async () => {
+    const first = await send(tl0, "lights out");
+    const second = await send(tl2, "and away we go");
+    expect((await chatGap(t.db, threadId, first.id)).map((m) => m.id)).toEqual([
+      second.id,
+    ]);
+    // Removed, or not a session thread: nothing.
+    await t.db
+      .update(threads)
+      .set({ status: "removed" })
+      .where(eq(threads.id, threadId));
+    expect(await chatGap(t.db, threadId, first.id)).toEqual([]);
   });
 
   it("a send outside the chat window is refused with chat_closed", async () => {

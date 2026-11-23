@@ -2,8 +2,8 @@
  * A visitor's spoiler choice for this device (HLD §7.3, M7 Task 10): "safe"
  * by default, or "all" after "Show results everywhere on this device". It
  * lives in `localStorage` only, so it never reaches the server or the CDN:
- * a page that should show more is asked for at its own `?show=all` address,
- * and the default page carries nothing hidden.
+ * a page that should show more asks for it with `showAll` from its history
+ * entry's state (M9 Task 4), and the default page carries nothing hidden.
  *
  * Storage can be missing or refuse (private windows, blocked site data), so
  * every read and write is in a `try`, and a failure is "safe".

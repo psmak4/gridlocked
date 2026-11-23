@@ -62,8 +62,11 @@ describe("the chat refresh route (HLD §11.2)", () => {
     const body = (await response.json()) as {
       messages: { body: string; author: string }[];
       mode: string;
+      windowStart: string;
     };
     expect(body.mode).toBe("chat");
+    // The window it answers, so a client can tell its own from another's.
+    expect(body.windowStart).toBe(LIVE.toISOString());
     expect(body.messages).toMatchObject([
       { body: "Lights out", author: "fan" },
     ]);

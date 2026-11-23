@@ -74,17 +74,17 @@ test("turning the toggle on shows them, and it survives a reload", async ({
   await toggle.click();
   await expect(visit.getByRole("heading", { level: 1 })).toHaveText(TITLE);
   await expect(visit.getByText(BODY)).toBeVisible();
-  await expect(visit).toHaveURL(/[?&]show=all/);
+  // The address never carries it (M9 Task 4).
+  await expect(visit).not.toHaveURL(/show=/);
 
   await visit.reload();
   await expect(visit.getByText(BODY)).toBeVisible();
-  // The plain address, on this device, asks for the shown one.
+  // The plain address, on this device, shows it in place.
   await visit.goto(path);
-  await expect(visit).toHaveURL(/[?&]show=all/);
   await expect(visit.getByText(BODY)).toBeVisible();
+  await expect(visit).not.toHaveURL(/show=/);
   // And the list shows the real title too.
   await visit.goto("/forum/race-weekend");
-  await expect(visit).toHaveURL(/[?&]show=all/);
   await expect(visit.getByRole("list", { name: "Threads" })).toContainText(
     TITLE,
   );
