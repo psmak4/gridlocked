@@ -12,6 +12,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import {
   categoryPageInput,
+  chatGapInput,
   createThreadInput,
   deletePostInput,
   editPostInput,
@@ -22,7 +23,7 @@ import {
   voteInput,
 } from "@/community/inputs";
 import { chatReplay, type ChatReplay } from "@/community/archive";
-import { sendChat, slowModeFor, chatState } from "@/community/chat";
+import { chatGap, sendChat, slowModeFor, chatState } from "@/community/chat";
 import { composerData, writerOf } from "@/community/composer";
 import { categoryList, threadList, threadPage } from "@/community/read";
 import { report } from "@/community/moderation";
@@ -97,6 +98,20 @@ export const sendChatFn = createServerFn({ method: "POST" })
   .validator(sendChatInput)
   .handler(({ data }) =>
     communityAction((db, now, viewer) => sendChat(db, now, viewer, data)),
+  );
+
+/**
+ * The chat's gap fill (M9 Task 4): what a refresh skipped. Public, like the
+ * refresh, and nothing while staff have chat off.
+ */
+export const chatGapFn = createServerFn({ method: "GET" })
+  .validator(chatGapInput)
+  .handler(({ data }) =>
+    withRequestNow(async (db) =>
+      (await getSetting(db, "feature_flags")).chat
+        ? chatGap(db, data.threadId, data.afterId)
+        : [],
+    ),
   );
 
 /** Up, down, or 0 to take a vote back. */

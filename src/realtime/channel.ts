@@ -53,6 +53,18 @@ export function mergeRefresh(
   return merged.slice(-ON_SCREEN);
 }
 
+/** Adds what filled a gap after what's on screen, in id order, once each. */
+export function mergeGap(
+  shown: ChatMessageView[],
+  gap: ChatMessageView[],
+): ChatMessageView[] {
+  if (gap.length === 0) return shown;
+  const have = new Set(shown.map((m) => m.id));
+  return [...shown, ...gap.filter((m) => !have.has(m.id))].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
+}
+
 /** Adds one message (the viewer's own, just sent) in id order, once. */
 export function addMessage(
   shown: ChatMessageView[],

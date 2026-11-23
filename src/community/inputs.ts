@@ -27,6 +27,12 @@ export const replyInput = z.object({
   body,
 });
 
+/** The gap fill's read: a session thread's messages after one. */
+export const chatGapInput = z.object({
+  threadId: z.uuid(),
+  afterId: z.uuid(),
+});
+
 export const sendChatInput = z.object({
   threadId: z.uuid(),
   body: z.string().trim().min(1).max(CHAT_BODY_MAX),

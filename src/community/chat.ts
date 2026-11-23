@@ -112,6 +112,23 @@ export async function chatUpTo(
   return rows.reverse().map(toView);
 }
 
+/**
+ * What a refresh skipped (M9 Task 4): a session thread's visible messages
+ * after `afterId`, a page at a time. Nothing for any other thread, or one
+ * that was removed. Like the refresh, the same for every reader.
+ */
+export async function chatGap(
+  db: Db,
+  threadId: string,
+  afterId: string,
+): Promise<ChatMessageView[]> {
+  const state = await chatState(db, threadId);
+  if (!state || state.kind !== "session" || state.status === "removed") {
+    return [];
+  }
+  return chatSince(db, threadId, afterId);
+}
+
 /** The thread's chat window and its session's status, or null. */
 export async function chatState(db: Db, threadId: string) {
   const [row] = await db

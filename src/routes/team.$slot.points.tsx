@@ -5,23 +5,18 @@ import { PointsBreakdown } from "@/components/play/points-breakdown";
 import { privateHeaders } from "@/lib/private-headers";
 import { getBreakdown, markSessionsWatched } from "@/server/play";
 import { isRefusal } from "@/play/refusal";
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { revealOf } from "@/lib/shown-ids";
+import { useRevealed } from "@/lib/use-revealed";
 
 /**
- * `?round=` picks the round, the team's latest by default. `?show=<id>,<id>`
- * holds the sessions "Show it" revealed on this page: it lasts until the
- * page is left and is never stored.
+ * `?round=` picks the round, the team's latest by default. `?show=` is the
+ * old address form of "Show it" (before M9): it still reveals on the load it
+ * arrives with, then moves into the history entry's state (`useRevealed`).
  */
 const searchSchema = z.object({
   round: z.coerce.number().int().min(1).max(30).optional().catch(undefined),
   show: z.string().max(400).optional(),
 });
-const shownIds = (show: string | undefined) =>
-  (show ?? "")
-    .split(",")
-    .filter((id) => UUID.test(id))
-    .slice(0, 10);
 
 // For someone signed in: the root gate sends a logged-out visitor to sign in
 // and back (`signInFirst`).
@@ -32,17 +27,18 @@ export const Route = createFileRoute("/team/$slot/points")({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({
     round: search.round,
-    show: shownIds(search.show),
+    show: search.show,
   }),
-  loader: async ({ params, deps }) => {
+  loader: async ({ params, deps, location }) => {
     const slot = Number(params.slot);
     const toList = () => redirect({ to: "/team", search: { list: 1 } });
     if (!Number.isInteger(slot) || slot < 1 || slot > 10) throw toList();
+    const { ids } = revealOf(location.state, deps.show);
     const page = await getBreakdown({
       data: {
         slot,
         ...(deps.round !== undefined ? { round: deps.round } : {}),
-        ...(deps.show.length > 0 ? { show: deps.show } : {}),
+        ...(ids.length > 0 ? { show: ids } : {}),
       },
     });
     if (isRefusal(page)) {
@@ -58,22 +54,13 @@ export const Route = createFileRoute("/team/$slot/points")({
 function PointsRoute() {
   const { page } = Route.useLoaderData();
   const router = useRouter();
-  const navigate = Route.useNavigate();
+  const { reveal } = useRevealed(Route.useSearch().show);
   return (
     <AppShell active="team">
       {page ? (
         <PointsBreakdown
           page={page}
-          show={(id) =>
-            void navigate({
-              search: (prev) => ({
-                ...prev,
-                show: [...new Set([...shownIds(prev.show), id])].join(","),
-              }),
-              replace: true,
-              resetScroll: false,
-            })
-          }
+          show={(id) => reveal({ ids: [id] })}
           markWatched={(sessionIds) =>
             markSessionsWatched({ data: { sessionIds } })
           }

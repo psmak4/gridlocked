@@ -31,7 +31,8 @@ import { systemTimer } from "@/lib/clock";
 import { msUntil } from "@/lib/reload-at";
 import { privateHeaders } from "@/lib/private-headers";
 import { publicHeaders } from "@/lib/public-headers";
-import { SHOW_ALL, shownIds, showsAll, withShown } from "@/lib/shown-ids";
+import { revealOf } from "@/lib/shown-ids";
+import { useRevealed } from "@/lib/use-revealed";
 import { createRefreshChannel } from "@/realtime/refresh";
 import {
   deletePostFn,
@@ -39,6 +40,7 @@ import {
   getThreadFn,
   replyFn,
   reportFn,
+  chatGapFn,
   sendChatFn,
   voteFn,
 } from "@/server/community";
@@ -48,7 +50,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * `?post=` opens the page at one reply ("Continue thread"), `?sort=new` for
- * the newest first, and `?show=` holds what "Show it" revealed here.
+ * the newest first. `?show=` is the old address form of "Show it": it
+ * reveals on the load it arrives with, then moves into the history entry's
+ * state (`useRevealed`).
  */
 const searchSchema = z.object({
   post: z.string().regex(UUID).optional().catch(undefined),
@@ -65,22 +69,27 @@ export const Route = createFileRoute("/t/$threadId")({
   loaderDeps: ({ search }) => ({
     post: search.post,
     sort: search.sort ?? "best",
-    show: shownIds(search.show),
-    showAll: showsAll(search.show),
+    show: search.show,
   }),
-  loader: async ({ params, deps }) => {
+  loader: async ({ params, deps, location }) => {
     if (!UUID.test(params.threadId)) throw notFound();
+    const shown = revealOf(location.state, deps.show);
     const result = await getThreadFn({
       data: {
         threadId: params.threadId,
         postId: deps.post ?? null,
         sort: deps.sort,
-        ...(deps.show.length > 0 ? { show: deps.show } : {}),
-        ...(deps.showAll ? { showAll: true } : {}),
+        ...(shown.ids.length > 0 ? { show: shown.ids } : {}),
+        ...(shown.all ? { showAll: true } : {}),
       },
     });
     if (!result.page) throw notFound();
-    return { ...result, page: result.page, nowMs: Date.parse(result.now) };
+    return {
+      ...result,
+      page: result.page,
+      nowMs: Date.parse(result.now),
+      showAll: shown.all,
+    };
   },
   // After the loader: a function here before `validateSearch` loses the
   // search's type.
@@ -94,8 +103,8 @@ const commentsWords = (n: number) =>
 
 /** A thread (wave 4): the opening post, then the comments as a tree. */
 function ThreadRoute() {
-  const { page, writer, nowMs, chat, replay } = Route.useLoaderData();
-  const { sort, showAll } = Route.useLoaderDeps();
+  const { page, writer, nowMs, chat, replay, showAll } = Route.useLoaderData();
+  const { sort } = Route.useLoaderDeps();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const { thread } = page;
@@ -153,13 +162,15 @@ function ThreadRoute() {
             windowSeconds: chat.windowSeconds,
             offsetMs: nowMs - systemTimer.now(),
             send: (threadId, body) => sendChatFn({ data: { threadId, body } }),
+            since: (threadId, afterId) =>
+              chatGapFn({ data: { threadId, afterId } }),
             onModeChange: (mode) => {
               if (mode === "discussion") void router.invalidate();
             },
           })
         : null,
     // One channel per thread while it is shown in chat mode; the loader's
-    // clock seeds it once, and each refresh corrects it.
+    // clock seeds it, and only a refused window corrects it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [thread.id, chatting, chat?.windowSeconds],
   );
@@ -179,26 +190,22 @@ function ThreadRoute() {
     return () => clearTimeout(timer);
   }, [reloadAt, nowMs, router]);
 
-  // A visitor's device choice (HLD §7.3): "all" asks for `?show=all`.
+  // A visitor's device choice (HLD §7.3): "all" reveals the page in its
+  // history entry, never in the address.
   const visitor = writer === null;
-  const setShow = (show: string | undefined) =>
-    void navigate({
-      search: (prev) => ({ ...prev, show }),
-      replace: true,
-      resetScroll: false,
-    });
+  const { reveal, hideAll } = useRevealed(Route.useSearch().show);
   useDeviceReveal({
     visitor,
     hasHidden: page.hidden,
     showAll,
-    showEverything: () => setShow(SHOW_ALL),
+    showEverything: () => reveal({ all: true }),
   });
   const deviceSwitch =
     visitor && (page.hidden || showAll) ? (
       <DeviceRevealSwitch
         on={showAll}
-        onShowAll={() => setShow(SHOW_ALL)}
-        onShowSafe={() => setShow(undefined)}
+        onShowAll={() => reveal({ all: true })}
+        onShowSafe={hideAll}
       />
     ) : null;
 
@@ -239,16 +246,7 @@ function ThreadRoute() {
                 ? `Comments in this thread may give away the result. You haven't marked ${thread.sessionPhrase} as watched.`
                 : "Comments in this thread may give away a result."
             }
-            onReveal={() =>
-              void navigate({
-                search: (prev) => ({
-                  ...prev,
-                  show: withShown(prev.show, revealId),
-                }),
-                replace: true,
-                resetScroll: false,
-              })
-            }
+            onReveal={() => reveal({ ids: [revealId] })}
             onMarkWatched={
               writer && thread.sessionId
                 ? () =>

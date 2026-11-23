@@ -9,8 +9,15 @@ import {
   markSessionsWatched,
 } from "@/server/play";
 import { isRefusal } from "@/play/refusal";
+import { revealOf } from "@/lib/shown-ids";
+import { useRevealed } from "@/lib/use-revealed";
 
-/** `show`: sessions revealed on this page only ("Show it"); never stored. */
+/**
+ * `?show=` is the old address form of "Show it" (before M9): it still
+ * reveals on the load it arrives with, then moves into the history entry's
+ * state (`useRevealed`), which back and forward keep and a copied address
+ * doesn't carry.
+ */
 type StandingsSearch = { show?: string };
 
 export const Route = createFileRoute("/leagues/$slug")({
@@ -21,27 +28,29 @@ export const Route = createFileRoute("/leagues/$slug")({
   loaderDeps: ({ search }) => ({ show: search.show }),
   head: () => ({ meta: [{ title: "League standings · Gridlocked" }] }),
   headers: privateHeaders,
-  loader: async ({ params, deps }) => {
-    const show = deps.show?.split(",").filter(Boolean) ?? [];
+  loader: async ({ params, deps, location }) => {
+    const show = revealOf(location.state, deps.show).ids;
     const page = await getStandings({
       data: { slug: params.slug, ...(show.length ? { show } : {}) },
     });
     if (isRefusal(page)) {
-      if (page.error === "league_not_found") return null;
+      if (page.error === "league_not_found") return { page: null, show };
       throw new Error(`getStandings: ${page.error}`);
     }
-    return page;
+    // With what it revealed, so the screen starts again only once the
+    // revealed page has loaded.
+    return { page, show };
   },
   component: StandingsRoute,
 });
 
 /** League standings (M6 Task 13). */
 function StandingsRoute() {
-  const page = Route.useLoaderData();
+  const { page, show } = Route.useLoaderData();
   const { slug } = Route.useParams();
   const search = Route.useSearch();
   const router = useRouter();
-  const show = search.show?.split(",").filter(Boolean) ?? [];
+  const { reveal } = useRevealed(search.show);
   return (
     <AppShell active="leagues">
       {page === null ? (
@@ -52,7 +61,7 @@ function StandingsRoute() {
         />
       ) : (
         <StandingsScreen
-          key={`${slug}:${search.show ?? ""}`}
+          key={`${slug}:${show.join(",")}`}
           page={page}
           more={(afterRank, version) =>
             getStandings({
@@ -64,14 +73,7 @@ function StandingsRoute() {
               },
             })
           }
-          show={(ids) =>
-            void router.navigate({
-              to: "/leagues/$slug",
-              params: { slug },
-              search: { show: [...new Set([...show, ...ids])].join(",") },
-              replace: true,
-            })
-          }
+          show={(ids) => reveal({ ids })}
           markWatched={(sessionIds) =>
             markSessionsWatched({ data: { sessionIds } })
           }
