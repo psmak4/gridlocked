@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { authClient } from "@/identity/auth-client";
 import { checkEmailState } from "@/lib/check-email-state";
+import { PASSWORD_TOO_COMMON, TOO_COMMON_WORDS } from "@/lib/password-refusals";
 import { privateHeaders } from "@/lib/private-headers";
 
 type ResetSearch = { token?: string; error?: string };
@@ -59,6 +60,11 @@ function ResetPassword() {
       });
       if (error) {
         setWorking(false);
+        // Also a 400, so asked first: the link still works.
+        if (error.code === PASSWORD_TOO_COMMON) {
+          setMessage(TOO_COMMON_WORDS);
+          return;
+        }
         if (error.code === "INVALID_TOKEN" || error.status === 400) {
           setExpired(true);
           return;

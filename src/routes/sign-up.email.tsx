@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { authClient } from "@/identity/auth-client";
 import { checkEmailState } from "@/lib/check-email-state";
+import { PASSWORD_TOO_COMMON, TOO_COMMON_WORDS } from "@/lib/password-refusals";
 
 export const Route = createFileRoute("/sign-up/email")({
   head: () => ({ meta: [{ title: "Create your account · Gridlocked" }] }),
@@ -171,7 +172,12 @@ function SignUpWithEmail() {
 }
 
 /** What went wrong, in words that give nothing away about other accounts. */
-function signUpMessage(error: { status?: number; message?: string }): string {
+function signUpMessage(error: {
+  status?: number;
+  message?: string;
+  code?: string;
+}): string {
+  if (error.code === PASSWORD_TOO_COMMON) return TOO_COMMON_WORDS;
   if (error.status === 429)
     return "Too many tries. Wait a moment, then try again.";
   if (error.status === 403) return "Sign-up isn't open for that address.";

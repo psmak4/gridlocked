@@ -262,6 +262,30 @@ test.describe("signing up", () => {
     await expect(page).toHaveURL(/\/welcome$/);
   });
 
+  test("one of the commonest passwords is refused, and says so", async ({
+    page,
+  }) => {
+    const email = newEmail();
+    await page.goto("/sign-up/email");
+    await expect(
+      page.getByRole("button", { name: "Create account" }),
+    ).toBeEnabled();
+    await fillEmailForm(page, {
+      email,
+      username: newUsername(),
+      password: "Password123",
+    });
+    await page.getByRole("checkbox", { name: "I'm 16 or older" }).click();
+    await page.getByRole("checkbox", { name: /I agree to the Terms/ }).click();
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(
+      page.getByText(
+        "That password is one of the most common. Choose another.",
+      ),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/sign-up\/email$/);
+  });
+
   test("a reserved username shows why", async ({ page, request }) => {
     const taken = (await createAccount(request)).username;
     await page.goto("/sign-up/email");
