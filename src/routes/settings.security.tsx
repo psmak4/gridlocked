@@ -14,6 +14,7 @@ import { Help, SettingsGroup } from "@/components/settings-parts";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { authClient } from "@/identity/auth-client";
+import { PASSWORD_TOO_COMMON, TOO_COMMON_WORDS } from "@/lib/password-refusals";
 import { privateHeaders } from "@/lib/private-headers";
 import { settingsGuard } from "@/lib/settings-guard";
 import { getSecurity, unlockStaffTools } from "@/server/account";
@@ -98,7 +99,9 @@ function PasswordChange({ hasPassword }: { hasPassword: boolean }) {
             ? "That isn't your current password."
             : error.code === "PASSWORD_TOO_SHORT"
               ? "Use at least 10 characters."
-              : "We couldn't change it. Try again in a moment.",
+              : error.code === PASSWORD_TOO_COMMON
+                ? TOO_COMMON_WORDS
+                : "We couldn't change it. Try again in a moment.",
       );
       return;
     }

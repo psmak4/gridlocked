@@ -7,6 +7,7 @@ import {
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { authSessions, authVerifications, users } from "@/db/schema";
+import { isCommonPassword, PASSWORD_TOO_COMMON } from "../common-passwords";
 import { hasStaffRole } from "../roles";
 import type { Db } from "@/db/types";
 import type { AuthEnv } from "../env";
@@ -49,6 +50,13 @@ export type RequestHookContext = {
 };
 
 export type AddressProof = { signedIn: string | null; unverified?: string };
+
+/** Where a request sets a new password, the body field that carries it. */
+const NEW_PASSWORD_FIELD: Readonly<Record<string, string>> = {
+  "/sign-up/email": "password",
+  "/change-password": "newPassword",
+  "/reset-password": "newPassword",
+};
 
 /** Better Auth's `hooks`: the request middleware before and after every endpoint. */
 export function requestHooks({
@@ -204,6 +212,21 @@ export function requestHooks({
               "username" in body || "displayUsername" in body
                 ? "A username is changed from settings."
                 : "Your account is changed from settings.",
+          });
+        }
+      }
+      // A new password isn't one of the commonest (ASVS 5.0 6.2.4).
+      const passwordField = NEW_PASSWORD_FIELD[ctx.path];
+      if (passwordField) {
+        const body: unknown = ctx.body;
+        const password =
+          typeof body === "object" && body !== null
+            ? (body as Record<string, unknown>)[passwordField]
+            : undefined;
+        if (typeof password === "string" && isCommonPassword(password)) {
+          throw new APIError("BAD_REQUEST", {
+            message: "That password is too common.",
+            code: PASSWORD_TOO_COMMON,
           });
         }
       }

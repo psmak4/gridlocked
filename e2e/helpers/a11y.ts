@@ -1,9 +1,8 @@
-import { createRequire } from "node:module";
 import { expect, type Locator, type Page } from "@playwright/test";
+import { injectAxe } from "./accounts";
 
 // Accessibility checks shared by the sweep and the keyboard pass (M9 Task 8).
 
-const require = createRequire(import.meta.url);
 const WCAG_21_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 type Violation = {
@@ -15,8 +14,7 @@ type Violation = {
 
 /** axe's WCAG 2.1 A and AA rules on the page as it stands, one line each. */
 export async function wcagViolations(page: Page): Promise<string[]> {
-  const loaded = await page.evaluate(() => "axe" in window);
-  if (!loaded) await page.addScriptTag({ path: require.resolve("axe-core") });
+  await injectAxe(page);
   const violations = await page.evaluate(
     async (tags) =>
       (
@@ -42,14 +40,24 @@ export async function wcagViolations(page: Page): Promise<string[]> {
   });
 }
 
-/** `target` shows a focus ring: an outline or a box shadow while focused. */
+/**
+ * `target` shows a focus ring: an outline or a box shadow while focused.
+ * Polled briefly: under a loaded full run, a sheet that is still opening can
+ * settle its styles a moment after focus arrives.
+ */
 export async function expectFocusRing(target: Locator) {
-  const ring = await target.evaluate((el) => {
-    const s = getComputedStyle(el);
-    const outline = s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0;
-    return outline || s.boxShadow !== "none";
-  });
-  expect(ring, "a visible focus ring").toBe(true);
+  await expect
+    .poll(
+      () =>
+        target.evaluate((el) => {
+          const s = getComputedStyle(el);
+          const outline =
+            s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0;
+          return outline || s.boxShadow !== "none";
+        }),
+      { message: "a visible focus ring", timeout: 2_000 },
+    )
+    .toBe(true);
 }
 
 /**

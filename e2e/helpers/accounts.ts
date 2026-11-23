@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
   expect,
@@ -95,9 +96,45 @@ type AxeResults = {
   violations: { id: string; impact: string | null; help: string }[];
 };
 
+const AXE_SOURCE = readFileSync(require.resolve("axe-core"), "utf8");
+
+/**
+ * Puts axe on the page, if it isn't there yet. Not as a script tag: the page's
+ * CSP (M9 Task 9) refuses inline scripts without its nonce, while Playwright's
+ * own evaluation runs outside the page's policy. Then waits for the page to
+ * settle.
+ */
+export async function injectAxe(page: Page) {
+  if (!(await page.evaluate(() => "axe" in window))) {
+    await page.evaluate(AXE_SOURCE);
+  }
+  await settled(page);
+}
+
+/**
+ * Waits (up to 2 s) for the page's finite animations and transitions to
+ * end, so axe reads colours as they rest, not halfway through a fade.
+ */
+async function settled(page: Page) {
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .getAnimations()
+          .every(
+            (a) =>
+              a.playState !== "running" ||
+              a.effect?.getComputedTiming().iterations === Infinity,
+          ),
+      undefined,
+      { timeout: 2_000 },
+    )
+    .catch(() => {});
+}
+
 /** Runs axe on the page and fails on anything serious or critical. */
 export async function expectNoSeriousAxeViolations(page: Page) {
-  await page.addScriptTag({ path: require.resolve("axe-core") });
+  await injectAxe(page);
   const results = await page.evaluate(() =>
     (
       window as unknown as { axe: { run: () => Promise<AxeResults> } }

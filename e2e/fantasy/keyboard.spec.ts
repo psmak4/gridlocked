@@ -185,6 +185,11 @@ test("a report with the keyboard only", async ({ page, browser }) => {
   await expect(report).toBeFocused();
   await page.keyboard.press("Enter");
   const sheet = page.getByRole("dialog", { name: "Report" });
+  // The sheet moves focus into itself once it has opened; a Tab pressed
+  // before then can be overtaken by it.
+  await expect
+    .poll(() => sheet.evaluate((el) => el.contains(document.activeElement)))
+    .toBe(true);
   // A radio group is one tab stop: Tab reaches its first choice, and the
   // arrow keys move (and check) within it.
   await tabTo(page, sheet.getByRole("radio", { name: "Spam" }));
