@@ -10,10 +10,9 @@ import {
   expectNoSeriousAxeViolations,
   heading,
   hydrated,
-  pageHydrated,
   signIn,
 } from "../helpers/accounts";
-import { setTrust } from "../helpers/forum";
+import { reportedPost } from "../helpers/forum";
 import {
   addCrowd,
   FANTASY_ORIGIN,
@@ -71,53 +70,6 @@ async function inAuditLog(page: Page, kind: string, reason: string) {
   await expect(
     page.getByRole("row").filter({ hasText: kind }).filter({ hasText: reason }),
   ).toHaveCount(1);
-}
-
-/** An author's forum post, reported as spam by a newcomer. Returns its words. */
-async function reportedPost(browser: Browser): Promise<string> {
-  const words = `Cheap tickets ${tag()}`;
-  const authorContext = await browser.newContext();
-  const author = await authorContext.newPage();
-  const writer = await createAccount(authorContext.request, {
-    origin: FANTASY_ORIGIN,
-  });
-  await setTrust(authorContext.request, writer.email, 1);
-  await author.goto("/forum/new?category=general");
-  await pageHydrated(author);
-  await author.getByLabel("Title").fill(`Pit stop strategy ${tag()}`);
-  await author.getByLabel("Post").fill("Two stops, surely.");
-  await author.getByRole("button", { name: "Post thread" }).click();
-  await expect(author).toHaveURL(/\/t\/[0-9a-f-]{36}$/);
-  const threadUrl = author.url();
-  await author.getByLabel("Add a comment").fill(words);
-  await author.getByRole("button", { name: "Post comment" }).click();
-  await expect(author.getByRole("list", { name: "Comments" })).toContainText(
-    words,
-  );
-  await authorContext.close();
-
-  const readerContext = await browser.newContext();
-  const reader = await readerContext.newPage();
-  const newcomer = await createAccount(readerContext.request, {
-    origin: FANTASY_ORIGIN,
-  });
-  await setTrust(readerContext.request, newcomer.email, 0);
-  await reader.goto(threadUrl);
-  await pageHydrated(reader);
-  const more = reader
-    .getByRole("list", { name: "Comments" })
-    .getByRole("button", { name: `More for the post by ${writer.username}` });
-  await hydrated(more);
-  await more.click();
-  await reader.getByRole("menuitem", { name: "Report" }).click();
-  const sheet = reader.getByRole("dialog", { name: "Report" });
-  await sheet.getByRole("radio", { name: "Spam" }).check();
-  await sheet.getByRole("button", { name: "Send report" }).click();
-  await expect(sheet.getByRole("status")).toHaveText(
-    "Thanks. A moderator will take a look.",
-  );
-  await readerContext.close();
-  return words;
 }
 
 /** The admin makes `username` a moderator from the users screen. */
@@ -322,7 +274,7 @@ for (const size of [
     }
 
     // A moderator acts on a report, and is refused the calendar.
-    const words = await reportedPost(browser);
+    const { words } = await reportedPost(browser, FANTASY_ORIGIN);
     const moderator = await unlockedModerator(browser, page, request);
     const mod = moderator.page;
     await mod.setViewportSize(size);
