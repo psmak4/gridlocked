@@ -1,0 +1,140 @@
+name: Backup (staging)
+
+# The nightly backup (M9 Task 11, decision 4): a custom-format pg_dump taken
+# in one exported snapshot with its row counts, checked whole with
+# pg_restore, encrypted to the owner's age public key, and kept as
+# backups/staging/<date>.dump.age in the branch's Neon Object Storage. The
+# newest 14 are kept. Any failed check fails the run, and nothing is kept
+# from it. The private key never comes here: restoring is by hand
+# (docs/runbooks/restore.md).
+#
+# The staging environment needs:
+# - secrets DATABASE_URL_STAGING, BACKUP_AWS_ACCESS_KEY_ID and
+#   BACKUP_AWS_SECRET_ACCESS_KEY (a Neon storage credential of its own);
+# - variables BACKUP_AWS_ENDPOINT_URL_S3, BACKUP_AWS_REGION and
+#   BACKUP_AGE_RECIPIENT (the age public key, `age1…`).
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never alongside a deploy's migrations.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  BACKUP_ENV: staging
+  BACKUP_BUCKET: backups
+  BACKUP_KEEP: "14"
+
+jobs:
+  backup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    # `bash` sets pipefail: a failed step in a pipe fails the run.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the settings
+        run: |
+          missing=""
+          [ -n "$DATABASE_URL" ] || missing="$missing DATABASE_URL_STAGING"
+          [ -n "$AWS_ACCESS_KEY_ID" ] || missing="$missing BACKUP_AWS_ACCESS_KEY_ID"
+          [ -n "$AWS_SECRET_ACCESS_KEY" ] || missing="$missing BACKUP_AWS_SECRET_ACCESS_KEY"
+          [ -n "$AWS_ENDPOINT_URL_S3" ] || missing="$missing BACKUP_AWS_ENDPOINT_URL_S3"
+          [ -n "$AWS_REGION" ] || missing="$missing BACKUP_AWS_REGION"
+          case "$BACKUP_AGE_RECIPIENT" in
+            age1*) ;;
+            *) missing="$missing BACKUP_AGE_RECIPIENT" ;;
+          esac
+          if [ -n "$missing" ]; then
+            echo "::error::The staging environment is missing:$missing (docs/runbooks/restore.md)"
+            exit 1
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL_S3: ${{ vars.BACKUP_AWS_ENDPOINT_URL_S3 }}
+          AWS_REGION: ${{ vars.BACKUP_AWS_REGION }}
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # pg_dump must be at least the server's version (Postgres 17), from
+      # the PostgreSQL project's own apt repository; age is Ubuntu's.
+      - name: Install pg_dump 17 and age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17 age
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Dump and count in one snapshot
+        run: |
+          pg_dump --version
+          pnpm -s backup-dump "$RUNNER_TEMP/backup.dump" "$RUNNER_TEMP/backup.counts.tsv"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+
+      - name: Check the dump is whole
+        run: pnpm -s backup-check dump "$RUNNER_TEMP/backup.dump"
+
+      - name: Encrypt it, and check the result
+        run: |
+          age --recipient "$BACKUP_AGE_RECIPIENT" --output "$RUNNER_TEMP/backup.dump.age" "$RUNNER_TEMP/backup.dump"
+          pnpm -s backup-check encrypted "$RUNNER_TEMP/backup.dump.age" "$RUNNER_TEMP/backup.dump"
+          rm -f "$RUNNER_TEMP/backup.dump"
+        env:
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+
+      - name: Upload it, and keep the newest 14
+        run: |
+          aws configure set default.s3.addressing_style path
+          day="$(date -u +%F)"
+          prefix="$BACKUP_ENV/$day"
+          aws s3 cp --only-show-errors "$RUNNER_TEMP/backup.dump.age" "s3://$BACKUP_BUCKET/$prefix.dump.age"
+          aws s3 cp --only-show-errors "$RUNNER_TEMP/backup.counts.tsv" "s3://$BACKUP_BUCKET/$prefix.counts.tsv"
+          echo "Kept s3://$BACKUP_BUCKET/$prefix.dump.age ($(stat -c %s "$RUNNER_TEMP/backup.dump.age") bytes)"
+          aws s3api list-objects-v2 --bucket "$BACKUP_BUCKET" --prefix "$BACKUP_ENV/" \
+              --query 'Contents[].Key' --output text \
+            | tr '\t' '\n' \
+            | pnpm -s backup-check prune "$BACKUP_KEEP" \
+            | while read -r key; do
+                aws s3 rm --only-show-errors "s3://$BACKUP_BUCKET/$key"
+                aws s3 rm --only-show-errors "s3://$BACKUP_BUCKET/${key%.dump.age}.counts.tsv"
+                echo "Deleted $key"
+              done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL_S3: ${{ vars.BACKUP_AWS_ENDPOINT_URL_S3 }}
+          AWS_REGION: ${{ vars.BACKUP_AWS_REGION }}
+
+      - name: Remove the local copies
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/backup.*
