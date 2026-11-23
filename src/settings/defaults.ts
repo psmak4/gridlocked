@@ -44,13 +44,21 @@ export const settingSchemas = {
   /** Set below each provider's published limits (HLD §4.1). */
   provider_limits: z.object({ jolpica: rateLimits, openf1: rateLimits }),
   session_durations: sessionDurations,
-  /** Start at scheduled end, back off through these gaps, give up after. */
+  /**
+   * Start at scheduled end, back off through these gaps, give up after. At
+   * most 10 gaps, none over a day (M9 Task 7).
+   */
   poll_schedule: z.object({
-    backoffMinutes: z.array(positiveInt).min(1),
+    backoffMinutes: z
+      .array(positiveInt.max(24 * 60))
+      .min(1)
+      .max(10),
     giveUpAfterHours: positiveInt,
   }),
-  /** Re-checks after the race (HLD §4.4). */
-  finalizer_checks: z.object({ afterHours: z.array(positiveInt).min(1) }),
+  /** Re-checks after the race (HLD §4.4), none over a week on. */
+  finalizer_checks: z.object({
+    afterHours: z.array(positiveInt.max(168)).min(1),
+  }),
   validator_thresholds: z.object({ carsPerConstructor: positiveInt }),
   /**
    * Resend's free plan (HLD §10). `reservedForUrgent` of the day's emails are

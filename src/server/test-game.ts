@@ -52,6 +52,7 @@ import { withDb } from "./db";
 import {
   localChatArchiveFiles,
   localChatArchiveStore,
+  localDueStore,
   resetLocalDb,
 } from "./local-db";
 
@@ -84,6 +85,7 @@ export function seedTestGame(at: Date): Promise<{ gameId: string }> {
         fixturesDir: fixturesDir(),
         assetId,
         chatArchiveStore: localChatArchiveStore,
+        store: localDueStore,
       });
       live = { gameId, replay };
       return { gameId };

@@ -31,6 +31,7 @@ const FROM_IDENTITY: Partial<Record<string, StaffErrorCode>> = {
   invalid_trust_level: "invalid",
   inactive: "invalid",
   last_admin: "last_admin",
+  cannot_ban_admin: "cannot_ban_admin",
   cannot_impersonate: "cannot_impersonate",
 };
 

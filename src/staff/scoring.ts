@@ -24,7 +24,9 @@ import {
   teams,
 } from "@/db/schema";
 import type { Db } from "@/db/types";
-import { approveRescore, discardDryRun, dryRunGame } from "@/game/corrections";
+import { approveRescore, discardDryRun, queueDryRun } from "@/game/corrections";
+import { republishIfEarlier, type DueStore } from "@/jobs/due-times";
+import type { TickDb } from "@/jobs/tick";
 import { GameError } from "@/game/errors";
 import { isStaffErrorCode, StaffError } from "./errors";
 import type { StaffActor } from "./roster";
@@ -409,14 +411,21 @@ async function asStaff<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** **Start a dry run**: what a re-score of the whole game would change. */
-export function startDryRun(
+/**
+ * **Start a dry run**: what a re-score of the whole game would change. The
+ * scoring runs as `dry_run` jobs (M9 Task 7), so with the due-times store the
+ * file is moved to now and the tick picks them up at once.
+ */
+export async function startDryRun(
   db: Db,
   now: Date,
   actor: StaffActor,
-  input: { gameId: string; reason: string },
+  input: { gameId: string; reason: string; batchSize?: number },
+  store?: DueStore,
 ) {
-  return asStaff(() => dryRunGame(db, now, actor, input));
+  const started = await asStaff(() => queueDryRun(db, now, actor, input));
+  if (store) await republishIfEarlier(db as TickDb, store, now, now);
+  return started;
 }
 
 /** **Approve and re-score**, naming the dry run the screen showed. */

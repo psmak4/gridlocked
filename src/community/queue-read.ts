@@ -320,6 +320,15 @@ export async function modQueue(
     : list;
 }
 
+/** How many items are open, for the staff area's badge: a count, not the list. */
+export async function openModCount(db: Db): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(modQueueItems)
+    .where(eq(modQueueItems.status, "open"));
+  return row?.n ?? 0;
+}
+
 const MONTH_YEAR = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   year: "numeric",

@@ -45,9 +45,10 @@ import { audit, type StaffActor } from "./roster";
 // (`time_source = 'admin'`) alone.
 //
 // When the caller has the due-times store, the file is rebuilt from the job
-// table after planning, so a lock moved earlier wakes the tick in time. The
-// site has no store when deployed (the tick runs elsewhere), so it relies on
-// the 6-hourly safety tick and on the lock job's own check of `lock_at`.
+// table after planning, so a lock moved earlier wakes the tick in time. A
+// deployed site has the store once its storage keys are set
+// (`src/server/due-store.ts`); without them it relies on the 6-hourly safety
+// tick and on the lock job's own check of `lock_at`.
 
 export { STAFF_SESSION_STATUSES, type StaffSessionStatus };
 

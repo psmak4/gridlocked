@@ -131,6 +131,16 @@ export async function moveClock(
   return (await response.json()) as { now: string; jobsRun: number };
 }
 
+/**
+ * Moves the clock to the next whole minute, so the tick runs every job due
+ * now: what a staff action just queued, such as a dry run (M9 Task 7).
+ */
+export async function runDueNow(request: APIRequestContext) {
+  const { now } = await gameState(request);
+  const next = (Math.floor(Date.parse(now) / 60_000) + 1) * 60_000;
+  return moveClock(request, new Date(next).toISOString());
+}
+
 /** The seeded game's status and each round's, for the harness's own checks. */
 export async function gameState(
   request: APIRequestContext,

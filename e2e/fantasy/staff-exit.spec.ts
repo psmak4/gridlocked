@@ -20,6 +20,7 @@ import {
   moveClock,
   ROUND_1,
   ROUND_2,
+  runDueNow,
   seedGame,
   staleOverride,
   teamChangeReview,
@@ -302,6 +303,15 @@ for (const size of [
     await start.getByLabel(REASON_LABEL).fill(`Check Albon ${run}`);
     await start.getByRole("button", { name: "Start a dry run" }).click();
     await expect(heading(page)).toHaveText("Scoring dry run");
+    // It scores as jobs (M9 Task 7): running until the tick runs them.
+    await expect(
+      page.getByText("This dry run is still scoring. Reload in a minute."),
+    ).toBeVisible();
+    await runDueNow(request);
+    await page.reload();
+    await expect(
+      page.getByRole("list", { name: "Dry run totals" }),
+    ).toBeVisible();
     const decide = page.getByRole("form", {
       name: "Approve or discard the dry run",
     });

@@ -10,8 +10,8 @@ import { ingest } from "../../tests/helpers/ingest-2026";
 import { sessionOf } from "../../tests/helpers/pipeline-2026";
 import { loadBody } from "../../tests/helpers/results-2026";
 import { seedUser } from "../../tests/helpers/users";
-import { drivers, leagueStandings, teamEventTotals } from "@/db/schema";
-import { dryRunGame } from "@/game/corrections";
+import { drivers, jobs, leagueStandings, teamEventTotals } from "@/db/schema";
+import { createDryRunHandlers, dryRunGame } from "@/game/corrections";
 import { openGame, saveLineup, type LineupPick } from "@/game/lineups";
 import { createScoreHandlers, enqueueScoring } from "@/game/score-jobs";
 import { createTeam } from "@/game/teams";
@@ -25,7 +25,7 @@ import { addOverride } from "@/results/overrides";
 import { advanceStatus } from "@/results/status";
 import { ENGINE_VERSION } from "@/scoring/engine";
 import type { StaffActor } from "./roster";
-import { dryRunSummary, rulesetVersions } from "./scoring";
+import { dryRunSummary, rulesetVersions, startDryRun } from "./scoring";
 
 const NOW = new Date("2026-02-01T09:00:00.000Z");
 const HOUR = 3_600_000;
@@ -213,6 +213,70 @@ describe("dryRunSummary and rulesetVersions (M8 Task 8)", () => {
     expect(first!.change).toBeLessThan(second!.change);
     expect(second).toMatchObject({ teamId: teamB, team: "Bravo" });
     expect(Math.abs(first!.change)).toBeGreaterThan(Math.abs(second!.change));
+  });
+
+  it("a dry run longer than one batch continues as a job, and the screen shows it running", async () => {
+    // Started from the screen: the runs and the audit row now, the scoring
+    // later, one dry_run job per event. A batch of one team makes two.
+    const started = await startDryRun(t.db, clock.now(), ACTOR, {
+      gameId,
+      reason: "Engine 2026.2",
+      batchSize: 1,
+    });
+    expect(started).toMatchObject({ sessions: 1, events: 1 });
+    expect(await dryRunSummary(t.db, gameId)).toMatchObject({
+      dryRunId: started.dryRunId,
+      state: "running",
+      sessions: 1,
+    });
+    const queued = await t.db
+      .select({ payload: jobs.payload, runAt: jobs.runAt })
+      .from(jobs)
+      .where(eq(jobs.kind, "dry_run"));
+    expect(queued).toMatchObject([
+      { payload: { gameId, eventId: round1.id }, runAt: clock.now() },
+    ]);
+
+    expect(
+      await runDue(t.db, clock, createDryRunHandlers(), {
+        maxJobs: 10,
+        leaseMs: 300_000,
+      }),
+    ).toMatchObject({ ran: 1, failed: 0 });
+    const summary = await dryRunSummary(t.db, gameId);
+    expect(summary).toMatchObject({
+      dryRunId: started.dryRunId,
+      state: "pending",
+    });
+    expect(summary!.tiles[0]).toEqual({
+      label: "TEAMS AFFECTED",
+      value: "2",
+      sub: "of 2",
+    });
+  });
+
+  it("a dry run job that fails sets the dry run aside", async () => {
+    const started = await startDryRun(t.db, clock.now(), ACTOR, {
+      gameId,
+      reason: "Engine 2026.2",
+    });
+    // A newer dry run takes over before the job runs.
+    await dryRunGame(t.db, clock.now(), ACTOR, {
+      gameId,
+      reason: "Engine 2026.3",
+    });
+    expect(
+      await runDue(t.db, clock, createDryRunHandlers(), {
+        maxJobs: 10,
+        leaseMs: 300_000,
+      }),
+    ).toMatchObject({ failed: 0 });
+    const summary = await dryRunSummary(t.db, gameId);
+    expect(summary?.dryRunId).not.toBe(started.dryRunId);
+    expect(summary).toMatchObject({
+      state: "pending",
+      reason: "Engine 2026.3",
+    });
   });
 
   it("dryRunSummary says approved once the dry run it shows is approved", async () => {

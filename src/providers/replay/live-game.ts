@@ -15,7 +15,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { events, gameEvents, jobs, providerIds, sessions } from "@/db/schema";
 import { createGameHandlers, planGameJobs } from "@/game/jobs";
 import { openGame } from "@/game/lineups";
-import { publishDueTimes } from "@/jobs/due-times";
+import { publishDueTimes, type DueStore } from "@/jobs/due-times";
 import { planEventJobs } from "@/jobs/plan-event";
 import type { TickDb, TickDeps } from "@/jobs/tick";
 import { fixedClock, virtualTimer, type Clock } from "@/lib/clock";
@@ -83,6 +83,12 @@ export async function startLiveReplay(
     assetId: (key: string) => Promise<string>;
     /** Where `community_daily` archives chat; none, and it can't. */
     chatArchiveStore?: ChatArchiveStore;
+    /**
+     * The due-times file's store; by default its own, in memory. The e2e
+     * server passes the site's, so a staff action that moves the file
+     * (a dry run, a lock moved earlier) reaches this tick (M9 Task 7).
+     */
+    store?: DueStore;
   },
 ): Promise<LiveReplay> {
   const { gameId, at, fixturesDir } = opts;
@@ -98,7 +104,7 @@ export async function startLiveReplay(
     .from(gameEvents)
     .where(eq(gameEvents.gameId, gameId));
   for (const { eventId } of calendar) await planEventJobs(db, eventId);
-  const store = memoryStore();
+  const store = opts.store ?? memoryStore();
   await publishDueTimes(db, store, at);
 
   // Every round's scored sessions are served, each half an hour after its
