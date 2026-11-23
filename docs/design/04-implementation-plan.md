@@ -395,7 +395,7 @@ Target dates assume steady work and are yours to move. The ordering is what matt
     The third, a server-function POST to confirm the CSRF check's fallback to Origin behind Vercel's proxy, passed in M6's staging deploy.
   - **Measure in the budget run:** the per-request `ensureProfile` and `betterAuth()` cost.
   - ~~**Make sure work after a commit can't be lost.** Audits and emails that run after Better Auth's transaction, and `onPasswordReset`'s session revoke, should survive a failure.~~ Done in M9 Task 2 (2026-11-22). A sign-up's email is written in Better Auth's transaction. The rest is an `identity_after_commit` job, run at once and retried by the tick.
-  - **Logging, with Sentry:** ~~a value-free config-error class, and logging codes instead of "better-auth error: event"~~ (done in M9 Task 2: `ConfigError`, and Better Auth's lines carry a code). Sentry itself is Task 10.
+  - **Logging, with Sentry:** ~~a value-free config-error class, and logging codes instead of "better-auth error: event"~~ (done in M9 Task 2: `ConfigError`, and Better Auth's lines carry a code). Sentry itself came in M9 Task 10: one allowlist scrubber for the browser, the server functions and the tick (`docs/runbooks/sentry.md`).
   - **Rate limits:** tune the per-IP and per-path limits with beta traffic.
   - **Job hardening:**
     - ~~queue `identity_daily` even when `sync_calendar` fails~~: done early (2026-11-16). The sync queues it before fetching anything;

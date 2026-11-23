@@ -99,6 +99,10 @@ In GitHub, under Settings, Environments, `staging`:
 | `VITE_TURNSTILE_SITE_KEY` | variable | The Turnstile widget's site key (public, used at build time) |
 | `RESEND_API_KEY`          | secret   | The Resend key, for the tick                                 |
 | `EMAIL_FROM`              | secret   | `onboarding@resend.dev`, for the tick                        |
+| `SENTRY_DSN`              | variable | Sentry's DSN (public); without it nothing reports            |
+| `SENTRY_ORG`              | variable | The Sentry organization's slug, for source maps              |
+| `SENTRY_PROJECT`          | variable | `paddock-club`, for source maps                              |
+| `SENTRY_AUTH_TOKEN`       | secret   | A Sentry organization token, to upload source maps           |
 
 In Vercel, under the project's Settings, Environment Variables (Production):
 
