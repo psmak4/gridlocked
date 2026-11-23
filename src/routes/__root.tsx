@@ -9,6 +9,7 @@ import {
 import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeScript } from "@/components/theme-script";
+import { ZodConfigScript } from "@/components/zod-config-script";
 import { gateRedirect, signInFirst } from "@/lib/auth-gate";
 import { privateHeaders } from "@/lib/private-headers";
 import { getAccount, markPrivate } from "@/server/account";
@@ -85,6 +86,7 @@ function RootDocument({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <ThemeScript />
+        <ZodConfigScript />
         <HeadContent />
       </head>
       {/* Room under the footer for the app shell's fixed bottom nav. */}

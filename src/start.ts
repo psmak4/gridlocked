@@ -3,6 +3,7 @@ import {
   createMiddleware,
   createStart,
 } from "@tanstack/react-start";
+import { contentSecurityPolicy, newNonce } from "@/lib/security-headers";
 import { noStoreOnError } from "@/server/no-store-errors";
 import { scrubServerFnErrors } from "@/server/server-fn-errors";
 
@@ -25,8 +26,27 @@ export const serverFnCsrf = createCsrfMiddleware({
   filter: (ctx) => ctx.handlerType === "serverFn",
 });
 
+/**
+ * A page's Content-Security-Policy (M9 Task 9), with a nonce of its own. The
+ * nonce goes in the request context, where `getRouter` reads it to put on
+ * every script the page's HTML carries. Server functions answer JSON and
+ * need no policy.
+ */
+export const pageCsp = createMiddleware().server(
+  async ({ next, handlerType }) => {
+    if (handlerType !== "router") return next();
+    const nonce = newNonce();
+    const result = await next({ context: { nonce } });
+    result.response.headers.set(
+      "Content-Security-Policy",
+      contentSecurityPolicy(nonce),
+    );
+    return result;
+  },
+);
+
 export const startInstance = createStart(() => ({
-  requestMiddleware: [noStoreErrors, serverFnCsrf],
+  requestMiddleware: [noStoreErrors, serverFnCsrf, pageCsp],
   // Runs around every server function, before its own middleware and its
   // validator: an unexpected error leaves with no address or link in it.
   functionMiddleware: [scrubServerFnErrors],

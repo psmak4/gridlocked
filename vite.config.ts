@@ -4,6 +4,7 @@ import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 import { signedInRoutes } from "./src/lib/public-headers";
+import { SECURITY_HEADERS } from "./src/lib/security-headers";
 
 export default defineConfig({
   server: { port: 3000 },
@@ -17,6 +18,9 @@ export default defineConfig({
     // missing static file, `private, no-store` (HLD §11.4).
     nitro({
       plugins: ["./src/server/nitro-no-store.ts"],
+      // On every response, pages and assets alike (M9 Task 9). A page's
+      // Content-Security-Policy is set per request in src/start.ts.
+      routeRules: { "/**": { headers: { ...SECURITY_HEADERS } } },
       // On Vercel (staging builds with NITRO_PRESET=vercel), a request with
       // the session cookie gets its own cache key before Nitro's routes run
       // (M9 Task 6). Nitro puts these ahead of the routes it generates.
