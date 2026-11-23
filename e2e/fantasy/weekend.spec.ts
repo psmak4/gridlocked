@@ -11,7 +11,7 @@ import { buildTeam, createTeam, saveTeam } from "../helpers/team";
 // size. Round 1 is Melbourne; a new account's zone is UTC, and its spoiler
 // protection is on.
 
-const PUBLIC_CACHE = "public, s-maxage=60, stale-while-revalidate=300";
+const PUBLIC_CACHE = "public, s-maxage=60, stale-while-revalidate=30";
 
 /** "05:00" for an instant in a zone, as the hub shows it. */
 const hhmm = (iso: string, timeZone: string) =>

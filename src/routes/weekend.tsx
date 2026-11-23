@@ -3,7 +3,7 @@ import { AppShell, NoGame } from "@/components/app-shell";
 import { WeekendHub } from "@/components/play/weekend-hub";
 import { EmptyState } from "@/components/ui/empty-state";
 import { privateHeaders } from "@/lib/private-headers";
-import { publicHeaders } from "@/lib/public-headers";
+import { publicHeaders, weekendCache } from "@/lib/public-headers";
 import { getWeekend, markSessionsWatched } from "@/server/play";
 
 // Public (M6 decision 3): a logged-out visitor's page is the same for
@@ -11,8 +11,11 @@ import { getWeekend, markSessionsWatched } from "@/server/play";
 // their watched state.
 export const Route = createFileRoute("/weekend")({
   head: () => ({ meta: [{ title: "This weekend · Gridlocked" }] }),
-  headers: ({ match }) =>
-    match.context.account ? privateHeaders() : publicHeaders(),
+  // Near the lock the stale copy lives 10 seconds, not 30 (M9 Task 6).
+  headers: ({ match, loaderData }) =>
+    match.context.account
+      ? privateHeaders()
+      : publicHeaders(loaderData ? weekendCache(loaderData) : undefined),
   loader: () => getWeekend(),
   component: WeekendRoute,
 });

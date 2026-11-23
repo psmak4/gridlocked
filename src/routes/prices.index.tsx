@@ -28,8 +28,15 @@ export const Route = createFileRoute("/prices/")({
   loaderDeps: ({ search }) => ({ show: search.show }),
   head: () => ({ meta: [{ title: "Prices · Gridlocked" }] }),
   // Typed here: inferring `match` would make the loader's data optional.
-  headers: ({ match }: { match: { context: { account?: unknown } } }) =>
-    match.context.account ? privateHeaders() : publicHeaders(),
+  // Near a lock the stale copy lives 10 seconds, not 30 (M9 Task 6).
+  headers: ({
+    match,
+    loaderData,
+  }: {
+    match: { context: { account?: unknown } };
+    loaderData?: { cache: string };
+  }) =>
+    match.context.account ? privateHeaders() : publicHeaders(loaderData?.cache),
   loader: async ({ deps, location }) =>
     await getPrices({
       data: {
