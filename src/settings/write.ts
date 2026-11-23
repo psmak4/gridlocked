@@ -1,6 +1,7 @@
 /**
  * Settings staff may change (M8 Task 13): the feature flags, the results
- * poll schedule and the after-race re-checks. Each change is checked by the
+ * poll schedule and the after-race re-checks, and a hosted replay's clock
+ * (M9 Task 5, through `src/replay/hosted-clock.ts`). Each change is checked by the
  * key's schema and audited with only the fields that changed, before and
  * after. Flags are recorded as On and Off, as the screen says them.
  */
@@ -9,6 +10,11 @@ import { sql } from "drizzle-orm";
 import { writeAudit } from "@/audit/log";
 import { settings } from "@/db/schema";
 import type { Db } from "@/db/types";
+import {
+  holdSimulatedClock,
+  simulatedClockAt,
+  type ClockDb,
+} from "@/lib/resolve-clock";
 import { StaffError, staffReason } from "@/staff/errors";
 import { audit, type StaffActor } from "@/staff/roster";
 import { settingSchemas, type SettingKey, type SettingValue } from "./defaults";
@@ -19,6 +25,7 @@ export const EDITABLE_SETTINGS = [
   "feature_flags",
   "poll_schedule",
   "finalizer_checks",
+  "replay_offset",
 ] as const satisfies readonly SettingKey[];
 export type EditableSetting = (typeof EDITABLE_SETTINGS)[number];
 
@@ -60,6 +67,10 @@ function changes(
  * Sets `key` to `value` with a reason. Refused: a key not in
  * `EDITABLE_SETTINGS` (`forbidden`), a value its schema refuses (`invalid`),
  * a blank reason. The same value again writes nothing.
+ *
+ * `replay_offset` is refused on a database with a real clock (`not_replay`).
+ * Otherwise `simulated_clock` is first held at `now`, where the replay stands
+ * (never earlier), so the new offset can't move the clock back.
  */
 export async function setSetting(
   db: Db,
@@ -83,6 +94,12 @@ export async function setSetting(
     await t.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`setting:${key}`}))`,
     );
+    if (key === "replay_offset") {
+      if (!(await simulatedClockAt(t as Db & ClockDb))) {
+        throw new StaffError("not_replay");
+      }
+      await holdSimulatedClock(t as Db & ClockDb, now);
+    }
     const before = await getSetting(t, key);
     const { was, now: after } = changes(
       before as Record<string, unknown>,

@@ -83,4 +83,62 @@ describe("app_now()", () => {
     );
     expect(rows[0]!.t).toBe("2026-10-31T20:00:00Z");
   });
+
+  // M9 Task 5: a hosted replay's clock runs on real time minus replay_offset.
+  describe("with replay_offset", () => {
+    async function setOffset(json: string) {
+      await t.client.query(
+        "insert into settings (key, value) values ('replay_offset', $1::jsonb)",
+        [json],
+      );
+    }
+    const lag = async () =>
+      (
+        await t.client.query<{ lag: number }>(
+          "select extract(epoch from (now() - app_now()))::float8 as lag",
+        )
+      ).rows[0]!.lag;
+
+    it("running: real time minus the offset", async () => {
+      await setClock('{"at":"2020-01-01T00:00:00Z"}');
+      await setOffset('{"mode":"running","seconds":3600}');
+      expect(Math.abs((await lag()) - 3600)).toBeLessThan(5);
+    });
+
+    it("running, never before simulated_clock", async () => {
+      await setClock('{"at":"2026-10-31T20:00:00Z"}');
+      await setOffset('{"mode":"running","seconds":999999999}');
+      const { rows } = await t.client.query<Ts>(
+        "select to_char(app_now() at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as t",
+      );
+      expect(rows[0]!.t).toBe("2026-10-31T20:00:00Z");
+    });
+
+    it("paused: simulated_clock", async () => {
+      await setClock('{"at":"2020-01-01T00:00:00Z"}');
+      await setOffset('{"mode":"paused","at":"2020-01-01T00:00:00Z"}');
+      const { rows } = await t.client.query<Ts>(
+        "select to_char(app_now() at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as t",
+      );
+      expect(rows[0]!.t).toBe("2020-01-01T00:00:00Z");
+    });
+
+    it("system mode (no simulated_clock) ignores it", async () => {
+      await setOffset('{"mode":"running","seconds":3600}');
+      expect(Math.abs(await lag())).toBeLessThan(5);
+    });
+
+    it.each([
+      ['{"mode":"running"}'],
+      ['{"mode":"running","seconds":"1"}'],
+      ['{"mode":"later"}'],
+      ["3600"],
+    ])("raises for %s", async (json) => {
+      await setClock('{"at":"2020-01-01T00:00:00Z"}');
+      await setOffset(json);
+      await expect(t.client.query("select app_now()")).rejects.toThrow(
+        "invalid replay_offset setting",
+      );
+    });
+  });
 });

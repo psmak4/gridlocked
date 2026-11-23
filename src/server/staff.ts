@@ -27,6 +27,7 @@ import { nextPrices } from "@/staff/prices";
 import * as USERS from "./staff-users";
 import * as WRITES from "./staff-writes";
 import { getSetting } from "@/settings";
+import { clockModeFromEnv } from "@/lib/resolve-clock";
 import { usageMeters } from "@/staff/usage";
 import { openReviewCount, reviewItem, reviewList } from "@/staff/review";
 import { sessionResults } from "@/staff/session-results";
@@ -498,6 +499,15 @@ export const getStaffSettings = createServerFn({ method: "GET" })
         flags: await getSetting(db, "feature_flags"),
         poll: await getSetting(db, "poll_schedule"),
         finalizer: await getSetting(db, "finalizer_checks"),
+        // A hosted replay's clock (M9 Task 5); null on real time.
+        replay:
+          clockModeFromEnv(process.env) === "replay"
+            ? {
+                now: now.toISOString(),
+                running:
+                  (await getSetting(db, "replay_offset")).mode === "running",
+              }
+            : null,
       }),
     }),
   );
@@ -509,3 +519,8 @@ export const getStaffSettings = createServerFn({ method: "GET" })
 export const saveStaffSettings = createServerFn({ method: "POST" })
   .validator(staffInput)
   .handler(staffFn(WRITES.SAVE_STAFF_SETTINGS));
+
+/** Pause, resume or jump a hosted replay's clock (M9 Task 5). */
+export const moveReplayClock = createServerFn({ method: "POST" })
+  .validator(staffInput)
+  .handler(staffFn(WRITES.MOVE_REPLAY_CLOCK));

@@ -6,14 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { privateHeaders } from "@/lib/private-headers";
 import { cn } from "@/lib/utils";
-import { getStaffSettings, saveStaffSettings } from "@/server/staff";
+import { dayTimeLabel } from "@/lib/settings-words";
+import {
+  getStaffSettings,
+  moveReplayClock,
+  saveStaffSettings,
+} from "@/server/staff";
 import { STAFF_ERROR_WORDS } from "@/staff/errors";
 
 /**
  * Settings (wave 5's settings board, M8 Task 13): the chat and push
  * switches, notification emails and ads shown locked with why, free-tier
  * usage (Task 14), and the results pipeline's timings. One reason and one
- * Save for the lot; each key that changed gets its own audit row.
+ * Save for the lot; each key that changed gets its own audit row. On a
+ * hosted replay (M9 Task 5) the replay clock comes first, with its own
+ * buttons and reason: each move is one audit row.
  */
 export const Route = createFileRoute("/staff/settings")({
   loader: () => getStaffSettings({ data: {} }),
@@ -71,6 +78,129 @@ function SettingsScreen() {
     );
   }
   return <SettingsForm data={result.value} />;
+}
+
+/** "2026-03-13T08:00" (a datetime-local, read as UTC) → an ISO instant, or null. */
+function utcInstant(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
+  const at = new Date(`${value}:00.000Z`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
+function ReplayClock({ replay }: { replay: NonNullable<Data["replay"]> }) {
+  const router = useRouter();
+  const [reason, setReason] = useState("");
+  const [to, setTo] = useState("");
+  const [tried, setTried] = useState<"move" | "jump" | null>(null);
+  const [sent, setSent] = useState<
+    { state: "idle" | "busy" } | { state: "done" | "error"; words: string }
+  >({ state: "idle" });
+  const jumpTo = utcInstant(to);
+  const stands = `${dayTimeLabel(new Date(replay.now), "UTC")} UTC`;
+
+  const move = async (
+    input: { action: "pause" | "resume" } | { action: "jump"; to: string },
+  ) => {
+    setTried(input.action === "jump" ? "jump" : "move");
+    if (!reasonReady(reason) || (input.action === "jump" && !jumpTo)) return;
+    setSent({ state: "busy" });
+    const answer = await moveReplayClock({ data: { ...input, reason } });
+    if (answer.ok) {
+      const at = `${dayTimeLabel(new Date(answer.value.at), "UTC")} UTC`;
+      setSent({
+        state: "done",
+        words:
+          answer.value.status === "paused"
+            ? `Paused at ${at}. It's in the audit log.`
+            : answer.value.status === "running"
+              ? `Running again from ${at}. It's in the audit log.`
+              : answer.value.status === "jumped_to_lock"
+                ? `Stopped at ${at}, a minute before the next lock. It's in the audit log.`
+                : `Jumped to ${at}. It's in the audit log.`,
+      });
+      setReason("");
+      setTo("");
+      setTried(null);
+    } else {
+      setSent({ state: "error", words: STAFF_ERROR_WORDS[answer.error] });
+    }
+    await router.invalidate();
+  };
+
+  return (
+    <form
+      aria-label="Replay clock"
+      noValidate
+      onSubmit={(e) => e.preventDefault()}
+      className={cn(section, "max-w-[760px]")}
+    >
+      <h2 className={eyebrow}>REPLAY CLOCK</h2>
+      <p data-slot="replay-state" className="text-[16px]">
+        {replay.running
+          ? `Running. The replay stands at ${stands}.`
+          : `Paused at ${stands}.`}
+      </p>
+      <p className="text-[14px] text-ink-muted">
+        The replay plays out in real time while it runs. A jump only moves
+        forward, and stops a minute before the next lock it would pass.
+      </p>
+      <div className="flex flex-wrap gap-space-3">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={sent.state === "busy"}
+          onClick={() =>
+            void move({ action: replay.running ? "pause" : "resume" })
+          }
+        >
+          {replay.running ? "Pause the replay" : "Resume the replay"}
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-end gap-space-3">
+        <label className={labelClass}>
+          Jump to (UTC)
+          <input
+            type="datetime-local"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            aria-invalid={tried === "jump" && !jumpTo ? true : undefined}
+            className={inputClass}
+          />
+          {tried === "jump" && !jumpTo ? (
+            <span className="text-[14px] font-semibold text-fall">
+              Pick a day and a time.
+            </span>
+          ) : null}
+        </label>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={sent.state === "busy"}
+          onClick={() => void move({ action: "jump", to: jumpTo ?? "" })}
+        >
+          Jump
+        </Button>
+      </div>
+      <ReasonField
+        value={reason}
+        onChange={setReason}
+        error={
+          tried && !reasonReady(reason)
+            ? STAFF_ERROR_WORDS.reason_required
+            : undefined
+        }
+      />
+      {sent.state === "error" ? (
+        <p role="alert" className="text-[14px] font-semibold text-fall">
+          {sent.words}
+        </p>
+      ) : sent.state === "done" ? (
+        <p role="status" className="text-[14px]">
+          {sent.words}
+        </p>
+      ) : null}
+    </form>
+  );
 }
 
 function SettingsForm({ data }: { data: Data }) {
@@ -149,6 +279,8 @@ function SettingsForm({ data }: { data: Data }) {
           Admins only. Every change goes in the audit log.
         </p>
       </header>
+
+      {data.replay ? <ReplayClock replay={data.replay} /> : null}
 
       <form
         aria-label="Settings"
