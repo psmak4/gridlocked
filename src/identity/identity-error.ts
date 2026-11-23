@@ -30,6 +30,7 @@ export type IdentityErrorCode =
   | "no_such_user"
   | "role_reserved"
   | "last_admin"
+  | "cannot_ban_admin"
   | "invalid_ban"
   | "cannot_impersonate"
   | "not_impersonating"

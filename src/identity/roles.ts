@@ -259,7 +259,8 @@ export async function setRoleAs(
 
 /**
  * Bans `targetUserId` until `until` (null: until lifted), revokes their
- * sessions and writes the audit `user.ban`. Better Auth refuses a banned
+ * sessions and writes the audit `user.ban`. An admin is refused
+ * (`cannot_ban_admin`): change their role first. Better Auth refuses a banned
  * user's next sign-in and lifts a ban whose end has passed. M7 adds the
  * `mod_actions` mirror (DM 5.9).
  */
@@ -280,9 +281,8 @@ export async function banUserAs(
   await staffTransaction(db, async (tx) => {
     await lockAdmins(tx);
     const target = await lockTarget(tx, input.targetUserId);
-    if (target.role === "admin") {
-      await requireAnotherAdmin(tx, now, target.id);
-    }
+    // An admin is demoted first, as view-as-user refuses admins (M9 Task 7).
+    if (target.role === "admin") throw new IdentityError("cannot_ban_admin");
     await tx
       .update(users)
       .set({

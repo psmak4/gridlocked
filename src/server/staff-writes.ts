@@ -231,13 +231,14 @@ export const START_SCORING_DRY_RUN = staffDef({
   role: "admin",
   input: gameReason,
   handler: async ({ db, now, viewer, requestId }, input) => {
-    const report = await startDryRun(
+    const started = await startDryRun(
       db,
       now,
       staffActor(viewer, requestId),
       input,
+      (await webDueStore()) ?? undefined,
     );
-    return { sessions: report.sessions, teamsChanged: report.teamsChanged };
+    return { sessions: started.sessions, events: started.events };
   },
 });
 
