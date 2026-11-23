@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useHydrated } from "@/lib/use-hydrated";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-space-2 rounded-radius-m border-2 border-transparent px-space-4 font-display uppercase select-none whitespace-nowrap cursor-pointer no-underline transition-transform active:not-disabled:scale-[0.98] motion-reduce:transition-none motion-reduce:active:not-disabled:scale-100 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45",
+  "inline-flex items-center justify-center gap-space-2 rounded-radius-m border-2 border-transparent px-space-4 font-display uppercase select-none whitespace-nowrap cursor-pointer no-underline transition-transform active:not-disabled:scale-[0.98] motion-reduce:transition-none motion-reduce:active:not-disabled:scale-100 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45",
   {
     variants: {
       variant: {

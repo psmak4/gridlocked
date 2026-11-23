@@ -64,7 +64,7 @@ function ReviewQueue() {
             search={{ tab: t.id }}
             aria-current={tab === t.id ? "page" : undefined}
             className={cn(
-              "flex min-h-[44px] items-center rounded-radius-pill border-2 px-space-4 text-[16px] font-bold no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+              "flex min-h-[44px] items-center rounded-radius-pill border-2 px-space-4 text-[16px] font-bold no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
               tab === t.id
                 ? "border-ink bg-ink text-surface"
                 : "border-line-strong text-ink",
@@ -100,7 +100,7 @@ function ReviewQueue() {
                     search={{ tab }}
                     aria-current={item.id === selected ? "page" : undefined}
                     className={cn(
-                      "flex min-h-[44px] flex-col gap-[2px] rounded-radius-l bg-surface-raised p-space-4 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+                      "flex min-h-[44px] flex-col gap-[2px] rounded-radius-l bg-surface-raised p-space-4 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
                       item.id === selected &&
                         "outline-2 -outline-offset-2 outline-ink",
                     )}

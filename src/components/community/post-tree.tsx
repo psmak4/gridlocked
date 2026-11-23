@@ -28,7 +28,7 @@ type PostActions = {
 };
 
 const iconButton =
-  "flex size-[44px] items-center justify-center rounded-radius-m border-0 bg-transparent text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45 aria-pressed:text-heat-text";
+  "flex size-[44px] items-center justify-center rounded-radius-m border-0 bg-transparent text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45 aria-pressed:text-heat-text";
 
 const PLACEHOLDER: Record<PostView["state"], string> = {
   visible: "",
@@ -246,7 +246,7 @@ export function PostItem({
           {canReply ? (
             <button
               type="button"
-              className="min-h-[44px] rounded-radius-m border-0 bg-transparent px-space-2 text-[14px] font-bold text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+              className="min-h-[44px] rounded-radius-m border-0 bg-transparent px-space-2 text-[14px] font-bold text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               aria-expanded={replying}
               onClick={() => setReplying((open) => !open)}
             >

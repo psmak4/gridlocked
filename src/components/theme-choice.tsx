@@ -70,7 +70,7 @@ export function ThemeChoice() {
         <label
           key={option.id}
           className={cn(
-            "flex min-h-[44px] cursor-pointer items-center justify-center rounded-radius-s text-[16px] font-bold text-ink has-checked:bg-surface has-checked:ring-1 has-checked:ring-line-strong has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus-ring",
+            "flex min-h-[44px] cursor-pointer items-center justify-center rounded-radius-s text-[16px] font-bold text-ink has-checked:bg-surface has-checked:ring-1 has-checked:ring-line-strong has-focus-visible:outline-2 focus-visible:outline-solid has-focus-visible:outline-offset-2 has-focus-visible:outline-focus-ring",
             !hydrated && "cursor-not-allowed opacity-45",
           )}
         >

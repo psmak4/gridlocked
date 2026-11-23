@@ -98,7 +98,7 @@ export function LinkRow({
   return (
     <a
       href={href}
-      className="flex min-h-[52px] items-center justify-between gap-space-3 border-b border-line px-[14px] py-[4px] text-ink no-underline outline-none last:border-b-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring"
+      className="flex min-h-[52px] items-center justify-between gap-space-3 border-b border-line px-[14px] py-[4px] text-ink no-underline outline-none last:border-b-0 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus-ring"
     >
       <span className="flex min-w-0 flex-col">
         <span
@@ -133,7 +133,7 @@ export function ButtonRow({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex min-h-[52px] w-full items-center justify-between gap-space-3 border-b border-line bg-transparent px-[14px] py-[4px] text-left text-ink outline-none last:border-b-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
+      className="flex min-h-[52px] w-full items-center justify-between gap-space-3 border-b border-line bg-transparent px-[14px] py-[4px] text-left text-ink outline-none last:border-b-0 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
     >
       <span className="flex min-w-0 flex-col">
         <span className="text-[16px] font-bold">{label}</span>

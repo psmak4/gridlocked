@@ -21,7 +21,7 @@ export const Route = createFileRoute("/leagues/new")({
 });
 
 const backLink =
-  "flex min-h-[44px] items-center self-start text-[16px] font-bold text-ink-muted underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "flex min-h-[44px] items-center self-start text-[16px] font-bold text-ink-muted underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 /**
  * Create a league (M6 Task 12). After it's made, the code to send, with

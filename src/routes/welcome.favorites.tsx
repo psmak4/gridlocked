@@ -78,7 +78,7 @@ function Favorites() {
         <StepLabel>STEP 1 OF 2</StepLabel>
         <a
           href="/welcome/spoilers"
-          className="inline-flex min-h-[44px] items-center rounded-radius-m px-space-2 text-[16px] font-bold text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="inline-flex min-h-[44px] items-center rounded-radius-m px-space-2 text-[16px] font-bold text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           Skip
         </a>

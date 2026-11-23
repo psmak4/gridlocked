@@ -169,7 +169,7 @@ export function ChipSheet({
                       : { kind: "confirm", chip, target: null },
                   );
                 }}
-                className="flex min-h-[64px] w-full cursor-pointer items-center justify-between gap-space-3 rounded-radius-m border-0 bg-surface px-[14px] py-[10px] text-left font-sans text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed"
+                className="flex min-h-[64px] w-full cursor-pointer items-center justify-between gap-space-3 rounded-radius-m border-0 bg-surface px-[14px] py-[10px] text-left font-sans text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed"
               >
                 <span className="flex min-w-0 flex-col gap-[2px]">
                   <span className="text-[16px] leading-[22px] font-bold">

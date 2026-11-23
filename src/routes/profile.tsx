@@ -90,7 +90,7 @@ function Profile() {
         <a
           href="/settings"
           aria-label="Settings"
-          className="flex size-[44px] items-center justify-center rounded-radius-m text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="flex size-[44px] items-center justify-center rounded-radius-m text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           <svg
             width="22"
@@ -145,7 +145,7 @@ function Profile() {
         {profile.staff ? (
           <a
             href="/staff"
-            className="flex min-h-[44px] items-center self-start rounded-radius-m font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            className="flex min-h-[44px] items-center self-start rounded-radius-m font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           >
             Staff tools
           </a>
@@ -202,7 +202,7 @@ function Profile() {
                   {t.status === "active" ? (
                     <a
                       href={`/team/${t.slot}`}
-                      className="flex min-h-[44px] items-center justify-between gap-space-3 rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                      className="flex min-h-[44px] items-center justify-between gap-space-3 rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                     >
                       <span className="min-w-0 font-bold break-words">
                         {t.name}
@@ -255,7 +255,7 @@ function Profile() {
                 <li key={p.postId}>
                   <a
                     href={p.href}
-                    className="flex min-h-[44px] flex-col gap-[2px] rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                    className="flex min-h-[44px] flex-col gap-[2px] rounded-radius-m bg-surface-raised px-space-3 py-space-2 text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                   >
                     <span className="font-bold break-words">{p.title}</span>
                     <span className="text-[14px] leading-[20px] break-words text-ink-muted">

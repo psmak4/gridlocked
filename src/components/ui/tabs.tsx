@@ -34,7 +34,7 @@ function Tabs({ label, items, value, onChange, className }: TabsProps) {
           <TabsPrimitive.Tab
             key={item.id}
             value={item.id}
-            className="min-h-[44px] flex-1 cursor-pointer rounded-[10px] border-0 bg-transparent font-sans text-[14px] font-bold tracking-[0.06em] text-ink-muted uppercase outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-active:bg-ink data-active:text-surface"
+            className="min-h-[44px] flex-1 cursor-pointer rounded-[10px] border-0 bg-transparent font-sans text-[14px] font-bold tracking-[0.06em] text-ink-muted uppercase outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-active:bg-ink data-active:text-surface"
           >
             {item.label}
           </TabsPrimitive.Tab>

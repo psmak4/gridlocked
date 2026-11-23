@@ -176,7 +176,7 @@ function ReviewPanel() {
                 <li key={a.id}>
                   <a
                     href={a.href!}
-                    className="flex min-h-[44px] items-center text-[16px] font-bold text-ink underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                    className="flex min-h-[44px] items-center text-[16px] font-bold text-ink underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                   >
                     {a.label}
                   </a>
@@ -196,7 +196,7 @@ function ReviewPanel() {
       <Link
         to="/staff/review"
         search={{ tab: open ? "open" : "resolved" }}
-        className="flex min-h-[44px] items-center self-start text-[16px] text-ink underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+        className="flex min-h-[44px] items-center self-start text-[16px] text-ink underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
       >
         Back to the queue
       </Link>
