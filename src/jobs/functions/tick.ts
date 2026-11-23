@@ -78,7 +78,7 @@ export const FUNCTION_TICK_OPTIONS: TickOptions = {
 
 export type TickHandlerDeps = Pick<
   TickDeps,
-  "db" | "store" | "handlers" | "mode" | "timer"
+  "db" | "store" | "handlers" | "mode" | "timer" | "hostedReplay"
 > & { options?: TickOptions };
 
 /** The scheduled instant from a trigger call's body: `data.scheduled_at`. */
@@ -210,6 +210,9 @@ export function depsFromEnv(
     db: () => database.db(),
     store,
     mode,
+    // In replay mode the trigger's minute is real time, and `replay_offset`
+    // turns it into the replay's (M9 Task 5).
+    hostedReplay: mode === "replay",
     timer: systemTimer,
     handlers: async (db, clock, wake) => ({
       ...createPipelineHandlers({

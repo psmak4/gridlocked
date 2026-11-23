@@ -170,8 +170,10 @@ for (const size of [
       const push = page.getByRole("switch", { name: "Push notifications" });
       await hydrated(push);
       await push.click();
-      await page.getByLabel(REASON_LABEL).fill(why);
-      await page.getByRole("button", { name: "Save settings" }).click();
+      // This server runs a replay, so the replay clock has a reason box too.
+      const form = page.getByRole("form", { name: "Settings" });
+      await form.getByLabel(REASON_LABEL).fill(why);
+      await form.getByRole("button", { name: "Save settings" }).click();
       await expect(page.getByRole("status")).toHaveText(
         "Saved. It's in the audit log.",
       );

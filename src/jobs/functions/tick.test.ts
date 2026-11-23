@@ -365,6 +365,13 @@ describe("the tick function", () => {
       }
     });
 
+    it("runs a hosted replay's clock in replay mode only (M9 Task 5)", () => {
+      expect(depsFromEnv(env).hostedReplay).toBe(false);
+      expect(depsFromEnv({ ...env, CLOCK_MODE: "replay" }).hostedReplay).toBe(
+        true,
+      );
+    });
+
     it("exports a fetch handler as the function's default", () => {
       expect(typeof tickFunction.fetch).toBe("function");
     });

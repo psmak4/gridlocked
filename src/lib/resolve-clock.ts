@@ -77,3 +77,35 @@ export async function resolveClock(opts: {
   }
   return fixedClock(new Date(value));
 }
+
+/**
+ * The instant in `settings.simulated_clock`, or null on a database with a
+ * real clock. A hosted replay's floor (M9 Task 5): app_now() never returns
+ * less.
+ */
+export async function simulatedClockAt(db: ClockDb): Promise<Date | null> {
+  const { rows } = await db.execute(
+    sql`select value ->> 'at' as at from settings where key = 'simulated_clock'`,
+  );
+  const value = (rows[0] as { at?: unknown } | undefined)?.at;
+  if (rows.length === 0) return null;
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+    throw new ClockModeError("invalid simulated_clock setting");
+  }
+  return new Date(value);
+}
+
+/**
+ * Moves `simulated_clock` forward to `at`, never back: a later instant
+ * already there (another tick, an offset change) stays. Writes nothing on a
+ * database with a real clock.
+ */
+export async function holdSimulatedClock(db: ClockDb, at: Date): Promise<void> {
+  const value = JSON.stringify({ at: at.toISOString() });
+  await db.execute(sql`
+    update settings
+       set value = ${value}::jsonb, updated_at = ${at.toISOString()}::timestamptz
+     where key = 'simulated_clock'
+       and (value ->> 'at')::timestamptz < ${at.toISOString()}::timestamptz
+  `);
+}

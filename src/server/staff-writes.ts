@@ -27,7 +27,15 @@ import { moderate, type ModTargetType } from "@/community/moderate";
 import { modItem } from "@/community/queue-read";
 import { setAdminPrice } from "@/staff/prices";
 import * as USERS from "./staff-users";
-import { EDITABLE_SETTINGS, setSetting } from "@/settings/write";
+import { setSetting } from "@/settings/write";
+import { publishDueTimes } from "@/jobs/due-times";
+import { systemClock } from "@/lib/clock";
+import {
+  hostedReplayNow,
+  jumpReplay,
+  pauseReplay,
+  resumeReplay,
+} from "@/replay/hosted-clock";
 import { resolveReviewItem } from "@/staff/review";
 import { checkProviderAgain } from "@/staff/session-results";
 import { webDueStore } from "./due-store";
@@ -335,6 +343,12 @@ export const MODERATE_ITEM = staffDef({
   },
 });
 
+const FORM_SETTINGS = [
+  "feature_flags",
+  "poll_schedule",
+  "finalizer_checks",
+] as const;
+
 export const SAVE_STAFF_SETTINGS = staffDef({
   role: "admin",
   input: z.strictObject({
@@ -348,7 +362,8 @@ export const SAVE_STAFF_SETTINGS = staffDef({
   handler: async ({ db, now, viewer, requestId }, { reason, values }) =>
     db.transaction(async (tx) => {
       const changed: string[] = [];
-      for (const key of EDITABLE_SETTINGS) {
+      // The replay clock moves with its own buttons (MOVE_REPLAY_CLOCK).
+      for (const key of FORM_SETTINGS) {
         if (values[key] === undefined) continue;
         const done = await setSetting(
           tx as unknown as typeof db,
@@ -360,6 +375,51 @@ export const SAVE_STAFF_SETTINGS = staffDef({
       }
       return { changed };
     }),
+});
+
+/**
+ * A hosted replay's clock (M9 Task 5): pause it, start it again, or jump it
+ * forward (stopping a minute before a lock). The offset is worked out from
+ * real time, which only this entry point reads; the request's `now` is the
+ * replay's. The due-times file is republished with the new clock, so the
+ * next tick runs on it.
+ */
+export const MOVE_REPLAY_CLOCK = staffDef({
+  role: "admin",
+  input: z.discriminatedUnion("action", [
+    z.strictObject({ action: z.literal("pause"), reason: reasonText }),
+    z.strictObject({ action: z.literal("resume"), reason: reasonText }),
+    z.strictObject({
+      action: z.literal("jump"),
+      to: instant,
+      reason: reasonText,
+    }),
+  ]),
+  handler: async ({ db, viewer, requestId }, input) => {
+    const realNow = systemClock.now();
+    const actor = staffActor(viewer, requestId);
+    const result =
+      input.action === "jump"
+        ? await jumpReplay(db, realNow, actor, input)
+        : {
+            status: input.action === "pause" ? "paused" : "running",
+            at: await (input.action === "pause" ? pauseReplay : resumeReplay)(
+              db,
+              realNow,
+              actor,
+              input,
+            ),
+          };
+    const store = await webDueStore();
+    if (store) {
+      await publishDueTimes(
+        db as TickDb,
+        store,
+        await hostedReplayNow(db as TickDb, realNow),
+      );
+    }
+    return { status: result.status, at: result.at.toISOString() };
+  },
 });
 
 /** Every POST in `staff.ts`, by its export name. */
@@ -379,6 +439,7 @@ export const STAFF_WRITES = {
   discardScoring: DISCARD_SCORING,
   savePrice: SAVE_PRICE,
   resolveReview: RESOLVE_REVIEW,
+  moveReplayClock: MOVE_REPLAY_CLOCK,
   moderateItem: MODERATE_ITEM,
   saveStaffSettings: SAVE_STAFF_SETTINGS,
   saveUserRole: USERS.SET_ROLE,
