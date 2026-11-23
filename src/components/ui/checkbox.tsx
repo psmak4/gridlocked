@@ -22,6 +22,7 @@ function Checkbox({
   "aria-describedby": callerDescribedBy,
   ...props
 }: CheckboxProps) {
+  const labelId = `${id}-label`;
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const describedBy =
@@ -42,6 +43,9 @@ function Checkbox({
           {...props}
           id={id}
           disabled={disabled}
+          // Named in the server's HTML too: until hydration the control's id
+          // is Base UI's own, so the label's `for` doesn't reach it.
+          aria-labelledby={labelId}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           data-slot="checkbox"
@@ -63,6 +67,7 @@ function Checkbox({
           </CheckboxPrimitive.Indicator>
         </CheckboxPrimitive.Root>
         <label
+          id={labelId}
           htmlFor={id}
           className={cn(
             "cursor-pointer text-[16px] leading-[20px] font-bold text-ink",

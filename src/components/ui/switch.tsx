@@ -22,6 +22,7 @@ function Switch({
   className,
   ...state
 }: SwitchProps) {
+  const labelId = `${id}-label`;
   const descriptionId = description ? `${id}-description` : undefined;
   return (
     <div
@@ -34,6 +35,7 @@ function Switch({
     >
       <div className="flex min-w-0 flex-col">
         <label
+          id={labelId}
           htmlFor={id}
           className={cn(
             "cursor-pointer text-[16px] leading-[20px] font-bold",
@@ -55,6 +57,9 @@ function Switch({
         {...state}
         id={id}
         disabled={disabled}
+        // Named in the server's HTML too: until hydration the control's id
+        // is Base UI's own, so the label's `for` doesn't reach it.
+        aria-labelledby={labelId}
         aria-describedby={descriptionId}
         onCheckedChange={(next) => onChange?.(next)}
         data-slot="switch"
