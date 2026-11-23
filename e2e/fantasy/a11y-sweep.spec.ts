@@ -1,6 +1,6 @@
-import { createRequire } from "node:module";
 import { expect, test, type Page } from "@playwright/test";
 import { createAccount, pageHydrated } from "../helpers/accounts";
+import { wcagViolations } from "../helpers/a11y";
 import { reportedPost } from "../helpers/forum";
 import {
   FANTASY_ORIGIN,
@@ -21,8 +21,6 @@ import { buildTeam, createTeam, saveTeam } from "../helpers/team";
 // finds, so the routes with an id in them are reached the way a person
 // reaches them; a route a role should reach and didn't fails the sweep too.
 
-const require = createRequire(import.meta.url);
-const WCAG_21_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const WIDTHS = [1440, 390] as const;
 
 /**
@@ -98,35 +96,6 @@ function routeOf(pathname: string): PageRoute | null {
   return hit?.route ?? null;
 }
 
-type Violation = {
-  id: string;
-  impact: string | null;
-  help: string;
-  nodes: { target: string[] }[];
-};
-
-/** axe's WCAG 2.1 AA rules on the page as it stands. */
-async function axe(page: Page): Promise<Violation[]> {
-  const loaded = await page.evaluate(() => "axe" in window);
-  if (!loaded) await page.addScriptTag({ path: require.resolve("axe-core") });
-  return page.evaluate(
-    async (tags) =>
-      (
-        await (
-          window as unknown as {
-            axe: {
-              run: (
-                context: Document,
-                options: unknown,
-              ) => Promise<{ violations: Violation[] }>;
-            };
-          }
-        ).axe.run(document, { runOnly: { type: "tag", values: tags } })
-      ).violations,
-    WCAG_21_AA,
-  );
-}
-
 /**
  * Visits `seeds`, then every in-site link they lead to, keeping the first page
  * of each route in `routes`, and runs axe on it at both widths. Answers the
@@ -154,14 +123,8 @@ async function sweep(
     reached.set(route, url.pathname);
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: width < 768 ? 844 : 900 });
-      for (const v of await axe(page)) {
-        const where = v.nodes
-          .slice(0, 3)
-          .map((n) => n.target.join(" "))
-          .join(" | ");
-        found.push(
-          `${role} ${width} ${url.pathname}: ${v.id} (${v.impact}) ${v.help} — ${v.nodes.length} × ${where}`,
-        );
+      for (const line of await wcagViolations(page)) {
+        found.push(`${role} ${width} ${url.pathname}: ${line}`);
       }
     }
     const links = await page.$$eval("a[href]", (as) =>
