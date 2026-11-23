@@ -12,7 +12,7 @@ import {
 import { ordinal, weekendDates } from "./weekend-words";
 
 const card =
-  "flex items-center justify-between gap-space-3 rounded-radius-m bg-surface-raised px-[14px] py-space-3 text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "flex items-center justify-between gap-space-3 rounded-radius-m bg-surface-raised px-[14px] py-space-3 text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 const eyebrow =
   "text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase";
 
@@ -167,7 +167,7 @@ export function HomeScreen({
             href="/weekend"
             className={cn(
               "flex flex-col gap-[2px] text-ink no-underline",
-              "rounded-radius-m outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+              "rounded-radius-m outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
             )}
           >
             <span className={eyebrow}>

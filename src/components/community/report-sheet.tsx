@@ -180,7 +180,7 @@ function ReportForm({
           maxLength={REPORT_NOTE_MAX}
           rows={3}
           onChange={(e) => setNote(e.target.value)}
-          className="rounded-radius-m border-2 border-line-strong bg-surface px-space-3 py-space-2 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="rounded-radius-m border-2 border-line-strong bg-surface px-space-3 py-space-2 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         />
       </div>
       {visitor ? (

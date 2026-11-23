@@ -24,7 +24,7 @@ export const Route = createFileRoute("/staff/prices")({
 
 const eyebrow = "text-[12px] font-bold tracking-[0.12em] text-ink-muted";
 const inputClass =
-  "min-h-[48px] w-full rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring aria-invalid:border-fall";
+  "min-h-[48px] w-full rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring aria-invalid:border-fall";
 
 type Board = Extract<
   Awaited<ReturnType<typeof getPrices>>,

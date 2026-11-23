@@ -40,7 +40,7 @@ export const Route = createFileRoute("/staff/seats")({
 });
 
 const inputClass =
-  "min-h-[48px] w-full rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "min-h-[48px] w-full rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 const labelClass = "flex flex-col gap-[6px] text-[14px] font-bold";
 const eyebrow = "text-[12px] font-bold tracking-[0.12em] text-ink-muted";
 
@@ -130,7 +130,7 @@ function Seats() {
                 href={hrefFor(tab.slug)}
                 aria-current={current ? "page" : undefined}
                 className={cn(
-                  "flex min-h-[44px] items-center rounded-radius-pill px-space-3 text-[14px] font-bold no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+                  "flex min-h-[44px] items-center rounded-radius-pill px-space-3 text-[14px] font-bold no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
                   current
                     ? "bg-ink text-surface"
                     : "bg-surface-raised text-ink hover:underline",

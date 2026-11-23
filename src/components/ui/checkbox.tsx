@@ -45,7 +45,7 @@ function Checkbox({
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           data-slot="checkbox"
-          className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-radius-s border-2 border-line-strong bg-surface text-surface outline-none after:absolute after:-inset-[10px] after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-checked:border-ink data-checked:bg-ink data-disabled:cursor-not-allowed aria-invalid:border-fall"
+          className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-radius-s border-2 border-line-strong bg-surface text-surface outline-none after:absolute after:-inset-[10px] after:content-[''] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-checked:border-ink data-checked:bg-ink data-disabled:cursor-not-allowed aria-invalid:border-fall"
         >
           <CheckboxPrimitive.Indicator className="flex items-center justify-center">
             <svg

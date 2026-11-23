@@ -109,7 +109,7 @@ function TeamPage() {
                 {team.status === "active" ? (
                   <a
                     href={`/team/${team.slot}`}
-                    className="flex min-h-[44px] items-center text-[18px] font-bold break-words text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                    className="flex min-h-[44px] items-center text-[18px] font-bold break-words text-ink no-underline outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                   >
                     {team.name}
                   </a>

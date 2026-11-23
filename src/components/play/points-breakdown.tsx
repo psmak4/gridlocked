@@ -15,7 +15,7 @@ import { DriverSheet, signed } from "./driver-sheet";
 const sectionTitle =
   "m-0 font-display text-[18px] leading-[22px] font-normal tracking-[0.02em] uppercase";
 const link =
-  "inline-flex min-h-[44px] items-center text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "inline-flex min-h-[44px] items-center text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 type PointsBreakdownProps = {
   page: BreakdownPage;

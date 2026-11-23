@@ -27,7 +27,7 @@ export function ThreadRowItem({
         href={`/t/${row.id}`}
         data-hidden={row.hidden || undefined}
         className={cn(
-          "flex min-h-[64px] items-start gap-space-3 rounded-radius-m px-[14px] py-space-3 text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+          "flex min-h-[64px] items-start gap-space-3 rounded-radius-m px-[14px] py-space-3 text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
           row.hidden ? "bg-veil" : "bg-surface-raised hover:bg-surface-sunken",
         )}
       >

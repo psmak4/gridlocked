@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu";
 
 const trigger =
-  "flex size-[44px] shrink-0 items-center justify-center rounded-radius-m border-0 bg-transparent text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "flex size-[44px] shrink-0 items-center justify-center rounded-radius-m border-0 bg-transparent text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 export type MoreItem = { label: string; onSelect: () => void };
 

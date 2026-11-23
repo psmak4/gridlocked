@@ -187,7 +187,7 @@ export function TurnstileFailed({ onRetry }: { onRetry: () => void }) {
       <button
         type="button"
         onClick={onRetry}
-        className="min-h-[44px] cursor-pointer rounded-radius-m border-2 border-ink px-space-4 font-display text-[16px] tracking-[0.04em] text-ink uppercase outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+        className="min-h-[44px] cursor-pointer rounded-radius-m border-2 border-ink px-space-4 font-display text-[16px] tracking-[0.04em] text-ink uppercase outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
         Try again
       </button>

@@ -34,7 +34,7 @@ function TextField({
         aria-describedby={describedBy}
         aria-invalid={error ? true : undefined}
         className={cn(
-          "min-h-[48px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45 aria-invalid:border-fall",
+          "min-h-[48px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45 aria-invalid:border-fall",
           className,
         )}
       />

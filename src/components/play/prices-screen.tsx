@@ -11,9 +11,9 @@ import { teamValueWords } from "./price-words";
 const eyebrow =
   "text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase";
 const link =
-  "inline-flex min-h-[44px] items-center self-start text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "inline-flex min-h-[44px] items-center self-start text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 const backLink =
-  "flex min-h-[44px] items-center self-start text-[16px] font-bold text-ink-muted underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "flex min-h-[44px] items-center self-start text-[16px] font-bold text-ink-muted underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 const h1 = "m-0 font-display text-[32px] leading-[34px] font-normal uppercase";
 
 type Tab = "up" | "down" | "all";

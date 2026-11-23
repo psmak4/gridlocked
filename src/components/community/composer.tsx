@@ -11,7 +11,7 @@ import { FAILED, refusalWords } from "./forum-words";
 
 const fieldLabel = "text-[14px] font-bold text-ink";
 const control =
-  "rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45 aria-invalid:border-fall";
+  "rounded-radius-m border-2 border-line-strong bg-surface px-space-3 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45 aria-invalid:border-fall";
 
 /** A post's text: Markdown, up to 10,000 characters. */
 function TextArea({
