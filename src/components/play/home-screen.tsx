@@ -88,7 +88,7 @@ function Season({
           ? `/team/${season.slot}/points`
           : `/team/${season.slot}`
       }
-      aria-label={`Your season · ${season.teamName}`}
+      // No aria-label: the link is named by what it shows (WCAG 2.5.3).
       className={card}
     >
       <span className="flex min-w-0 flex-col gap-[2px]">
