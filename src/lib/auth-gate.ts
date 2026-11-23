@@ -1,3 +1,5 @@
+import { SIGNED_IN_FLAG } from "./public-headers";
+
 /**
  * Where the signed-in gate (`__root.tsx`) sends someone, or null to let them
  * through. Public pages stay public: a logged-out visitor is never touched.
@@ -63,7 +65,18 @@ export function signInFirst(
 ): string | null {
   if (account) return null;
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
-  return SIGN_IN_FIRST.some((re) => re.test(path)) ? path + search : null;
+  return SIGN_IN_FIRST.some((re) => re.test(path))
+    ? path + withoutFlag(search)
+    : null;
+}
+
+/** `search` without the edge's signed-in flag (`public-headers.ts`). */
+function withoutFlag(search: string): string {
+  if (!search.includes(SIGNED_IN_FLAG)) return search;
+  const params = new URLSearchParams(search);
+  params.delete(SIGNED_IN_FLAG);
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
 }
 
 /** Longer than any path the site makes: a `next` past it is dropped. */

@@ -57,6 +57,8 @@ import {
   markSessionsWatchedInput,
 } from "./play-actions";
 import { cacheFor } from "./public-cache";
+import { publicCache, weekendCache } from "@/lib/public-headers";
+import { nextLockAt } from "@/play/next-lock";
 import { getViewer, withRequestNow } from "./session";
 
 /**
@@ -148,8 +150,11 @@ export const playLateCall = createServerFn({ method: "POST" })
 export const getWeekend = createServerFn({ method: "GET" }).handler(
   async (): Promise<WeekendPage> => {
     const viewer = await getViewer(getRequest());
-    cacheFor(viewer);
-    return withRequestNow((db, now) => weekendPage(db, now, viewer));
+    return withRequestNow(async (db, now) => {
+      const page = await weekendPage(db, now, viewer);
+      cacheFor(viewer, weekendCache(page));
+      return page;
+    });
   },
 );
 
@@ -162,10 +167,16 @@ export const getWeekend = createServerFn({ method: "GET" }).handler(
 export const getPrices = createServerFn({ method: "GET" })
   .validator(getPricesInput)
   .handler(
-    async ({ data }): Promise<{ hasGame: boolean; board: PriceBoard }> => {
+    async ({
+      data,
+    }): Promise<{ hasGame: boolean; board: PriceBoard; cache: string }> => {
       const viewer = await getViewer(getRequest());
-      cacheFor(viewer);
-      return withRequestNow((db, now) => pricesPage(db, now, viewer, data));
+      return withRequestNow(async (db, now) => {
+        const page = await pricesPage(db, now, viewer, data);
+        const cache = publicCache(now, await nextLockAt(db, now));
+        cacheFor(viewer, cache);
+        return { ...page, cache };
+      });
     },
   );
 

@@ -93,7 +93,7 @@ test("a logged-out visitor gets a public cache header and covered changes", asyn
   await moveClock(request, ROUND_1.final);
   const response = await page.goto("/prices");
   expect(response!.headers()["cache-control"]).toBe(
-    "public, s-maxage=60, stale-while-revalidate=300",
+    "public, s-maxage=60, stale-while-revalidate=30",
   );
   await expect(page.getByText(COVER)).toBeVisible();
   await expect(page.locator("text=/▲|▼/")).toHaveCount(0);
@@ -112,10 +112,11 @@ test("a logged-out visitor gets a public cache header and covered changes", asyn
   await expect(list(page, "Going up")).toContainText("▲");
   const shown = await page.request.get("/prices?show=changes");
   expect(shown.headers()["cache-control"]).toBe(
-    "public, s-maxage=60, stale-while-revalidate=300",
+    "public, s-maxage=60, stale-while-revalidate=30",
   );
-  // Keyed on the cookie, so a signed-in reader never gets this copy.
-  expect(shown.headers()["vary"]).toMatch(/cookie/i);
+  // No Vary: Cookie, which Vercel's CDN won't cache (M9 Task 6); the edge
+  // keys a signed-in request apart instead.
+  expect(shown.headers()["vary"] ?? "").not.toMatch(/cookie/i);
 });
 
 test("public pages are private for a signed-in reader", async ({
@@ -125,9 +126,9 @@ test("public pages are private for a signed-in reader", async ({
   await moveClock(request, ROUND_1.final);
   const loggedOut = await page.request.get("/prices/how");
   expect(loggedOut.headers()["cache-control"]).toBe(
-    "public, s-maxage=60, stale-while-revalidate=300",
+    "public, s-maxage=60, stale-while-revalidate=30",
   );
-  expect(loggedOut.headers()["vary"]).toMatch(/cookie/i);
+  expect(loggedOut.headers()["vary"] ?? "").not.toMatch(/cookie/i);
 
   // The page carries the account, so it must not reach a shared cache.
   await createAccount(page.context().request, { origin: FANTASY_ORIGIN });

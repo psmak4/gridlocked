@@ -10,7 +10,7 @@ import { setTrust } from "./helpers/forum";
 // The forum's screens (M7 Task 6), at phone size: reading is public, a TL1
 // account starts a thread, and anyone verified replies and votes.
 
-const PUBLIC_CACHE = "public, s-maxage=60, stale-while-revalidate=300";
+const PUBLIC_CACHE = "public, s-maxage=60, stale-while-revalidate=30";
 
 test("the forum is public, cacheable and lists the seven categories", async ({
   page,
