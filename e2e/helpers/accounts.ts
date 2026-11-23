@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
   expect,
@@ -95,9 +96,21 @@ type AxeResults = {
   violations: { id: string; impact: string | null; help: string }[];
 };
 
+const AXE_SOURCE = readFileSync(require.resolve("axe-core"), "utf8");
+
+/**
+ * Puts axe on the page, if it isn't there yet. Not as a script tag: the page's
+ * CSP (M9 Task 9) refuses inline scripts without its nonce, while Playwright's
+ * own evaluation runs outside the page's policy.
+ */
+export async function injectAxe(page: Page) {
+  if (await page.evaluate(() => "axe" in window)) return;
+  await page.evaluate(AXE_SOURCE);
+}
+
 /** Runs axe on the page and fails on anything serious or critical. */
 export async function expectNoSeriousAxeViolations(page: Page) {
-  await page.addScriptTag({ path: require.resolve("axe-core") });
+  await injectAxe(page);
   const results = await page.evaluate(() =>
     (
       window as unknown as { axe: { run: () => Promise<AxeResults> } }
