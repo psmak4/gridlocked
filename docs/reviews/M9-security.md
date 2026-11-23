@@ -33,34 +33,15 @@ server (`e2e/csrf.spec.ts`), so the matrix doesn't repeat it per function.
 | --- | --- | --- | --- |
 | 1 | Configuration (V3, V13) | No response carried a Content-Security-Policy, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` or HSTS. | **Fixed** in be577a0. Every response, pages and assets, gets `nosniff`, `strict-origin-when-cross-origin`, `DENY`, a Permissions-Policy and HSTS (two years, subdomains, no preload), through Nitro's route rules. Each page gets a CSP with a nonce of its own (`pageCsp` in `src/start.ts`); the router puts it on every script it writes, so no other inline script runs. Scripts come only from the app, the nonce and Turnstile; calls go only to the app, Turnstile and Sentry's ingest; framing, plugins, other `<base>`s and other form targets are refused. |
 | 2 | Configuration | With the CSP on, Zod 4's probe for `new Function` was reported as a violation on every page (it is caught, so nothing broke). | **Fixed** in be577a0: a head script sets Zod's `jitless` before any module loads, so Zod parses without compiling. |
-| 3 | Authentication (V6.2.4) | A new password is checked for length (10 to 128) but not against a list of common or breached passwords. | **Open, for the owner** (see below). |
+| 3 | Authentication (V6.2.4) | A new password was checked for length (10 to 128) but not against a list of common or breached passwords. | **Fixed.** The owner chose a bundled list: the UK NCSC's 100,000 most-used passwords from SecLists (MIT), cut to the 9,126 that are 10 to 128 characters long, lower-cased, in `src/identity/common-passwords.txt` with its licence beside it. Sign-up, password change and reset refuse one in any case as `PASSWORD_TOO_COMMON`, checked in Better Auth's request hook with no outside call, and each screen says so. Tested in `src/identity/common-passwords.test.ts` and `e2e/sign-up.spec.ts`. The list ships in the server bundle only. |
 | 4 | Dependencies (V15) | `pnpm audit` and Dependabot report two moderate advisories: esbuild ≤ 0.24.2 (its dev server answers any origin), through `better-auth > drizzle-kit`, and minimatch < 11.0.1 (a slow glob), a development dependency. | **Accepted.** Neither is in the built server: drizzle-kit and minimatch run only at development time, and the app never runs esbuild's dev server. Dependabot will offer the bumps. |
 | 5 | Configuration (found through the CSP) | The e2e tests put axe on a page with a script tag, which the CSP rightly refuses. Running axe the new way showed a flaky failure: before React hydrates, a Checkbox or Switch has no name, because its label's `for` points at an id Base UI only sets once hydrated (WCAG 4.1.2). | **Fixed.** The e2e helper injects axe with `page.evaluate`, outside the page's policy, so the tests didn't loosen the CSP. Checkbox and Switch now name their control with `aria-labelledby` in the server's HTML, with a server-render test each. |
-
-### Finding 3: the owner's choice
-
-ASVS 5.0 6.2.4 (level 1) asks that a new password be checked against at
-least the 3,000 most common passwords. There are two ways to do it:
-
-- **Better Auth's `haveIBeenPwned` plugin.** It is in the package already.
-  On sign-up, password change and reset, it sends the first five characters
-  of the password's SHA-1 to `api.pwnedpasswords.com` (k-anonymity; the
-  password never leaves) and refuses one that has been breached. It **fails
-  closed**: if the service is down, nobody can sign up with a password or
-  change one until it is back. The e2e runs would need it switched off.
-- **A bundled list:** the 10,000 most common passwords (SecLists, MIT
-  licence) checked in the sign-up and password hooks. No outside call, but a
-  file to download into the repo, and it misses breached passwords that
-  aren't common.
-
-Until one is chosen, the 10-character minimum is the only check, which
-already rules out most of the commonest passwords.
 
 ## What was checked and found sound
 
 - **Authentication (V6).**
   - Passwords are 10 to 128 characters (ASVS asks for at least 8, and allows
-    at least 64).
+    at least 64), and not one of the 9,126 commonest that long (finding 3).
   - Sign-in, sign-up and password change are rate-limited by Better Auth's
     default rules. The magic link, reset request and verification email have
     tighter limits of their own, kept in the database because serverless
