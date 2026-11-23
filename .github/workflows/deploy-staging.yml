@@ -81,16 +81,15 @@ jobs:
       - name: Install the Neon CLI
         run: npm install --global "neon@${NEON_CLI_VERSION}"
 
-      # A dry run: what the deploy below would change.
+      # A dry run: what the deploy below would change to the buckets, the
+      # function and the triggers. It gets only the API key (and the project
+      # id above): no step is handed a secret it doesn't use. neon.ts
+      # declares the email and push secrets only when they are set, so the
+      # plan doesn't list them; the deploy below passes them.
       - name: Plan the Neon deploy
         run: neon config plan --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH"
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
-          # Same as the deploy below, so the plan matches it.
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
 
       # Applies neon.ts: the `scheduler`, `exports` and `chat-archives`
       # buckets (a missing one is created), the `tick` function (bundled

@@ -7,6 +7,8 @@ import { createMiddleware, createServerFn } from "@tanstack/react-start";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { APIError } from "better-auth/api";
+import { logAuthEvent } from "@/identity/auth";
 import { IdentityError } from "@/identity/viewer";
 import { startInstance } from "@/start";
 import {
@@ -176,6 +178,38 @@ async function runOnServer(
     () => compiled.__executeServer({ data, method: "POST" }),
   );
 }
+
+describe("an auth failure logs its code", () => {
+  it("names Better Auth's error code, or its known event, and never a value", () => {
+    logAuthEvent(
+      "error",
+      `Failed for ${ADDRESS}`,
+      new APIError("BAD_REQUEST", {
+        code: "INVALID_TOKEN",
+        message: `token for ${ADDRESS}`,
+      }),
+    );
+    logAuthEvent("warn", "Invalid password");
+    logAuthEvent("error", `Invalid callbackURL: ${LINK}`);
+    expect(logged).toEqual([
+      "better-auth error: INVALID_TOKEN (APIError)",
+      "better-auth warn: invalid_password",
+      "better-auth error: unlisted",
+    ]);
+  });
+
+  it("a server function's auth refusal logs its code", () => {
+    scrubServerFnError(
+      new APIError("UNAUTHORIZED", {
+        code: "INVALID_EMAIL_OR_PASSWORD",
+        message: `no account for ${ADDRESS}`,
+      }),
+    );
+    expect(logged).toEqual([
+      "server function failed: APIError [INVALID_EMAIL_OR_PASSWORD]",
+    ]);
+  });
+});
 
 describe("every server function runs inside the scrub", () => {
   it("is registered as global function middleware in start.ts", async () => {
