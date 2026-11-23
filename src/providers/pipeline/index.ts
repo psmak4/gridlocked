@@ -9,7 +9,10 @@ import {
   unconfiguredExportStore,
   type ExportStore,
 } from "@/identity/export";
-import { createGameChecksHandler } from "@/game/corrections";
+import {
+  createDryRunHandlers,
+  createGameChecksHandler,
+} from "@/game/corrections";
 import { createScoreHandlers } from "@/game/score-jobs";
 import { createFinalizeHandler } from "@/jobs/finalize";
 import { createPollHandler } from "@/jobs/poll";
@@ -78,6 +81,7 @@ export function createPipelineHandlers(deps: PipelineDeps): PipelineHandlers {
     ),
     ...createScoreHandlers({ batchSize: deps.scoreBatchSize }),
     game_checks: createGameChecksHandler(),
+    ...createDryRunHandlers(),
     // Database only, like the game's: no provider is involved.
     identity_daily: createIdentityDailyHandler({ exportStore }),
     privacy_export: createPrivacyExportHandler({

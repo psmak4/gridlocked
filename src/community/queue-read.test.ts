@@ -7,7 +7,7 @@ import type { Viewer } from "@/identity/viewer";
 import { moderate, staffActor, type ModTargetType } from "./moderate";
 import { report, type CaptchaVerifier } from "./moderation";
 import { editPost, reply } from "./posts";
-import { modItem, modQueue } from "./queue-read";
+import { modItem, modQueue, openModCount } from "./queue-read";
 import { createThread } from "./threads";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
@@ -167,6 +167,31 @@ describe("modQueue and modItem (M8 Task 11)", () => {
       where: "Race thoughts",
       reports: 1,
     });
+  });
+
+  it("the staff area's counts come from count queries", async () => {
+    expect(await openModCount(t.db)).toBe(0);
+    const other = await seedViewer(t.db, { trustLevel: 0, username: "newbie" });
+    const shown = await report(
+      t.db,
+      at(2),
+      other,
+      { targetType: "thread", targetId: threadId, reason: "abuse" },
+      { verifyCaptcha: passes },
+    );
+    if (!shown.ok) throw new Error(shown.error);
+    await reportReply(3);
+    expect(await openModCount(t.db)).toBe(2);
+
+    // A closed item no longer counts.
+    await t.db
+      .update(modQueueItems)
+      .set({ status: "dismissed" })
+      .where(eq(modQueueItems.id, shown.queueItemId));
+    expect(await openModCount(t.db)).toBe(1);
+    expect(await openModCount(t.db)).toBe(
+      (await modQueue(t.db, { tab: "open" })).length,
+    );
   });
 
   it("a deleted author shows as deleted user", async () => {

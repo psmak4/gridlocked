@@ -49,7 +49,7 @@ function BottomNav({ items, active, className }: BottomNavProps) {
                 href={item.href ?? "#"}
                 aria-current={current ? "page" : undefined}
                 className={cn(
-                  "flex min-h-[44px] flex-1 flex-col items-center justify-center gap-[3px] font-sans text-[12px] no-underline outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring",
+                  "flex min-h-[44px] flex-1 flex-col items-center justify-center gap-[3px] font-sans text-[12px] no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus-ring",
                   current
                     ? "font-bold text-heat-text"
                     : "font-semibold text-ink-muted",

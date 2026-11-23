@@ -64,7 +64,7 @@ type TeamBuilderProps = {
 const sectionTitle =
   "m-0 font-display text-[18px] leading-[22px] font-normal tracking-[0.02em]";
 const headerLink =
-  "inline-flex min-h-[44px] items-center text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "inline-flex min-h-[44px] items-center text-[16px] font-bold text-heat-text underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 type Slot = { kind: "driver" | "constructor"; pick: LineupPick | null };
 
@@ -89,7 +89,7 @@ function EmptySlot({
       type="button"
       onClick={onClick}
       disabled={disabled || !hydrated}
-      className="flex min-h-[56px] w-full cursor-pointer items-center justify-center rounded-radius-m border-2 border-dashed border-line-strong bg-transparent font-sans text-[16px] font-bold text-ink-muted outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed"
+      className="flex min-h-[56px] w-full cursor-pointer items-center justify-center rounded-radius-m border-2 border-dashed border-line-strong bg-transparent font-sans text-[16px] font-bold text-ink-muted outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed"
     >
       Add a {kind}
     </button>

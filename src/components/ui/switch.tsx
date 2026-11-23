@@ -63,7 +63,7 @@ function Switch({
         aria-describedby={descriptionId}
         onCheckedChange={(next) => onChange?.(next)}
         data-slot="switch"
-        className="relative h-[32px] w-[52px] shrink-0 cursor-pointer rounded-radius-pill border-2 border-line-strong bg-surface-sunken p-0 outline-none after:absolute after:-inset-[6px] after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-checked:border-ink data-checked:bg-ink data-disabled:cursor-not-allowed"
+        className="relative h-[32px] w-[52px] shrink-0 cursor-pointer rounded-radius-pill border-2 border-line-strong bg-surface-sunken p-0 outline-none after:absolute after:-inset-[6px] after:content-[''] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring data-checked:border-ink data-checked:bg-ink data-disabled:cursor-not-allowed"
       >
         <SwitchPrimitive.Thumb className="pointer-events-none absolute top-[2px] left-[2px] size-[24px] rounded-full bg-surface ring-1 ring-line-strong transition-transform motion-reduce:transition-none data-checked:translate-x-[20px] data-checked:ring-0" />
       </SwitchPrimitive.Root>

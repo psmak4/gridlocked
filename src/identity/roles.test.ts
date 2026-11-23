@@ -215,7 +215,7 @@ describe("roles and bans (DM 6.4)", () => {
     const other = await seedUser(t.db, { username: "other", role: "admin" });
     await t.db.update(users).set({ banned: true }).where(eq(users.id, other));
     expect(await errorCode(() => demote(boss))).toBe("last_admin");
-    // Nor can the last active admin be banned.
+    // Nor can the last active admin be banned: no admin can (M9 Task 7).
     expect(
       await errorCode(() =>
         banUserAs(t.db, now(), {
@@ -225,12 +225,48 @@ describe("roles and bans (DM 6.4)", () => {
           actor,
         }),
       ),
-    ).toBe("last_admin");
+    ).toBe("cannot_ban_admin");
 
     await t.db.update(users).set({ banned: false }).where(eq(users.id, other));
     await demote(boss);
     expect(await roleOf(boss)).toBe("user");
     expect(await errorCode(() => demote(other))).toBe("last_admin");
+  });
+
+  it("banning an admin is refused with cannot_ban_admin", async () => {
+    // Another active admin is there, so this isn't the last-admin rule.
+    const other = await seedUser(t.db, { username: "other", role: "admin" });
+    expect(
+      await errorCode(() =>
+        banUserAs(t.db, now(), {
+          targetUserId: other,
+          until: null,
+          reason: "Rogue admin",
+          actor,
+        }),
+      ),
+    ).toBe("cannot_ban_admin");
+    const [row] = await t.db
+      .select({ banned: users.banned })
+      .from(users)
+      .where(eq(users.id, other));
+    expect(row!.banned).toBe(false);
+    expect(await audits("user.ban")).toHaveLength(0);
+
+    // Demoted first, they can be banned.
+    await setRoleAs(t.db, now(), {
+      targetUserId: other,
+      role: "user",
+      reason: "Stepping down",
+      actor,
+    });
+    await banUserAs(t.db, now(), {
+      targetUserId: other,
+      until: null,
+      reason: "Rogue admin",
+      actor,
+    });
+    expect(await audits("user.ban")).toHaveLength(1);
   });
 
   it("no one can be made system", async () => {

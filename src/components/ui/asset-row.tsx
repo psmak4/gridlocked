@@ -106,7 +106,7 @@ function AssetRow({
     "flex min-h-[56px] w-full items-center gap-space-3 rounded-radius-m border-0 py-[6px] pr-space-3 pl-[6px] text-left font-sans text-ink no-underline",
     !tint && "bg-surface-raised",
     (onClick || href) &&
-      "cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+      "cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
     disabled && "cursor-not-allowed opacity-60",
     className,
   );

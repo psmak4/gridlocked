@@ -35,7 +35,7 @@ export function ReasonField({
         onChange={(event) => onChange(event.target.value)}
         aria-describedby={error ? errorId : undefined}
         aria-invalid={error ? true : undefined}
-        className="min-h-[96px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 py-space-2 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring aria-invalid:border-fall"
+        className="min-h-[96px] rounded-radius-m border-2 border-line-strong bg-surface px-space-3 py-space-2 font-sans text-[16px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring aria-invalid:border-fall"
       />
       {error ? (
         <p id={errorId} className="text-[14px] font-semibold text-fall">

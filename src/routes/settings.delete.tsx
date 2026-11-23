@@ -159,7 +159,7 @@ function DeleteAccount() {
           </ul>
           <a
             href="/settings/data"
-            className="flex min-h-[48px] items-center justify-between rounded-radius-m border border-line px-[14px] text-[16px] font-bold text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            className="flex min-h-[48px] items-center justify-between rounded-radius-m border border-line px-[14px] text-[16px] font-bold text-ink no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           >
             Download my data first
             <svg

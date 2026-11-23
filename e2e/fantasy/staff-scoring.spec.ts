@@ -10,6 +10,7 @@ import {
   FANTASY_ORIGIN,
   moveClock,
   ROUND_1,
+  runDueNow,
   seedGame,
   staleOverride,
 } from "../helpers/game";
@@ -62,6 +63,15 @@ for (const size of [
     await expect(
       page.getByText("SCORING · DRY RUN · NOTHING HAS CHANGED YET"),
     ).toBeVisible();
+    // It scores as jobs (M9 Task 7), so it shows as running until they run.
+    await expect(
+      page.getByText("This dry run is still scoring. Reload in a minute."),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Approve and re-score" }),
+    ).toBeDisabled();
+    await runDueNow(request);
+    await page.reload();
     const tiles = page.getByRole("list", { name: "Dry run totals" });
     await expect(tiles.locator('[data-slot="dry-run-tile"]')).toHaveCount(4);
     await expect(tiles).toContainText("TEAMS AFFECTED");
