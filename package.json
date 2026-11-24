@@ -17,6 +17,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
+    "legal:publish": "tsx scripts/publish-legal.ts",
     "db:drift": "node scripts/db-drift.mjs",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:staging": "pnpm db:migrate",

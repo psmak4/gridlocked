@@ -26,10 +26,13 @@ import { getViewer, type SessionDeps } from "@/server/session";
 import {
   acceptDocuments,
   completeSignUp,
+  consentBoxes,
   currentDocuments,
   pendingDocuments,
+  publishDocument,
   purgeIncompleteAccounts,
 } from "./consent";
+import { BETA_NOTICE } from "./legal-text";
 import { IdentityError, requireComplete } from "./viewer";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -276,6 +279,51 @@ describe("consent (DM 6.2, 6.8)", () => {
       const viewer = await viewerFor(cookie);
       expect(viewer!.complete).toBe(true);
       expect(() => requireComplete(viewer)).not.toThrow();
+    });
+  });
+
+  describe("the beta notice (M9 Task 13)", () => {
+    it("isn't in force until it's published: production never has it", async () => {
+      const kinds = (await currentDocuments(t.db, TEST_NOW)).map((d) => d.kind);
+      expect(kinds).not.toContain("beta");
+    });
+
+    it("consentBoxes names the beta notice on the sign-up box only once it's in force", async () => {
+      expect(await consentBoxes(t.db, TEST_NOW)).toEqual({ beta: false });
+      await publishDocument(
+        t.db,
+        new Date(TEST_NOW.getTime() + DAY),
+        BETA_NOTICE,
+      );
+      expect(await consentBoxes(t.db, TEST_NOW)).toEqual({ beta: false });
+      await publishDocument(t.db, TEST_NOW, {
+        ...BETA_NOTICE,
+        version: "beta-0",
+      });
+      expect(await consentBoxes(t.db, TEST_NOW)).toEqual({ beta: true });
+    });
+
+    it("publishDocument publishes it once, and an account that accepted the rest must accept it too", async () => {
+      const response = await testAuth(t.db).handler(
+        signUpRequest("ada@example.test", { username: "grid_fan" }),
+      );
+      const { id: userId } = await userByEmail("ada@example.test");
+      expect(await pendingDocuments(t.db, TEST_NOW, userId)).toEqual([]);
+      expect(response.status).toBe(200);
+
+      const at = new Date(TEST_NOW.getTime() - DAY);
+      expect(await publishDocument(t.db, at, BETA_NOTICE)).toBe(true);
+      expect(await publishDocument(t.db, at, BETA_NOTICE)).toBe(false);
+
+      const pending = await pendingDocuments(t.db, TEST_NOW, userId);
+      expect(pending.map((d) => [d.kind, d.version, d.url])).toEqual([
+        ["beta", "beta-1", "/legal/beta"],
+      ]);
+      await acceptDocuments(t.db, TEST_NOW, {
+        userId,
+        documentIds: pending.map((d) => d.id),
+      });
+      expect(await pendingDocuments(t.db, TEST_NOW, userId)).toEqual([]);
     });
   });
 

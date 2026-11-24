@@ -17,6 +17,8 @@ export const USERNAME_MESSAGES: Record<UsernameProblem, string> = {
 export const AGE_ERROR = "Confirm you're 16 or older.";
 export const TERMS_ERROR =
   "Accept the terms, privacy policy and community rules to continue.";
+export const TERMS_ERROR_BETA =
+  "Accept the terms, privacy policy, community rules and beta notice to continue.";
 
 /**
  * Asks the server why a username can't be used, with no reload. Answers that
@@ -98,6 +100,7 @@ export function ConsentFields({
   onAccepted,
   ageError,
   termsError,
+  beta = false,
 }: {
   ageConfirmed: boolean;
   accepted: boolean;
@@ -105,6 +108,8 @@ export function ConsentFields({
   onAccepted: (next: boolean) => void;
   ageError: boolean;
   termsError: boolean;
+  /** A beta notice is in force, so the box names it too. */
+  beta?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-space-1">
@@ -120,13 +125,24 @@ export function ConsentFields({
         label={
           <span>
             I agree to the <LegalLink kind="terms">Terms</LegalLink>,{" "}
-            <LegalLink kind="privacy">Privacy Policy</LegalLink> and{" "}
-            <LegalLink kind="community_rules">Community rules</LegalLink>
+            <LegalLink kind="privacy">Privacy Policy</LegalLink>
+            {beta ? (
+              <>
+                , <LegalLink kind="community_rules">Community rules</LegalLink>{" "}
+                and <LegalLink kind="beta">Beta notice</LegalLink>
+              </>
+            ) : (
+              <>
+                {" "}
+                and{" "}
+                <LegalLink kind="community_rules">Community rules</LegalLink>
+              </>
+            )}
           </span>
         }
         checked={accepted}
         onCheckedChange={onAccepted}
-        error={termsError ? TERMS_ERROR : undefined}
+        error={termsError ? (beta ? TERMS_ERROR_BETA : TERMS_ERROR) : undefined}
       />
     </div>
   );

@@ -18,16 +18,18 @@ import { authClient } from "@/identity/auth-client";
 import { pushOff } from "@/lib/push-actions";
 import { signOutHere } from "@/lib/sign-out";
 import { privateHeaders } from "@/lib/private-headers";
-import { finishSignUp } from "@/server/account";
+import { finishSignUp, getConsentBoxes } from "@/server/account";
 
 export const Route = createFileRoute("/welcome/")({
   head: () => ({ meta: [{ title: "Finish signing up · Gridlocked" }] }),
   headers: privateHeaders,
+  loader: () => getConsentBoxes(),
   component: FinishSigningUp,
 });
 
 /** "Finish signing up": after a first Discord or magic-link sign-in (decision 3). */
 function FinishSigningUp() {
+  const { beta } = Route.useLoaderData();
   const { account } = Route.useRouteContext();
   const router = useRouter();
   const hasName = account?.username != null;
@@ -119,6 +121,7 @@ function FinishSigningUp() {
             }}
             ageError={boxes.age}
             termsError={boxes.terms}
+            beta={beta}
           />
           <FormMessage>{message}</FormMessage>
         </Body>

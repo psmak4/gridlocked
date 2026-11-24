@@ -138,6 +138,7 @@ const PUBLIC: Record<string, string> = {
   "account.getAccount": "the header's account summary; null when signed out",
   "account.markPrivate": "marks a page's answer private; reads nothing",
   "account.getSignInOptions": "the sign-in page's buttons",
+  "account.getConsentBoxes": "which documents the sign-up box names",
   "account.checkUsername": "sign-up's username check, rate-limited per address",
   "account.getEmailBusy": "sign-up's email check, rate-limited per address",
   "account.confirmMyDeletion":
