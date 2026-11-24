@@ -22,6 +22,8 @@
     "db:migrate:staging": "pnpm db:migrate",
     "import:2026": "tsx scripts/import-2026.ts",
     "staff": "tsx scripts/staff.ts",
+    "backup-check": "tsx scripts/backup-check.ts",
+    "backup-dump": "tsx scripts/backup-dump.ts",
     "usage-snapshot": "tsx scripts/usage-snapshot.ts",
     "e2e": "playwright test",
     "chat-load": "tsx scripts/chat-load.ts"

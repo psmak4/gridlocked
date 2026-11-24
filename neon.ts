@@ -11,6 +11,8 @@
  * - `chat-archives` bucket: each session thread's chat, 30 days on (DM 5.5,
  *   M7 decision 5), as one gzip JSON-lines file kept for good. Written by the
  *   `community_daily` job; same injected keys.
+ * - `backups` bucket: the nightly encrypted dumps (M9 Task 11), written by
+ *   `backup.yml` with a credential of its own; the tick never touches it.
  * - `tick` function: bundled from the entry file by the CLI (esbuild). Neon
  *   injects DATABASE_URL. The only `env` declared is the email sender's
  *   (RESEND_API_KEY and EMAIL_FROM) and Web Push's (VAPID_PUBLIC_KEY and
@@ -66,6 +68,7 @@ export default defineConfig({
     scheduler: {},
     exports: {},
     "chat-archives": {},
+    backups: {},
   },
   functions: {
     tick: {
