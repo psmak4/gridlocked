@@ -7,7 +7,7 @@ Every night at 04:00 UTC, `.github/workflows/backup.yml` backs up the staging da
    - counts every table's rows in the same snapshot.
 2. **Check.** `pnpm backup-check dump` renders the dump back to SQL with `pg_restore` and requires the closing line, `-- PostgreSQL database dump complete`. A cut-short dump has no such line. The dump must also be at least 32 KB.
 3. **Encrypt.** `age` encrypts the dump to your public key. The result must be an age file, and no smaller than the dump.
-4. **Store.** The workflow uploads `backups/staging/<date>.dump.age` and `<date>.counts.tsv` to the branch's Neon Object Storage. It deletes any copy past the newest 14.
+4. **Store.** The workflow uploads `backups/staging/<date>.dump.age` and `<date>.counts.tsv` to the branch's Neon Object Storage. While the closed beta runs, the `beta` branch's database is backed up too, to the same bucket under `backups/beta/` ([beta.md](beta.md)). It deletes any copy past the newest 14.
 
 Any failed check fails the run, and nothing from it is kept. The counts file holds table names and row counts, nothing else. The private key never goes to GitHub, Neon or Claude: only you can decrypt a backup.
 

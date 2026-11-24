@@ -242,6 +242,69 @@ describe("the staff two-step (DM 6.4)", () => {
     expect((await viewer(cookie))!.staffVerifiedAt).not.toBeNull();
   });
 
+  // M9 Task 13: on a hosted replay the site's time is a past season's, while
+  // an authenticator app always shows codes for the real time.
+  it("on a replay the code is for the real time, not the replay's", async () => {
+    const { userId, secret } = await adminWithTotp();
+    later(5 * 60_000);
+    const cookie = await signInWithTotp(auth, BOSS, secret);
+    const v = (await viewer(cookie))!;
+    later(SECOND);
+    const realNow = now();
+    const replayNow = new Date(realNow.getTime() - 330 * 24 * 3_600_000);
+
+    // A code for the replay's moment is nobody's current code.
+    expect(
+      await errorCode(async () =>
+        verifyStaffSession(auth, t.db, replayNow, {
+          viewer: v,
+          code: await totpCode(auth, secret, replayNow),
+          realNow,
+        }),
+      ),
+    ).toBe("invalid_code");
+
+    await verifyStaffSession(auth, t.db, replayNow, {
+      viewer: v,
+      code: await totpCode(auth, secret),
+      realNow,
+    });
+    // What it records is still at the site's time, with everything else.
+    expect((await viewer(cookie))!.staffVerifiedAt).toEqual(replayNow);
+    expect(
+      await t.db
+        .select({ at: auditLog.createdAt })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.actorUserId, userId),
+            eq(auditLog.action, "staff.session.verify"),
+          ),
+        ),
+    ).toEqual([{ at: replayNow }]);
+  });
+
+  it("a locked unlock clears in real time, while the replay stands still", async () => {
+    const { secret } = await adminWithTotp();
+    const cookie = await signInWithTotp(auth, BOSS, secret);
+    const v = (await viewer(cookie))!;
+    const replayNow = new Date(now().getTime() - 330 * 24 * 3_600_000);
+    const attempt = async (code: string) =>
+      errorCode(() =>
+        verifyStaffSession(auth, t.db, replayNow, {
+          viewer: v,
+          code,
+          realNow: now(),
+        }),
+      );
+    for (let i = 0; i < 5; i++) {
+      expect(await attempt("not-a-backup")).toBe("invalid_code");
+    }
+    expect(await attempt("not-a-backup")).toBe("rate_limited");
+    later(16 * 60_000);
+    expect(await attempt(await totpCode(auth, secret))).toBeNull();
+  });
+
   it("a burst of wrong codes at once still hits the limit", async () => {
     const { secret } = await adminWithTotp();
     const cookie = await signInWithTotp(auth, BOSS, secret);

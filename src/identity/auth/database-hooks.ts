@@ -120,14 +120,20 @@ export function databaseHooks({
           if (/\.invalid$/.test(email)) {
             throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
           }
-          if (allowedToSignUp(env, email)) return;
+          // The account is made at the site's time. Better Auth dates it at
+          // the real one, which on a hosted replay is months later, and then
+          // account ages, "Joined" and broadcasts would all be wrong (M9
+          // Task 13).
+          const at = now();
+          const data = { ...user, createdAt: at, updatedAt: at };
+          if (allowedToSignUp(env, email)) return { data };
           // A Discord sign-up whose address isn't listed may still be
           // invited by its Discord id: the account hook below decides, in
           // the same transaction, once the id is known.
           const oauth = context?.path?.startsWith("/callback/") ?? false;
           if (context && oauth && listsDiscord(env)) {
             awaitingDiscordId.add(context);
-            return;
+            return { data };
           }
           throw new APIError("FORBIDDEN", { message: SIGN_UP_CLOSED });
         },

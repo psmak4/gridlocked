@@ -11,7 +11,9 @@ import {
 } from "@/db/schema";
 import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
-import { recordUsage, usageMeters, USAGE_LIMITS } from "./usage";
+import { ClockModeError } from "@/lib/resolve-clock";
+import { setSimulatedClock } from "@/replay/clock-loop";
+import { recordReading, recordUsage, usageMeters, USAGE_LIMITS } from "./usage";
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 
@@ -60,6 +62,42 @@ describe("recordUsage and usageMeters (M8 Task 14)", () => {
       vercelCpuHours: 0.5,
     });
     expect(await warnings()).toHaveLength(2);
+  });
+
+  // The beta (M9 Task 13): the providers' month is the real one, and the row
+  // is dated as the site reads it, at the replay's now.
+  it("a replay's reading is of the real month, and recorded at the replay's now", async () => {
+    const real = new Date("2027-02-20T05:00:00Z");
+    const replay = new Date("2026-03-07T05:00:00Z");
+    await setSimulatedClock(t.db, replay);
+    const asked: Date[] = [];
+    const { warned } = await recordReading(
+      t.db,
+      { CLOCK_MODE: "replay" },
+      real,
+      async (at) => {
+        asked.push(at);
+        return { neonComputeHours: 74, neonTransferGb: 1, vercelCpuHours: 1 };
+      },
+    );
+    expect(asked).toEqual([real]);
+    expect(warned).toEqual(["neon_compute"]);
+    const [row] = await t.db.select().from(usageSnapshots);
+    expect(row!.takenAt).toEqual(replay);
+    expect((await usageMeters(t.db, replay))[0]).toMatchObject({ pct: 74 });
+  });
+
+  it("a reading for a database of the other kind asks no provider and writes nothing", async () => {
+    await setSimulatedClock(t.db, NOW);
+    let asked = false;
+    await expect(
+      recordReading(t.db, {}, NOW, async () => {
+        asked = true;
+        return { neonComputeHours: 1, neonTransferGb: 1, vercelCpuHours: 1 };
+      }),
+    ).rejects.toBeInstanceOf(ClockModeError);
+    expect(asked).toBe(false);
+    expect(await t.db.select().from(usageSnapshots)).toEqual([]);
   });
 
   it("recordUsage keeps the limits it was measured against", async () => {

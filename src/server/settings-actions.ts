@@ -732,7 +732,7 @@ export function requestDeletionAction(
   now: Date,
   viewer: Viewer | null,
   input: z.infer<typeof requestDeletionInput>,
-  deps: { sender: EmailSender | null; baseUrl: string },
+  deps: { sender: EmailSender | null; baseUrl: string; realNow?: Date },
 ): Promise<SettingsResult<{ confirm: "email" | "fresh_sign_in" }>> {
   return refusing(
     [

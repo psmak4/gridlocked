@@ -148,7 +148,9 @@ export async function scrubAccount(
  * With a verified address, a one-hour token goes out as `delete_confirm` and
  * only its hash is kept; a new request replaces an older one's link. With
  * none, a sign-in in the last 10 minutes is the confirmation, and the account
- * goes at once (`sign_in_again` otherwise). Refused for an impersonated
+ * goes at once (`sign_in_again` otherwise). Better Auth dates sessions at the
+ * real time, which on a hosted replay isn't the site's, so that age is
+ * counted from `deps.realNow` (default `now`; M9 Task 13). Refused for an impersonated
  * session (`read_only`), a wrong name (`wrong_username`), `system` and the
  * last active admin.
  */
@@ -156,7 +158,7 @@ export async function requestDeletion(
   db: Db,
   now: Date,
   input: { viewer: Viewer | null; typedUsername: string },
-  deps: { sender: EmailSender | null; baseUrl: string },
+  deps: { sender: EmailSender | null; baseUrl: string; realNow?: Date },
 ): Promise<{ confirm: "email" | "fresh_sign_in" }> {
   const viewer = requireViewer(input.viewer);
   if (viewer.impersonatedBy !== null) throw new IdentityError("read_only");
@@ -228,7 +230,8 @@ export async function requestDeletion(
       );
     if (
       !session ||
-      now.getTime() - session.createdAt.getTime() > FRESH_SIGN_IN_MS
+      (deps.realNow ?? now).getTime() - session.createdAt.getTime() >
+        FRESH_SIGN_IN_MS
     ) {
       throw new IdentityError("sign_in_again");
     }

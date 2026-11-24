@@ -29,15 +29,12 @@
  * username and the role change, never an email.
  *
  * Keys are Jolpica's. Without STAFF_DRY_RUN=false it only resolves the keys
- * and prints what it would do. It runs in system mode only: it refuses a
- * replay database and a CLOCK_MODE other than system.
+ * and prints what it would do. On the beta, CLOCK_MODE=replay runs it at the
+ * replay's now; a CLOCK_MODE that isn't the database's is refused.
  */
 import { createDb } from "@/db/client";
-import {
-  assertClockMode,
-  clockModeFromEnv,
-  resolveClock,
-} from "@/lib/resolve-clock";
+import { systemClock } from "@/lib/clock";
+import { checkedNow } from "@/lib/resolve-clock";
 import { rematchParticipants } from "@/providers/openf1/participants";
 import { parseStaffEnv, runStaffCommand } from "@/staff/cli";
 
@@ -51,16 +48,12 @@ async function main() {
   const cmd = parseStaffEnv(args[0], process.env);
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  if (clockModeFromEnv(process.env) !== "system") {
-    throw new Error("staff actions run in system mode: unset CLOCK_MODE");
-  }
 
   const handle = createDb(url);
   const db = handle.db();
   try {
-    await assertClockMode(db, "system");
-    const clock = await resolveClock({ mode: "system", db });
-    const report = await runStaffCommand(db, clock.now(), cmd, {
+    const now = await checkedNow(db, process.env, systemClock.now());
+    const report = await runStaffCommand(db, now, cmd, {
       rematchParticipants,
     });
     console.log(

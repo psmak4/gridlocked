@@ -315,3 +315,60 @@ describe("the invite list and Discord", () => {
     expect(await people()).toHaveLength(0);
   });
 });
+
+// M9 Task 13: on a hosted replay the site's time is a past season's, and
+// account ages, "Joined" and broadcasts all compare `created_at` with it.
+describe("when an account was made", () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let fetchStub: ReturnType<typeof vi.fn<typeof fetch>>;
+  const REPLAY_NOW = new Date("2026-03-06T10:00:00Z");
+  const DISCORD = {
+    clientId: "fake-discord-client-id",
+    clientSecret: "fake-discord-client-secret",
+  };
+  const on = (signUpAllowlist: string[] | null, mail = recordingSender()) =>
+    testAuth(t.db, {
+      now: () => REPLAY_NOW,
+      sender: mail.sender,
+      env: { discord: DISCORD, signUpAllowlist },
+    });
+  const made = async () =>
+    (await t.db.select().from(users))
+      .filter((u) => u.role !== "system")
+      .map((u) => u.createdAt);
+
+  beforeEach(async () => {
+    t = await createTestDb();
+    fetchStub = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchStub);
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await t.close();
+  });
+
+  it("is the site's time, for an email sign-up", async () => {
+    const response = await on(null).handler(signUpRequest(EMAIL));
+    expect(response.status).toBe(200);
+    expect(await made()).toEqual([REPLAY_NOW]);
+  });
+
+  it("is the site's time, for a first magic link", async () => {
+    const mail = recordingSender();
+    const auth = on(null, mail);
+    await auth.handler(
+      authPost("/sign-in/magic-link", { email: EMAIL, name: "Ada" }),
+    );
+    await auth.handler(clickLink(linkIn(mail.last(EMAIL, "sign-in link"))));
+    expect(await made()).toEqual([REPLAY_NOW]);
+  });
+
+  it("is the site's time, for a Discord account on the invite list", async () => {
+    await signInWithDiscord(on(["discord:2001"]), fetchStub, {
+      id: "2001",
+      email: "tester@example.test",
+      verified: true,
+    });
+    expect(await made()).toEqual([REPLAY_NOW]);
+  });
+});

@@ -3,7 +3,9 @@ name: Backup (staging)
 # The nightly backup (M9 Task 11, decision 4): a custom-format pg_dump taken
 # in one exported snapshot with its row counts, checked whole with
 # pg_restore, encrypted to the owner's age public key, and kept as
-# backups/staging/<date>.dump.age in the branch's Neon Object Storage. The
+# backups/<target>/<date>.dump.age in main's Neon Object Storage. The target
+# is `staging` (the `main` branch) and, while the staging variable
+# BETA_RUNNING is true, `beta` as well. The
 # newest 14 are kept. Any failed check fails the run, and nothing is kept
 # from it. The private key never comes here: restoring is by hand
 # (docs/runbooks/restore.md).
@@ -12,7 +14,8 @@ name: Backup (staging)
 # - secrets DATABASE_URL_STAGING, BACKUP_AWS_ACCESS_KEY_ID and
 #   BACKUP_AWS_SECRET_ACCESS_KEY (a Neon storage credential of its own);
 # - variables BACKUP_AWS_ENDPOINT_URL_S3, BACKUP_AWS_REGION and
-#   BACKUP_AGE_RECIPIENT (the age public key, `age1…`).
+#   BACKUP_AGE_RECIPIENT (the age public key, `age1…`);
+# - for the beta, the secret DATABASE_URL_BETA and the variable BETA_RUNNING.
 
 on:
   schedule:
@@ -28,16 +31,43 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BACKUP_ENV: staging
   BACKUP_BUCKET: backups
   BACKUP_KEEP: "14"
 
 jobs:
-  backup:
+  # An environment's variables can't be read in a job's `if`, so a job of its
+  # own says which databases there are to back up.
+  targets:
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - name: Which databases
+        id: list
+        run: |
+          if [ "$BETA_RUNNING" = "true" ]; then
+            echo 'list=["staging","beta"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'list=["staging"]' >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          BETA_RUNNING: ${{ vars.BETA_RUNNING }}
+
+  backup:
+    needs: targets
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: staging
+    strategy:
+      # One failing never stops the other.
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.list) }}
+    env:
+      BACKUP_ENV: ${{ matrix.target }}
     # `bash` sets pipefail: a failed step in a pipe fails the run.
     defaults:
       run:
@@ -46,7 +76,9 @@ jobs:
       - name: Check the settings
         run: |
           missing=""
-          [ -n "$DATABASE_URL" ] || missing="$missing DATABASE_URL_STAGING"
+          url_name="DATABASE_URL_STAGING"
+          [ "$BACKUP_ENV" != "beta" ] || url_name="DATABASE_URL_BETA"
+          [ -n "$DATABASE_URL" ] || missing="$missing $url_name"
           [ -n "$AWS_ACCESS_KEY_ID" ] || missing="$missing BACKUP_AWS_ACCESS_KEY_ID"
           [ -n "$AWS_SECRET_ACCESS_KEY" ] || missing="$missing BACKUP_AWS_SECRET_ACCESS_KEY"
           [ -n "$AWS_ENDPOINT_URL_S3" ] || missing="$missing BACKUP_AWS_ENDPOINT_URL_S3"
@@ -60,7 +92,7 @@ jobs:
             exit 1
           fi
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          DATABASE_URL: ${{ matrix.target == 'beta' && secrets.DATABASE_URL_BETA || matrix.target == 'staging' && secrets.DATABASE_URL_STAGING || '' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
           AWS_ENDPOINT_URL_S3: ${{ vars.BACKUP_AWS_ENDPOINT_URL_S3 }}
@@ -99,7 +131,7 @@ jobs:
           pg_dump --version
           pnpm -s backup-dump "$RUNNER_TEMP/backup.dump" "$RUNNER_TEMP/backup.counts.tsv"
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          DATABASE_URL: ${{ matrix.target == 'beta' && secrets.DATABASE_URL_BETA || matrix.target == 'staging' && secrets.DATABASE_URL_STAGING || '' }}
 
       - name: Check the dump is whole
         run: pnpm -s backup-check dump "$RUNNER_TEMP/backup.dump"

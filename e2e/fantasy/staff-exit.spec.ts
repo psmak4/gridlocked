@@ -24,7 +24,7 @@ import {
   staleOverride,
   teamChangeReview,
 } from "../helpers/game";
-import { setUpTotp, unlockedAdmin } from "../helpers/staff";
+import { setUpTotp, totpCode, unlockedAdmin } from "../helpers/staff";
 import { buildTeam, createTeam, saveTeam } from "../helpers/team";
 
 // M8's exit (Task 15) on the seeded 2026 game in replay mode: an admin
@@ -115,7 +115,8 @@ async function unlockedModerator(
   await hydrated(section.getByRole("button", { name: "Unlock staff tools" }));
   await section
     .getByLabel("Code from your app, or a backup code")
-    .fill(totp.backupCodes[0]!);
+    // The fantasy servers run on a replay: the code is still for real time.
+    .fill(totpCode(totp.setupKey));
   await section.getByRole("button", { name: "Unlock staff tools" }).click();
   await expect(
     section.getByText("Staff tools are unlocked for this session."),

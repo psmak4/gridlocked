@@ -1,7 +1,8 @@
 name: Staff action (staging)
 
 # Manual only: a staff action on the Neon project `gridlocked-staging`, branch
-# `main`, until M8's screens (`pnpm staff`, src/staff/).
+# `main` or the closed beta's `beta` (`pnpm staff`, src/staff/). On the beta it
+# runs at the replay's now. It's how the beta gets its first admin (set-role).
 # - substitute: one event only. change = {"in": "<driver>", "team": "<team>",
 #   "car": <n>, "out": "<driver>" | null}
 # - seats: from an event onward. change = [{"driver": "<driver>",
@@ -34,6 +35,11 @@ name: Staff action (staging)
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: The Neon branch
+        type: choice
+        options: [main, beta]
+        default: main
       command:
         description: The action
         type: choice
@@ -78,7 +84,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Holds DATABASE_URL_STAGING.
+    # Holds DATABASE_URL_STAGING and DATABASE_URL_BETA.
     environment: staging
     steps:
       - name: Check out
@@ -104,7 +110,9 @@ jobs:
       - name: Run the staff action
         run: pnpm staff "$STAFF_COMMAND"
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          # A missing beta URL stops the run: it never falls back to main's.
+          DATABASE_URL: ${{ inputs.target == 'beta' && secrets.DATABASE_URL_BETA || inputs.target == 'main' && secrets.DATABASE_URL_STAGING || '' }}
+          CLOCK_MODE: ${{ inputs.target == 'beta' && 'replay' || 'system' }}
           STAFF_COMMAND: ${{ inputs.command }}
           STAFF_EVENT: ${{ inputs.event }}
           STAFF_CHANGE: ${{ inputs.change }}
