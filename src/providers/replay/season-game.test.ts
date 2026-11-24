@@ -14,19 +14,21 @@ import { replaySeasonGame } from "./season-game";
 
 const SEEDED_AT = new Date("2026-02-01T09:00:00.000Z");
 
+const SEASON_TIMEOUT_MS = 180_000;
+
 const script = gameScriptSchema.parse(readFixture("game-2026-script.json"));
 
 describe("the 2026 season replay", () => {
   let t: Awaited<ReturnType<typeof createTestDb>>;
   let report: Awaited<ReturnType<typeof replaySeasonGame>>;
 
-  // The whole season takes about 8 s here, inside the db project's limits.
+  // The whole season took 32 to 59 s on CI, and once over the db project's 60.
   beforeAll(async () => {
     t = await createTestDb();
     report = await replaySeasonGame(t.db, script, {
       seed: (db) => seedGame2026(db, SEEDED_AT),
     });
-  });
+  }, SEASON_TIMEOUT_MS);
   afterAll(async () => {
     await t?.close();
   });
