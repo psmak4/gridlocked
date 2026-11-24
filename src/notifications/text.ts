@@ -34,6 +34,9 @@ export type NotificationData = {
   sessionKind?: string;
   leader?: string | null;
   text?: string;
+  /** A usage meter's label ("Neon compute") and its share of the limit. */
+  meter?: string;
+  pct?: number;
 };
 
 export type NotificationLine = { label: string; text: string };
@@ -46,6 +49,7 @@ const LABELS: Record<AnyNotificationKind, string> = {
   league_activity: "LEAGUES",
   score_correction: "CORRECTION",
   moderation: "MODERATION",
+  usage_high: "USAGE",
   scores_in: "SCORES",
   announcement: "NEWS",
 };
@@ -139,6 +143,11 @@ export function notificationText(
       };
     case "moderation":
       return { label, text: moderationText(d, timeZone) };
+    case "usage_high":
+      return {
+        label,
+        text: `${d.meter ?? "A free-tier meter"} is at ${d.pct ?? 70}% of its free limit this month. Plan to upgrade before it runs out.`,
+      };
     case "scores_in": {
       const session = d.session ?? "Session";
       if (!revealed) {

@@ -60,6 +60,7 @@ export const DEFAULT_PREFERENCES: Record<
   league_activity: { in_app: true, push: false },
   score_correction: { in_app: true, push: true },
   moderation: { in_app: true, push: false },
+  usage_high: { in_app: true, push: true },
   scores_in: { in_app: true, push: true },
   announcement: { in_app: true, push: false },
 };

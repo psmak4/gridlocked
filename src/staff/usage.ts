@@ -3,12 +3,22 @@
  * `usage-snapshot.yml` workflow records, a `usage_high` warning for each
  * meter at 70% or more (once per meter per month), and the meters the
  * settings screen shows, with today's account emails counted here from the
- * outbox.
+ * outbox. While a warning is open and its meter still reads high, every
+ * admin gets a `usage_high` notification once a day, pushed to those with
+ * push on (M9 Task 10).
  */
 import { and, desc, eq, gte, lt, or, sql } from "drizzle-orm";
-import { emailOutbox, reviewItems, usageSnapshots } from "@/db/schema";
+import {
+  emailOutbox,
+  notifications,
+  profiles,
+  reviewItems,
+  usageSnapshots,
+  users,
+} from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { notify } from "@/notifications/write";
 import { openReviewItem } from "@/reference/review";
 import { getSetting } from "@/settings";
 
@@ -41,6 +51,45 @@ const METERS = [
 ] as const;
 
 const monthOf = (at: Date) => at.toISOString().slice(0, 7);
+const dayOf = (at: Date) => at.toISOString().slice(0, 10);
+
+/**
+ * Tells every active admin a meter is high, once per meter per day: the
+ * group key carries the day, and a row with it (read or not) means done.
+ * `notify` writes the bell's row and queues its push for those with a device
+ * and push on.
+ */
+async function alertAdmins(
+  db: Db,
+  now: Date,
+  meter: { id: string; label: string },
+  pct: number,
+): Promise<void> {
+  const groupKey = `usage_high:${meter.id}:${dayOf(now)}`;
+  const admins = await db
+    .select({ id: users.id })
+    .from(users)
+    .innerJoin(profiles, eq(profiles.userId, users.id))
+    .where(and(eq(users.role, "admin"), eq(profiles.status, "active")));
+  for (const admin of admins) {
+    const [done] = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, admin.id),
+          eq(notifications.groupKey, groupKey),
+        ),
+      );
+    if (done) continue;
+    await notify(db, now, {
+      userId: admin.id,
+      kind: "usage_high",
+      groupKey,
+      data: { meter: meter.label, pct },
+    });
+  }
+}
 
 /**
  * Records one snapshot, and opens a `usage_high` warning for each meter at
@@ -66,11 +115,16 @@ export async function recordUsage(
       const limit = limits[meter.field];
       if (value === null || value < limit * WARN_AT) continue;
       const dedupeKey = `usage_high:${meter.id}:${monthOf(now)}`;
+      const pct = Math.round((value / limit) * 100);
       const [seen] = await t
-        .select({ id: reviewItems.id })
+        .select({ status: reviewItems.status })
         .from(reviewItems)
         .where(eq(reviewItems.dedupeKey, dedupeKey));
-      if (seen) continue;
+      if (seen) {
+        // Still open: today's reminder. Resolved or dismissed: an admin has it.
+        if (seen.status === "open") await alertAdmins(t, now, meter, pct);
+        continue;
+      }
       await openReviewItem(t, now, {
         kind: "usage_high",
         seasonId: null,
@@ -83,6 +137,7 @@ export async function recordUsage(
         },
         dedupeKey,
       });
+      await alertAdmins(t, now, meter, pct);
       warned.push(meter.id);
     }
     return { warned };

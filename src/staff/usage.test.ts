@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
-import { emailOutbox, reviewItems, usageSnapshots } from "@/db/schema";
+import {
+  emailOutbox,
+  jobs,
+  notifications,
+  pushSubscriptions,
+  reviewItems,
+  usageSnapshots,
+} from "@/db/schema";
+import { seedUser } from "../../tests/helpers/users";
 import { newId } from "@/lib/ids";
 import { recordUsage, usageMeters, USAGE_LIMITS } from "./usage";
 
@@ -136,5 +144,65 @@ describe("recordUsage and usageMeters (M8 Task 14)", () => {
       warn: false,
       note: "Fine",
     });
+  });
+
+  it("a usage_high item pushes to every admin with push on, once per meter per day", async () => {
+    const admin = await seedUser(t.db, { role: "admin" });
+    const quiet = await seedUser(t.db, { role: "admin" });
+    const moderator = await seedUser(t.db, { role: "moderator" });
+    await t.db.insert(pushSubscriptions).values(
+      [admin, moderator].map((userId) => ({
+        id: newId(),
+        userId,
+        endpoint: `https://push.example/${userId}`,
+        p256dh: "key",
+        auth: "auth",
+        createdAt: NOW,
+      })),
+    );
+    const high = {
+      neonComputeHours: 74,
+      neonTransferGb: 1,
+      vercelCpuHours: 0.5,
+    };
+    const alerts = () =>
+      t.db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.kind, "usage_high"));
+    const pushes = () =>
+      t.db.select().from(jobs).where(eq(jobs.kind, "push_fanout"));
+
+    await recordUsage(t.db, NOW, high);
+    // Every admin has it in the bell; only the one with a device is pushed.
+    expect((await alerts()).map((n) => n.userId).sort()).toEqual(
+      [admin, quiet].sort(),
+    );
+    expect(await alerts()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ meter: "Neon compute", pct: 74 }),
+        }),
+      ]),
+    );
+    expect(await pushes()).toHaveLength(1);
+
+    // A second run the same day: nothing new.
+    await recordUsage(t.db, new Date("2026-03-07T09:00:00Z"), high);
+    expect(await alerts()).toHaveLength(2);
+    expect(await pushes()).toHaveLength(1);
+
+    // The next day, still over and still open: once more.
+    await recordUsage(t.db, new Date("2026-03-08T05:00:00Z"), high);
+    expect(await alerts()).toHaveLength(4);
+    expect(await pushes()).toHaveLength(2);
+
+    // Resolved: no more alerts for it this month.
+    await t.db
+      .update(reviewItems)
+      .set({ status: "resolved" })
+      .where(eq(reviewItems.kind, "usage_high"));
+    await recordUsage(t.db, new Date("2026-03-09T05:00:00Z"), high);
+    expect(await alerts()).toHaveLength(4);
   });
 });

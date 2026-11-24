@@ -18,7 +18,9 @@
  *   workflow passes them from the `staging` secrets). Each pair is declared
  *   only when both are set and not empty (GitHub passes a missing secret as
  *   ""); without it the function leaves queued emails queued, or sends no
- *   push. No value is ever written in this file.
+ *   push. Sentry's DSN (M9 Task 10) is declared when set, with the deploy's
+ *   SENTRY_RELEASE and SENTRY_ENVIRONMENT; without it nothing is reported.
+ *   No value is ever written in this file.
  * - two schedule triggers (UTC), both on the `tick` function: a tick every
  *   minute, and the safety tick at minute 7 of every sixth hour (M1 result).
  *
@@ -40,8 +42,24 @@ const pushEnv =
   vapidPublicKey && vapidPrivateKey
     ? { VAPID_PUBLIC_KEY: vapidPublicKey, VAPID_PRIVATE_KEY: vapidPrivateKey }
     : undefined;
+// Sentry (M9 Task 10): the DSN, with the deploy's release and environment.
+// No DSN, no reporting.
+const sentryDsn = process.env.SENTRY_DSN;
+const sentryEnv = sentryDsn
+  ? {
+      SENTRY_DSN: sentryDsn,
+      ...(process.env.SENTRY_RELEASE
+        ? { SENTRY_RELEASE: process.env.SENTRY_RELEASE }
+        : {}),
+      ...(process.env.SENTRY_ENVIRONMENT
+        ? { SENTRY_ENVIRONMENT: process.env.SENTRY_ENVIRONMENT }
+        : {}),
+    }
+  : undefined;
 const functionEnv =
-  emailEnv || pushEnv ? { ...emailEnv, ...pushEnv } : undefined;
+  emailEnv || pushEnv || sentryEnv
+    ? { ...emailEnv, ...pushEnv, ...sentryEnv }
+    : undefined;
 
 export default defineConfig({
   buckets: {

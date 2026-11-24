@@ -264,6 +264,33 @@ describe("the tick function", () => {
       expect(logs[0]).toMatch(/^tick 2026-03-01T10:00:00\.000Z error: /);
       expect(logs[0]).not.toContain("\n");
     });
+
+    it("reports a failed tick to Sentry under its route, with its class and none of its message (M9 Task 10)", async () => {
+      const { m, logs } = setup({ stored: file(T0.toISOString()) });
+      const reported: { error: unknown; route: string }[] = [];
+      class PoolError extends Error {}
+      const broken = createTickHandler(
+        {
+          db: () => {
+            throw new PoolError(
+              "connection refused: postgres://user:secret@host/db",
+            );
+          },
+          store: m.store,
+          handlers: () => ({}),
+          mode: "system",
+        },
+        (line) => logs.push(line),
+        async (error, route) => {
+          reported.push({ error, route });
+        },
+      );
+      const res = await broken(post("/safety", { headers: TRIGGER }));
+      expect(res.status).toBe(500);
+      expect(reported).toHaveLength(1);
+      expect(reported[0]!.route).toBe("safety");
+      expect(reported[0]!.error).toBeInstanceOf(PoolError);
+    });
   });
 
   describe("wired from the environment", () => {

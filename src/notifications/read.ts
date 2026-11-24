@@ -55,6 +55,8 @@ export function notificationHref(n: Linkable): string {
       return n.data.leagueSlug ? `/leagues/${n.data.leagueSlug}` : "/leagues";
     case "moderation":
       return "/profile";
+    case "usage_high":
+      return "/staff/settings#usage";
     case "scores_in":
       return "/weekend";
     case "announcement":

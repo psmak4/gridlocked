@@ -1,10 +1,32 @@
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
+import { sentryTanstackStart } from "@sentry/tanstackstart-react/vite";
 import { nitro } from "nitro/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import { signedInRoutes } from "./src/lib/public-headers";
 import { SECURITY_HEADERS } from "./src/lib/security-headers";
+
+/**
+ * Source maps to Sentry (M9 Task 10), only in a deploy that has Sentry's
+ * auth token: the plugin turns the maps on, uploads them under the build's
+ * release, and deletes them, so none is served. Errors only: no middleware
+ * or module instrumentation, and no telemetry of its own. Local and CI
+ * builds have no token, and no plugin.
+ */
+function sentrySourceMaps(): PluginOption[] {
+  const authToken = process.env.SENTRY_AUTH_TOKEN;
+  if (!authToken) return [];
+  return sentryTanstackStart({
+    authToken,
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    release: { name: process.env.VITE_SENTRY_RELEASE },
+    autoInstrumentMiddleware: false,
+    buildTimeInstrumentation: false,
+    telemetry: false,
+  });
+}
 
 export default defineConfig({
   server: { port: 3000 },
@@ -33,5 +55,7 @@ export default defineConfig({
         : {}),
     }),
     viteReact(),
+    // Last, as Sentry's plugin asks.
+    ...sentrySourceMaps(),
   ],
 });

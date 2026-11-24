@@ -10,6 +10,8 @@ export const NOTIFICATION_KINDS = [
   "league_activity",
   "score_correction",
   "moderation",
+  /** Admins only: a free-tier meter at 70% or more (M9 Task 10). */
+  "usage_high",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

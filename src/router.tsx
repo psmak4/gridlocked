@@ -1,5 +1,6 @@
 import { createRouter } from "@tanstack/react-router";
 import { getGlobalStartContext } from "@tanstack/react-start";
+import { reportClientError, startClientReporting } from "./lib/report-client";
 import { routeTree } from "./routeTree.gen";
 
 /**
@@ -16,9 +17,14 @@ function pageNonce(): string | undefined {
 }
 
 export function getRouter() {
-  return createRouter({
+  const router = createRouter({
     routeTree,
     scrollRestoration: true,
     ssr: { nonce: pageNonce() },
+    // A route's boundary keeps a render error from Sentry's own handlers.
+    defaultOnCatch: (error) => reportClientError(error),
   });
+  // Errors to Sentry, scrubbed (M9 Task 10), when the build has a DSN.
+  if (!router.isServer) void startClientReporting(router);
+  return router;
 }

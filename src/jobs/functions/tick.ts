@@ -28,7 +28,7 @@ import { createGameHandlers } from "@/game/jobs";
 import { createEmailFlushHandler } from "@/identity/email/outbox";
 import type { ExportStore } from "@/identity/export";
 import { senderFromEnv } from "@/identity/email/resend";
-import { systemTimer } from "@/lib/clock";
+import { systemClock, systemTimer } from "@/lib/clock";
 import { clockModeFromEnv } from "@/lib/resolve-clock";
 import { createPipelineHandlers } from "@/providers/pipeline";
 import {
@@ -47,6 +47,7 @@ import {
   type TickOptions,
   type TickResult,
 } from "../tick";
+import { reporterFromEnv, type ReportError } from "@/lib/server-reporter";
 import { createPushFanoutHandler } from "@/notifications/push";
 import { pushSenderFromEnv } from "@/notifications/web-push-sender";
 
@@ -117,11 +118,13 @@ function describeTick(at: string, result: TickResult, ms: string): string {
 /**
  * The request handler. `deps` may be a function, called on the first request
  * that passes the header, route and body checks, so a bad request never
- * builds anything. `log` gets one line per result.
+ * builds anything. `log` gets one line per result. `report` sends a failed
+ * tick's error to Sentry, scrubbed (M9 Task 10), under "tick" or "safety".
  */
 export function createTickHandler(
   deps: TickHandlerDeps | (() => TickHandlerDeps),
   log: (line: string) => void = console.log,
+  report: ReportError = async () => {},
 ) {
   let resolved: TickHandlerDeps | undefined;
   const resolve = () =>
@@ -165,6 +168,7 @@ export function createTickHandler(
       // system, which retries, and the logs hold the cause.
       const detail = error instanceof Error ? error.message : String(error);
       log(`${label} ${at} error: ${detail.replace(/\s+/g, " ")} ${ms()}`);
+      await report(error, label);
       return new Response("internal error", { status: 500 });
     }
   };
@@ -236,7 +240,11 @@ export function depsFromEnv(
   };
 }
 
-const handle = createTickHandler(() => depsFromEnv(process.env));
+const handle = createTickHandler(
+  () => depsFromEnv(process.env),
+  console.log,
+  reporterFromEnv(process.env, () => systemClock.now()),
+);
 
 /** A Neon Function is a module whose default export has a `fetch(request)`. */
 const tickFunction = { fetch: handle };
