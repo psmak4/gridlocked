@@ -17,12 +17,12 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
+    "legal:publish": "tsx scripts/publish-legal.ts",
     "db:drift": "node scripts/db-drift.mjs",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:staging": "pnpm db:migrate",
     "import:2026": "tsx scripts/import-2026.ts",
     "staff": "tsx scripts/staff.ts",
-    "legal:publish": "tsx scripts/publish-legal.ts",
     "usage-snapshot": "tsx scripts/usage-snapshot.ts",
     "e2e": "playwright test",
     "chat-load": "tsx scripts/chat-load.ts"
