@@ -16,6 +16,7 @@ import {
   reviewItems,
   sessionResultState,
 } from "@/db/schema";
+import { AUTO_RESOLUTION } from "@/reference/review";
 import { normalizeSession } from "./normalize";
 import type { ParsedResults } from "./types";
 
@@ -407,6 +408,29 @@ describe("normalizeSession", () => {
 
       expect(await reviews(sessionId)).toHaveLength(1);
     });
+
+    it("closes the item by itself once the provider sends every driver again", async () => {
+      const { sessionId, a } = await seeded();
+      const empty = loadBody("jolpica/2026/r01-results.json");
+      empty.MRData.RaceTable.Races[0]!.Results = [];
+      await run(sessionId, "race", empty, T2);
+
+      const back = await run(
+        sessionId,
+        "race",
+        loadBody("jolpica/2026/r01-results.json"),
+        T3,
+      );
+      expect(back.snapshotId).toBe(a.snapshotId);
+      expect(await reviews(sessionId)).toEqual([
+        expect.objectContaining({
+          kind: "results_disappeared",
+          status: "resolved",
+          resolution: AUTO_RESOLUTION,
+          resolvedAt: T3,
+        }),
+      ]);
+    });
   });
 
   describe("a response we cannot use (Review Focus 1)", () => {
@@ -453,6 +477,67 @@ describe("normalizeSession", () => {
       await run(sessionId, "race", bad, T3);
 
       expect(await reviews(sessionId)).toHaveLength(1);
+    });
+
+    it("closes the item by itself when a later answer passes, and writes it", async () => {
+      // Round 20 of 2026: Jolpica sent a race row with a null grid, then
+      // fixed it; the item from the bad answer held the race for good.
+      const { sessionId } = await seeded();
+      const bad = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(bad, "Results")[0]!.grid = null;
+      const b = await run(sessionId, "race", bad, T2);
+      expect(await reviews(sessionId)).toEqual([
+        expect.objectContaining({ kind: "validation_failed", status: "open" }),
+      ]);
+
+      const fixed = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(fixed, "Results")[0]!.laps = "1";
+      const c = await run(sessionId, "race", fixed, T3);
+
+      expect(c.snapshotId).not.toBe(b.snapshotId);
+      expect((await state(sessionId))!.currentSnapshotId).toBe(c.snapshotId);
+      expect(await reviews(sessionId)).toEqual([
+        expect.objectContaining({
+          kind: "validation_failed",
+          status: "resolved",
+          resolution: AUTO_RESOLUTION,
+          resolvedAt: T3,
+        }),
+      ]);
+    });
+
+    it("closes it too when the provider goes back to the answer we already have", async () => {
+      const { sessionId, a, good } = await seeded();
+      const bad = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(bad, "Results")[5]!.positionText = "Z";
+      await run(sessionId, "race", bad, T2);
+
+      const again = await run(sessionId, "race", good, T3);
+      expect(again.snapshotId).toBe(a.snapshotId);
+      expect(again.outcome).toEqual({ changed: 0 });
+      expect(await reviews(sessionId)).toEqual([
+        expect.objectContaining({
+          kind: "unknown_classification",
+          status: "resolved",
+          resolution: AUTO_RESOLUTION,
+        }),
+      ]);
+    });
+
+    it("leaves an item an admin dismissed alone", async () => {
+      const { sessionId, good } = await seeded();
+      const bad = loadBody("jolpica/2026/r01-results.json");
+      rowsOf(bad, "Results")[5]!.positionText = "Z";
+      await run(sessionId, "race", bad, T2);
+      await t.db
+        .update(reviewItems)
+        .set({ status: "dismissed", resolution: "Dismiss", resolvedAt: T2 })
+        .where(eq(reviewItems.sessionId, sessionId));
+
+      await run(sessionId, "race", good, T3);
+      expect(await reviews(sessionId)).toEqual([
+        expect.objectContaining({ status: "dismissed", resolution: "Dismiss" }),
+      ]);
     });
 
     it("treats a body with no Results the same way, as validation_failed", async () => {

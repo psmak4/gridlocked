@@ -1,8 +1,13 @@
-import { eq } from "drizzle-orm";
-import { resultChanges, results, sessionResultState } from "@/db/schema";
+import { and, eq, like, ne, sql } from "drizzle-orm";
+import {
+  resultChanges,
+  results,
+  reviewItems,
+  sessionResultState,
+} from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
-import { openReviewItem } from "@/reference/review";
+import { AUTO_RESOLUTION, openReviewItem } from "@/reference/review";
 import { getSessionContext } from "./session-context";
 import type { ParsedResults, ResultRow } from "./types";
 
@@ -49,6 +54,11 @@ function asText(value: string | number | boolean | null): string | null {
  * A failed parse writes nothing to `results` and keeps the previous rows. It
  * opens one blocking review item, `unknown_classification` or
  * `validation_failed`, which a rerun of the same snapshot does not repeat.
+ * Such an item stands for that one answer: once a later answer passes and is
+ * the session's current one (written now, or already current because the
+ * provider went back to it), every open item held for another snapshot is
+ * resolved automatically, so a provider's passing mistake doesn't hold the
+ * session for good. An item an admin resolved or dismissed is left alone.
  *
  * Results never silently disappear: if any driver we already have is absent
  * from the new rows (an empty body included), nothing is written and a
@@ -122,7 +132,10 @@ export async function normalizeSession(
       .from(sessionResultState)
       .where(eq(sessionResultState.sessionId, sessionId))
       .for("update");
-    if (state!.currentSnapshotId === snapshotId) return { changed: 0 };
+    if (state!.currentSnapshotId === snapshotId) {
+      await closeSuperseded(tx, now, sessionId, snapshotId);
+      return { changed: 0 };
+    }
 
     // A final session is never written to: a late response is refused and an
     // admin is told (reopening it is the audited way, HLD §4.4).
@@ -212,6 +225,35 @@ export async function normalizeSession(
         version: state!.version + 1,
       })
       .where(eq(sessionResultState.sessionId, sessionId));
+    await closeSuperseded(tx, now, sessionId, snapshotId);
     return { changed: changeRows.length };
   });
+}
+
+/**
+ * Resolves the session's open `hold` items (`normalize:<session>:<snapshot>`)
+ * for every snapshot but `current`, the answer that has just passed.
+ */
+async function closeSuperseded(
+  tx: Db,
+  now: Date,
+  sessionId: string,
+  current: string,
+) {
+  await tx
+    .update(reviewItems)
+    .set({
+      status: "resolved",
+      resolution: AUTO_RESOLUTION,
+      resolvedAt: now,
+      version: sql`${reviewItems.version} + 1`,
+    })
+    .where(
+      and(
+        eq(reviewItems.sessionId, sessionId),
+        eq(reviewItems.status, "open"),
+        like(reviewItems.dedupeKey, `normalize:${sessionId}:%`),
+        ne(reviewItems.dedupeKey, `normalize:${sessionId}:${current}`),
+      ),
+    );
 }

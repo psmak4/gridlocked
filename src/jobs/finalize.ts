@@ -26,8 +26,9 @@ const HELD_WINDOW_MS = 14 * 24 * 3_600_000;
  * re-fetches every scored session of the event (`SCORED_KINDS`: qualifying,
  * the sprint if there is one, and the race: a post-session disqualification
  * changes qualifying as much as a penalty changes the race) and compares the
- * snapshot with the one the results came from. A different snapshot is
- * normalized, which logs `result_changes`.
+ * answer with the one the results came from. Each answer is normalized: a
+ * different snapshot logs `result_changes`, the same one writes nothing but
+ * closes the hold items of an earlier answer that failed.
  *
  * `advanceStatus` then runs for each of those sessions that is not final or
  * cancelled, whether or not the re-fetch worked and whether or not anything
@@ -95,18 +96,18 @@ export function createFinalizeHandler(source: ResultsSource): JobHandler {
       if (state?.status === "final") continue;
 
       // A failed re-fetch just skips this session's check: the next check (or
-      // the final one, on what is stored) goes on.
+      // the final one, on what is stored) goes on. An unchanged answer is
+      // normalized too: it writes nothing, but closes the items an earlier
+      // bad answer opened, so the provider going back to it frees the session.
       try {
         const fetched = await source.fetch(db, session, job.id);
-        if (fetched.snapshotId !== (state?.currentSnapshotId ?? null)) {
-          await source.normalize(
-            db,
-            ctx.clock.now(),
-            session,
-            fetched.snapshotId,
-            fetched.body,
-          );
-        }
+        await source.normalize(
+          db,
+          ctx.clock.now(),
+          session,
+          fetched.snapshotId,
+          fetched.body,
+        );
       } catch (error) {
         if (!(error instanceof ProviderUnavailableError)) throw error;
         unavailable = true;
