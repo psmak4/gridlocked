@@ -293,7 +293,13 @@ export const RESOLVE_REVIEW = staffDef({
     reason: reasonText,
   }),
   handler: async ({ db, now, viewer, requestId }, input) =>
-    resolveReviewItem(db, now, staffActor(viewer, requestId), input),
+    resolveReviewItem(
+      db,
+      now,
+      staffActor(viewer, requestId),
+      input,
+      (await webDueStore()) ?? undefined,
+    ),
 });
 
 export const MODERATE_ITEM = staffDef({

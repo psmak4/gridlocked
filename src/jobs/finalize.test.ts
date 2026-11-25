@@ -24,6 +24,7 @@ import {
 } from "@/db/schema";
 import { simulatedClock } from "@/lib/clock";
 import { openReviewItem } from "@/reference/review";
+import { checkEventAgain } from "@/staff/finalize-again";
 import { enqueue } from "./queue";
 import { planEventJobs } from "./plan-event";
 import { runDue } from "./runner";
@@ -410,6 +411,22 @@ describe("the finalize_check handler", () => {
         .where(eq(reviewItems.dedupeKey, `finalize_held:${event.id}`));
       expect(warning).toMatchObject({ status: "open" });
       expect(warning!.details).toMatchObject({ recheckStopped: true });
+
+      // A month on, the blocker is dealt with and staff check it again.
+      const later = after(race.scheduledEnd, 30 * 24);
+      await t.db
+        .update(reviewItems)
+        .set({ status: "dismissed", resolution: "Dismiss" })
+        .where(eq(reviewItems.dedupeKey, "test:blocking"));
+      await checkEventAgain(t.db, later, event.id);
+      expect((await heldJobs(event.id)).at(-1)).toMatchObject({
+        dedupeKey: `finalize:${event.id}:held:49`,
+        status: "pending",
+        runAt: later,
+      });
+      await run(later);
+      expect(await eventStatus(event.id)).toBe("completed");
+      expect((await state(race.id))!.status).toBe("final");
     });
 
     it("holds the event when a scored session never got results", async () => {
@@ -633,7 +650,9 @@ describe("the finalize_check handler", () => {
       expect(await eventStatus(event.id)).toBe("scheduled");
       expect(
         (await heldJobs(event.id)).map((j) => [j.dedupeKey, j.runAt]),
-      ).toEqual([[`finalize:${event.id}:held:1`, after(race.scheduledEnd, 49)]]);
+      ).toEqual([
+        [`finalize:${event.id}:held:1`, after(race.scheduledEnd, 49)],
+      ]);
 
       blocked = false;
       await run(after(race.scheduledEnd, 49));

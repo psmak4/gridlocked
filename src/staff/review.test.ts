@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, like } from "drizzle-orm";
 import { createTestDb } from "../../tests/helpers/test-db";
+import { createMemoryDueStore } from "../../tests/helpers/memory-due-store";
+import { eventOfRound } from "../../tests/helpers/pipeline-2026";
 import {
   idFor,
   ingest,
@@ -17,13 +19,17 @@ import {
   auditLog,
   driverAvailability,
   events,
+  jobs,
   reviewItems,
   seatAssignments,
   sessionResultState,
 } from "@/db/schema";
+import { DUE_KEY } from "@/jobs/due-times";
+import { enqueue } from "@/jobs/queue";
 import { openReviewItem } from "@/reference/review";
 import { advanceStatus } from "@/results/status";
 import { getSessionContext } from "@/results/session-context";
+import { StaffError } from "./errors";
 import type { StaffActor } from "./roster";
 import { resolveReviewItem, reviewItem, reviewList } from "./review";
 
@@ -231,6 +237,144 @@ describe("the review queue (M8 Task 10)", () => {
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ action: "review_item.dismiss" });
     expect(await item(gaveUp.id)).toMatchObject({ status: "dismissed" });
+  });
+
+  describe("checking a stuck event again", () => {
+    /** Round 18's event, and a review item of `kind` with `details`. */
+    async function stuck(
+      kind: "finalize_held" | "job_dead",
+      details: (eventId: string) => Record<string, unknown>,
+    ) {
+      const { event } = await eventOfRound(t.db, 18);
+      const eventId = event.id;
+      await openReviewItem(t.db, T0, {
+        kind,
+        severity: "warning",
+        seasonId: kind === "job_dead" ? null : event.seasonId,
+        eventId: kind === "job_dead" ? null : eventId,
+        details: details(eventId),
+        dedupeKey: `test:${kind}`,
+      });
+      const [row] = await t.db
+        .select()
+        .from(reviewItems)
+        .where(eq(reviewItems.dedupeKey, `test:${kind}`));
+      return { eventId, row: row! };
+    }
+    const finalizeJobs = (eventId: string) =>
+      t.db
+        .select()
+        .from(jobs)
+        .where(like(jobs.dedupeKey, `finalize:${eventId}:held:%`));
+    const deadCheck = (eventId: string) => ({
+      kind: "finalize_check",
+      dedupe_key: `finalize:${eventId}:+48h`,
+      attempts: 5,
+      last_error: "Jolpica /2026/18/results.json: 403",
+    });
+
+    it('resolve finalize_held with "Check the event again now" queues a last check for now, after the held ones, and wakes the tick', async () => {
+      const { eventId, row } = await stuck("finalize_held", () => ({
+        recheckStopped: true,
+      }));
+      await enqueue(t.db, {
+        kind: "finalize_check",
+        dedupeKey: `finalize:${eventId}:held:3`,
+        runAt: T0,
+        payload: { eventId, afterHours: 48, final: true, held: 3 },
+      });
+      // It ran, held, and its window was over: nothing is due.
+      await t.db
+        .update(jobs)
+        .set({ status: "succeeded" })
+        .where(eq(jobs.dedupeKey, `finalize:${eventId}:held:3`));
+      const due = createMemoryDueStore();
+
+      expect(
+        (await reviewItem(t.db, row.id))!.actions.map((a) => a.id),
+      ).toEqual(["check_again", "go_calendar", "dismiss"]);
+      await resolveReviewItem(
+        t.db,
+        T1,
+        ACTOR,
+        {
+          id: row.id,
+          version: row.version,
+          actionId: "check_again",
+          reason: "Jolpica has fixed the grid",
+        },
+        due.store,
+      );
+
+      const queued = (await finalizeJobs(eventId)).find((j) =>
+        j.dedupeKey.endsWith(":held:4"),
+      );
+      expect(queued).toMatchObject({
+        kind: "finalize_check",
+        status: "pending",
+        runAt: T1,
+        payload: { eventId, afterHours: 48, final: true, held: 4 },
+      });
+      expect((await item(row.id)).status).toBe("resolved");
+      expect(await reviewAudits()).toHaveLength(1);
+      expect(JSON.parse(due.objects.get(DUE_KEY)!).next_due_at).toBe(
+        T1.toISOString(),
+      );
+    });
+
+    it("job_dead for a finalize check offers the same action, finding the event in the job's key", async () => {
+      const { eventId, row } = await stuck("job_dead", deadCheck);
+      expect(
+        (await reviewItem(t.db, row.id))!.actions.map((a) => a.id),
+      ).toEqual(["check_again", "dismiss"]);
+
+      await resolveReviewItem(t.db, T1, ACTOR, {
+        id: row.id,
+        version: row.version,
+        actionId: "check_again",
+        reason: "Jolpica answers again",
+      });
+      expect(
+        (await finalizeJobs(eventId)).map((j) => [j.dedupeKey, j.runAt]),
+      ).toEqual([[`finalize:${eventId}:held:1`, T1]]);
+    });
+
+    it("job_dead for any other job doesn't offer it, and refuses it", async () => {
+      const { row } = await stuck("job_dead", () => ({
+        kind: "sync_calendar",
+        dedupe_key: "sync_calendar:2026:2026-11-24",
+      }));
+      expect(
+        (await reviewItem(t.db, row.id))!.actions.map((a) => a.id),
+      ).toEqual(["dismiss"]);
+      await expect(
+        resolveReviewItem(t.db, T1, ACTOR, {
+          id: row.id,
+          version: row.version,
+          actionId: "check_again",
+          reason: "try",
+        }),
+      ).rejects.toMatchObject({ code: "invalid" });
+      expect((await item(row.id)).status).toBe("open");
+    });
+
+    it.each(["completed", "cancelled"] as const)(
+      "refuses for a %s event, writing nothing",
+      async (status) => {
+        const { eventId, row } = await stuck("job_dead", deadCheck);
+        await t.db.update(events).set({ status }).where(eq(events.id, eventId));
+        const refused = resolveReviewItem(t.db, T1, ACTOR, {
+          id: row.id,
+          version: row.version,
+          actionId: "check_again",
+          reason: "try",
+        });
+        await expect(refused).rejects.toBeInstanceOf(StaffError);
+        await expect(refused).rejects.toMatchObject({ code: "invalid" });
+        expect(await finalizeJobs(eventId)).toEqual([]);
+        expect((await item(row.id)).status).toBe("open");
+      },
+    );
   });
 
   it("a blocking item's resolution lets advanceStatus take the session to provisional", async () => {
