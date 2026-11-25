@@ -371,6 +371,8 @@ Tasks 1–7 and 11 share nothing and can run in any order. Task 13 spans the bet
 - Modify: `.github/workflows/deploy-staging.yml` (a `target: main | beta` input), `neon.ts`.
 
 - [ ] **Step 1: With your OK, create the `beta` branch,** deploy with `target=beta`, import 2026, set `CLOCK_MODE=replay`, and set the offset so the first beta weekend's Friday lands on a real Friday.
+
+  *Changed 2026-11-24 (your answer, "From round 1").* The import loads every result at once, so the beta doesn't use it. The deploy seeds the game from round 1 with no results (`pnpm seed:beta`), starts the clock, and publishes the notice. The branch is schema-only. The steps are in [docs/runbooks/beta.md](../runbooks/beta.md).
 - [ ] **Step 2: You approve the beta notice, and open sign-up to the invite list.**
 - [ ] **Step 3: The budget run,** on the first beta weekend and the quiet week after it: Neon compute-hours and transfer, function invocations, Vercel usage and emails, read from the usage meters and the providers' dashboards, against HLD §11.4's free limits. It also measures (carried from M5 and M7):
   - the per-request cost of `ensureProfile` and `betterAuth()`;

@@ -57,7 +57,9 @@ function code is [`src/jobs/functions/tick.ts`](src/jobs/functions/tick.ts).
 The **Deploy staging** workflow (`.github/workflows/deploy-staging.yml`) puts
 the code there. It is manual only and uses the `staging` environment's
 secrets `DATABASE_URL_STAGING` (the direct, unpooled URL of the `main`
-branch) and `NEON_API_KEY_STAGING`. Its steps:
+branch) and `NEON_API_KEY_STAGING`. With `target: beta` it deploys the closed
+beta's branch instead ([docs/runbooks/beta.md](docs/runbooks/beta.md)). Its
+steps:
 
 1. install with the frozen lockfile;
 2. `pnpm db:migrate:staging`: apply the migrations and list the ones applied;

@@ -1,17 +1,33 @@
 name: Deploy staging
 
 # Manual only. Run it from the Actions tab (or `gh workflow run deploy-staging.yml`).
-# It takes the code to the Neon project `gridlocked-staging`, branch `main`:
-# migrations, an optional import of the 2026 season, and the `tick` function
-# with its two triggers (neon.ts). Once the Vercel project exists (VERCEL_TOKEN
-# is set), it also builds the website and deploys it to `gridlocked-staging`.
+# It takes the code to the Neon project `gridlocked-staging`, branch `main` or,
+# for the closed beta (docs/runbooks/beta.md), `beta`: migrations, the data a
+# new database needs (main: an optional import of the 2026 season; beta: the
+# seeded game and the beta notice), and the `tick` function with its two
+# triggers (neon.ts). Once the Vercel project exists (VERCEL_TOKEN is set), it
+# also builds the website and deploys it to `gridlocked-staging`, unless the
+# site belongs to the other target (the BETA_RUNNING variable says which).
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: The Neon branch (beta needs BETA_RUNNING and DATABASE_URL_BETA)
+        type: choice
+        options: [main, beta]
+        default: main
       import_2026:
-        description: Import the recorded 2026 season (refuses a database that has polled live data)
+        description: main only. Import the recorded 2026 season (refuses a database that has polled live data)
         type: boolean
         default: false
+      seed_beta:
+        description: beta only, once. Seed the game into the empty database and start the replay's clock
+        type: boolean
+        default: false
+      first_friday:
+        description: With seed_beta, the first beta Friday as yyyy-mm-dd (round 1's Friday lands on it)
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -27,7 +43,7 @@ env:
   # Pinned: the version of the `vercel` CLI from npm that this workflow uses.
   VERCEL_CLI_VERSION: 65.2.0
   NEON_PROJECT_ID: ancient-fog-03461181
-  NEON_BRANCH: main
+  NEON_BRANCH: ${{ inputs.target }}
 
 jobs:
   deploy:
@@ -35,7 +51,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Holds the staging secrets: NEON_API_KEY_STAGING, DATABASE_URL_STAGING and,
+    # Holds the staging secrets: NEON_API_KEY_STAGING, DATABASE_URL_STAGING,
+    # DATABASE_URL_BETA (for the beta) and,
     # once Resend is approved, RESEND_API_KEY and EMAIL_FROM, and for Web Push
     # VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY (neon.ts declares each pair for the
     # function only when both are set). The website adds the secret
@@ -44,6 +61,29 @@ jobs:
     # DATABASE_URL and so on) live in the Vercel project, not here.
     environment: staging
     steps:
+      # The inputs must suit the target, and the beta must be switched on:
+      # names only. Inputs reach the shell through the environment.
+      - name: Check the target
+        run: |
+          failed=""
+          fail() { echo "::error::$1"; failed=1; }
+          if [ "$TARGET" = "beta" ]; then
+            [ "$BETA_RUNNING" = "true" ] || fail "The staging variable BETA_RUNNING is not true: the site still belongs to main (docs/runbooks/beta.md)"
+            [ -n "$DATABASE_URL_BETA" ] || fail "The staging secret DATABASE_URL_BETA is not set (docs/runbooks/beta.md)"
+            [ "$IMPORT_2026" != "true" ] || fail "import_2026 is for main: it loads every result at once. Seed the beta with seed_beta"
+            [ "$SEED_BETA" != "true" ] || [ -n "$FIRST_FRIDAY" ] || fail "seed_beta needs first_friday"
+          else
+            [ "$SEED_BETA" != "true" ] || fail "seed_beta is for target beta"
+          fi
+          [ -z "$failed" ]
+        env:
+          TARGET: ${{ inputs.target }}
+          IMPORT_2026: ${{ inputs.import_2026 }}
+          SEED_BETA: ${{ inputs.seed_beta }}
+          FIRST_FRIDAY: ${{ inputs.first_friday }}
+          BETA_RUNNING: ${{ vars.BETA_RUNNING }}
+          DATABASE_URL_BETA: ${{ secrets.DATABASE_URL_BETA }}
+
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,20 +103,41 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The direct (unpooled) URL of the staging `main` branch. Prints the
+      # The direct (unpooled) URL of the target's branch. Prints the
       # migrations it applied. Safe to run again.
       - name: Run migrations
         run: pnpm db:migrate:staging
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          DATABASE_URL: ${{ inputs.target == 'beta' && secrets.DATABASE_URL_BETA || inputs.target == 'main' && secrets.DATABASE_URL_STAGING || '' }}
 
       # Refuses a database that has polled live data (provider_requests is not
       # empty), so it cannot overwrite newer results.
       - name: Import the 2026 season
-        if: ${{ inputs.import_2026 }}
+        if: ${{ inputs.target == 'main' && inputs.import_2026 }}
         run: pnpm import:2026
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+
+      # Refuses a database that isn't empty, and writes nothing unless it all
+      # succeeds (src/providers/replay/seed-beta.ts).
+      - name: Seed the beta
+        if: ${{ inputs.target == 'beta' && inputs.seed_beta }}
+        run: pnpm seed:beta
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_BETA }}
+          CLOCK_MODE: replay
+          BETA_FIRST_FRIDAY: ${{ inputs.first_friday }}
+          STAFF_ACTOR: ${{ github.triggering_actor }}
+
+      # Safe to run again: an already published version writes nothing. It
+      # fails on a database with no replay clock, so an unseeded beta stops
+      # here, before its tick is deployed.
+      - name: Publish the beta notice
+        if: ${{ inputs.target == 'beta' }}
+        run: pnpm legal:publish beta
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_BETA }}
+          CLOCK_MODE: replay
 
       - name: Install the Neon CLI
         run: npm install --global "neon@${NEON_CLI_VERSION}"
@@ -90,6 +151,7 @@ jobs:
         run: neon config plan --project-id "$NEON_PROJECT_ID" --branch "$NEON_BRANCH"
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
+          CLOCK_MODE: ${{ inputs.target == 'beta' && 'replay' || 'system' }}
 
       # Applies neon.ts: the `scheduler`, `exports` and `chat-archives`
       # buckets (a missing one is created), the `tick` function (bundled
@@ -110,7 +172,9 @@ jobs:
           # the staging environment has a SENTRY_DSN variable.
           SENTRY_DSN: ${{ vars.SENTRY_DSN }}
           SENTRY_RELEASE: ${{ github.sha }}
-          SENTRY_ENVIRONMENT: staging
+          SENTRY_ENVIRONMENT: ${{ inputs.target == 'beta' && 'beta' || 'staging' }}
+          # The beta's tick runs on the replay's clock (neon.ts).
+          CLOCK_MODE: ${{ inputs.target == 'beta' && 'replay' || 'system' }}
 
       # The function URL and the trigger ids only; never the environment.
       - name: Show the function and triggers
@@ -125,10 +189,17 @@ jobs:
       # The website steps below run only when the Vercel token is set, so the
       # scheduler deploy above works on its own until then. They come last: a
       # failed site build never stops the migrations or the function.
+      # The site has one address and one database, so it is deployed only with
+      # the target it belongs to: during the beta, a deploy to main leaves it.
       - name: Check for the Vercel token
         id: vercel
         run: |
-          if [ -n "$VERCEL_TOKEN" ]; then
+          site="main"
+          [ "$BETA_RUNNING" != "true" ] || site="beta"
+          if [ "$TARGET" != "$site" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::The site belongs to $site (BETA_RUNNING), so the website build and deploy are skipped."
+          elif [ -n "$VERCEL_TOKEN" ]; then
             # With the token set, the rest must be set too; names only.
             missing=""
             [ -n "$VERCEL_ORG_ID" ] || missing="$missing VERCEL_ORG_ID"
@@ -148,6 +219,8 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
           VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+          TARGET: ${{ inputs.target }}
+          BETA_RUNNING: ${{ vars.BETA_RUNNING }}
 
       # No VITE_LOCAL_DB: this is the deployed build, with no local database.
       # The vercel preset writes .vercel/output (Build Output API).
@@ -165,7 +238,7 @@ jobs:
           # source maps to Sentry and deletes them.
           VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
           VITE_SENTRY_RELEASE: ${{ github.sha }}
-          VITE_SENTRY_ENVIRONMENT: staging
+          VITE_SENTRY_ENVIRONMENT: ${{ inputs.target == 'beta' && 'beta' || 'staging' }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}

@@ -3,8 +3,10 @@ import { createTestDb } from "../../tests/helpers/test-db";
 import { systemClock } from "./clock";
 import {
   assertClockMode,
+  checkedNow,
   clockModeFromEnv,
   ClockModeError,
+  createRequestNow,
   resolveClock,
 } from "./resolve-clock";
 
@@ -66,6 +68,59 @@ describe("resolveClock", () => {
       await expect(resolveClock({ mode: "replay", db: t.db })).rejects.toThrow(
         ClockModeError,
       );
+    });
+  });
+
+  describe("checkedNow", () => {
+    const real = new Date("2027-02-19T10:00:00Z");
+
+    it("is the real instant on a database with a real clock", async () => {
+      expect(await checkedNow(t.db, {}, real)).toEqual(real);
+    });
+
+    it("is the replay's instant on a replay database", async () => {
+      await setSimulatedClock('{"at":"2026-03-06T10:00:00Z"}');
+      expect(await checkedNow(t.db, { CLOCK_MODE: "replay" }, real)).toEqual(
+        new Date("2026-03-06T10:00:00Z"),
+      );
+    });
+
+    it("refuses a mode that isn't the database's, either way round", async () => {
+      await expect(
+        checkedNow(t.db, { CLOCK_MODE: "replay" }, real),
+      ).rejects.toBeInstanceOf(ClockModeError);
+      await setSimulatedClock('{"at":"2026-03-06T10:00:00Z"}');
+      await expect(checkedNow(t.db, {}, real)).rejects.toBeInstanceOf(
+        ClockModeError,
+      );
+    });
+  });
+
+  describe("createRequestNow", () => {
+    it("checks a real-clock site's database once, not on every request", async () => {
+      const now = createRequestNow(() => ({}));
+      const spy = vi.spyOn(t.db, "execute");
+      await now(t.db);
+      await now(t.db);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a replay database on a real clock, on every request", async () => {
+      await setSimulatedClock('{"at":"2026-03-06T10:00:00Z"}');
+      const now = createRequestNow(() => ({}));
+      await expect(now(t.db)).rejects.toBeInstanceOf(ClockModeError);
+      await expect(now(t.db)).rejects.toBeInstanceOf(ClockModeError);
+    });
+
+    it("reads the replay's clock on every request", async () => {
+      const now = createRequestNow(() => ({ CLOCK_MODE: "replay" }));
+      await expect(now(t.db)).rejects.toBeInstanceOf(ClockModeError);
+      await setSimulatedClock('{"at":"2026-03-06T10:00:00Z"}');
+      expect(await now(t.db)).toEqual(new Date("2026-03-06T10:00:00Z"));
+      await t.client.query(
+        `update settings set value = '{"at":"2026-03-07T10:00:00Z"}' where key = 'simulated_clock'`,
+      );
+      expect(await now(t.db)).toEqual(new Date("2026-03-07T10:00:00Z"));
     });
   });
 

@@ -767,6 +767,42 @@ describe("account deletion (DM 6.7)", () => {
       ]);
     });
 
+    // M9 Task 13: Better Auth dates sessions at the real time, which on a
+    // hosted replay is months after the site's.
+    it("on a replay the sign-in's age is counted in real time", async () => {
+      const userId = await seedUser(t.db, {
+        username: "Ada_Fan",
+        emailVerified: false,
+      });
+      const replayNow = after(-330 * DAY);
+      const stale = await viewerWithSession(t.db, userId, after(-11 * MIN));
+      expect(
+        await errorCode(() =>
+          requestDeletion(
+            t.db,
+            replayNow,
+            { viewer: stale, typedUsername: "Ada_Fan" },
+            { ...deps(), realNow: NOW },
+          ),
+        ),
+      ).toBe("sign_in_again");
+      expect((await profileRow(t.db, userId)).status).toBe("active");
+
+      const fresh = await viewerWithSession(t.db, userId, after(-9 * MIN));
+      expect(
+        await requestDeletion(
+          t.db,
+          replayNow,
+          { viewer: fresh, typedUsername: "Ada_Fan" },
+          { ...deps(), realNow: NOW },
+        ),
+      ).toEqual({ confirm: "fresh_sign_in" });
+      // The request itself is at the site's time.
+      expect(await t.db.select().from(privacyRequests)).toMatchObject([
+        { status: "completed", completedAt: replayNow },
+      ]);
+    });
+
     it("the only admin can't delete themself", async () => {
       const admin = await seedUser(t.db, {
         role: "admin",

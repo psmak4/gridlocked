@@ -78,6 +78,40 @@ export async function resolveClock(opts: {
   return fixedClock(new Date(value));
 }
 
+type Env = Record<string, string | undefined>;
+
+/**
+ * "Now" for a script on a hosted database, after checking the database is the
+ * kind CLOCK_MODE says: `realNow` on a real clock, the replay's on a replay.
+ */
+export async function checkedNow(
+  db: ClockDb,
+  env: Env,
+  realNow: Date,
+): Promise<Date> {
+  const mode = clockModeFromEnv(env);
+  await assertClockMode(db, mode);
+  return (await resolveClock({ mode, db, scheduledAt: realNow })).now();
+}
+
+/**
+ * The site's "now" for each request. On a real clock it checks once, not on
+ * every request, that the database isn't a replay one: pointed at the beta's
+ * with no CLOCK_MODE, it must refuse rather than write real dates into it
+ * (§3.3 rule 6). A replay is checked as its clock is read.
+ */
+export function createRequestNow(env: () => Env) {
+  let checked = false;
+  return async (db: ClockDb): Promise<Date> => {
+    const mode = clockModeFromEnv(env());
+    if (mode === "system" && !checked) {
+      await assertClockMode(db, mode);
+      checked = true;
+    }
+    return (await resolveClock({ mode, db })).now();
+  };
+}
+
 /**
  * The instant in `settings.simulated_clock`, or null on a database with a
  * real clock. A hosted replay's floor (M9 Task 5): app_now() never returns

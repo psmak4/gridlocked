@@ -5,6 +5,9 @@
  *   NEON_API_KEY=… NEON_PROJECT_ID=… VERCEL_USAGE_TOKEN=… \
  *   DATABASE_URL=postgres://… pnpm usage-snapshot
  *
+ * With CLOCK_MODE=replay the database is the beta's: the reading is still of
+ * the real month, and the row is dated at the replay's now.
+ *
  * It reads Neon's project (compute and transfer for the billing period so
  * far, the Free plan's only usage source) and Vercel's FOCUS billing charges
  * for the month (function CPU), then records one `usage_snapshots` row and
@@ -153,18 +156,21 @@ async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
   const { createDb } = await import("@/db/client");
-  const { resolveClock } = await import("@/lib/resolve-clock");
-  const { recordUsage } = await import("@/staff/usage");
+  const { systemClock } = await import("@/lib/clock");
+  const { recordReading } = await import("@/staff/usage");
   const handle = createDb(url);
   try {
-    const db = handle.db();
-    const now = (await resolveClock({ mode: "system", db })).now();
     // Both readings first: nothing is written unless both succeed.
-    const snapshot = await takeSnapshot(process.env, now, {
-      fetch,
-      log: (line) => console.log(line),
-    });
-    const { warned } = await recordUsage(db, now, snapshot);
+    const { warned } = await recordReading(
+      handle.db(),
+      process.env,
+      systemClock.now(),
+      (now) =>
+        takeSnapshot(process.env, now, {
+          fetch,
+          log: (line) => console.log(line),
+        }),
+    );
     console.log(
       warned.length > 0
         ? `recorded; over 70%: ${warned.join(", ")}`

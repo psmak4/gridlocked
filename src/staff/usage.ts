@@ -18,6 +18,7 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { newId } from "@/lib/ids";
+import { checkedNow, type ClockDb } from "@/lib/resolve-clock";
 import { notify } from "@/notifications/write";
 import { openReviewItem } from "@/reference/review";
 import { getSetting } from "@/settings";
@@ -142,6 +143,22 @@ export async function recordUsage(
     }
     return { warned };
   });
+}
+
+/**
+ * The daily reading: checks the database's clock first, reads the providers
+ * for the real month, then records the row at the database's "now" (the
+ * replay's, on the beta: M9 Task 13). Nothing is written unless `read`
+ * succeeds.
+ */
+export async function recordReading(
+  db: Db & ClockDb,
+  env: Record<string, string | undefined>,
+  realNow: Date,
+  read: (realNow: Date) => Promise<UsageSnapshot>,
+): Promise<{ warned: string[] }> {
+  const now = await checkedNow(db, env, realNow);
+  return recordUsage(db, now, await read(realNow));
 }
 
 export type UsageMeter = {

@@ -22,6 +22,8 @@
  *   ""); without it the function leaves queued emails queued, or sends no
  *   push. Sentry's DSN (M9 Task 10) is declared when set, with the deploy's
  *   SENTRY_RELEASE and SENTRY_ENVIRONMENT; without it nothing is reported.
+ *   CLOCK_MODE is declared only as `replay`, on a deploy to the `beta` branch
+ *   (M9 Task 13).
  *   No value is ever written in this file.
  * - two schedule triggers (UTC), both on the `tick` function: a tick every
  *   minute, and the safety tick at minute 7 of every sixth hour (M1 result).
@@ -58,9 +60,13 @@ const sentryEnv = sentryDsn
         : {}),
     }
   : undefined;
+// The beta's replay (M9 Task 13): the tick's clock is the database's own. Any
+// other deploy leaves it out, and the tick's default is the real clock.
+const clockEnv =
+  process.env.CLOCK_MODE === "replay" ? { CLOCK_MODE: "replay" } : undefined;
 const functionEnv =
-  emailEnv || pushEnv || sentryEnv
-    ? { ...emailEnv, ...pushEnv, ...sentryEnv }
+  emailEnv || pushEnv || sentryEnv || clockEnv
+    ? { ...emailEnv, ...pushEnv, ...sentryEnv, ...clockEnv }
     : undefined;
 
 export default defineConfig({

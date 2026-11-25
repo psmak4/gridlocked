@@ -11,8 +11,8 @@ terms, privacy policy and community rules still show the draft placeholder.
 ## The beta notice
 
 It's published per environment, never by a migration, so it never reaches
-production. Run it once against the beta branch (Task 13's beta deploy does
-this, with the owner's OK):
+production. Every deploy to the beta runs it (**Deploy staging** with
+`target: beta`, see [beta.md](beta.md)); the first one publishes it. By hand:
 
 ```bash
 CLOCK_MODE=replay DATABASE_URL=<beta branch> pnpm legal:publish beta

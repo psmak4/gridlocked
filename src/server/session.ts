@@ -20,7 +20,7 @@ import {
   type TokenVerifier,
 } from "@/identity/turnstile";
 import { touchViewer, type Viewer } from "@/identity/viewer";
-import { clockModeFromEnv, resolveClock } from "@/lib/resolve-clock";
+import { createRequestNow } from "@/lib/resolve-clock";
 import { withDb, type ServerDb } from "./db";
 
 export type SessionDeps = {
@@ -63,13 +63,7 @@ const defaultDeps: SessionDeps = {
   withDb,
   env: authEnv,
   sender: defaultSender,
-  now: async (db) =>
-    (
-      await resolveClock({
-        mode: clockModeFromEnv(process.env),
-        db,
-      })
-    ).now(),
+  now: createRequestNow(() => process.env),
 };
 
 /**

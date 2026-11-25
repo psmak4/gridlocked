@@ -111,13 +111,18 @@ async function takeTotpStep(
  * writes `staff.session.verify_failed`; the fifth also writes
  * `staff.session.verify_locked` and opens a warning review item. The code is
  * never logged.
+ *
+ * `realNow` (default `now`) is the time on the person's own clock, which on a
+ * hosted replay isn't the site's (M9 Task 13): an authenticator app's codes
+ * and the wait after failed attempts go by it, and what's written by `now`.
  */
 export async function verifyStaffSession(
   auth: Auth,
   db: Db,
   now: Date,
-  input: { viewer: Viewer; code: string },
+  input: { viewer: Viewer; code: string; realNow?: Date },
 ): Promise<void> {
+  const realNow = input.realNow ?? now;
   const v = requireViewer(input.viewer);
   if (v.impersonatedBy !== null) throw new IdentityError("read_only");
   if (v.banned || !hasStaffRole(v.role, "moderator")) {
@@ -128,7 +133,12 @@ export async function verifyStaffSession(
   // atomic upsert, so attempts made at once can't all read a count under the
   // limit. A right code gives its attempt back, so only failures count.
   const limitKey = `staff-verify:${v.userId}`;
-  const attempts = await consumeRateLimitCount(db, now, limitKey, VERIFY_LIMIT);
+  const attempts = await consumeRateLimitCount(
+    db,
+    realNow,
+    limitKey,
+    VERIFY_LIMIT,
+  );
   if (attempts > VERIFY_LIMIT.max) throw new IdentityError("rate_limited");
 
   const code = input.code.trim();
@@ -139,7 +149,7 @@ export async function verifyStaffSession(
     let method: "totp" | "backup_code";
     const step =
       /^\d{6}$/.test(code) && factor.secret
-        ? await totpMatches(factor.secret, code, now)
+        ? await totpMatches(factor.secret, code, realNow)
         : null;
     if (step !== null) {
       // A replayed code is a failure, like a wrong one.

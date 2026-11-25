@@ -15,6 +15,7 @@ import { consentBoxes } from "@/identity/consent";
 import { discordFrom } from "@/identity/env";
 import { stopImpersonating } from "@/identity/impersonation";
 import { verifyStaffSession } from "@/identity/staff-access";
+import { systemClock } from "@/lib/clock";
 import { unreadCount } from "@/notifications/read";
 import {
   consumeRateLimit,
@@ -329,7 +330,11 @@ export const unlockStaffTools = createServerFn({ method: "POST" })
     if (!viewer) throw new IdentityError("unauthenticated");
     try {
       await withAuth((auth, db, now) =>
-        verifyStaffSession(auth, db, now, { viewer, code: data.code }),
+        verifyStaffSession(auth, db, now, {
+          viewer,
+          code: data.code,
+          realNow: systemClock.now(),
+        }),
       );
       return { ok: true };
     } catch (error) {
@@ -379,6 +384,7 @@ export const requestMyDeletion = createServerFn({ method: "POST" })
     const deps = {
       sender: await requestSender(),
       baseUrl: siteBaseUrl(request),
+      realNow: systemClock.now(),
     };
     return withRequestNow((db, now) =>
       requestDeletionAction(db, now, viewer, data, deps),

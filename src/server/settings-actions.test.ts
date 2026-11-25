@@ -735,6 +735,16 @@ describe("settings actions (M5 task 13)", () => {
           deps,
         ),
       ).toEqual({ ok: false, error: "sign_in_again" });
+      // M9 Task 13: on a replay the sign-in's age is counted in real time.
+      expect(
+        await requestDeletionAction(
+          db,
+          later(-330),
+          viewer,
+          { typedUsername: "late_braker" },
+          { ...deps, realNow: NOW },
+        ),
+      ).toEqual({ ok: false, error: "sign_in_again" });
       await db
         .update(authSessions)
         .set({ createdAt: NOW })

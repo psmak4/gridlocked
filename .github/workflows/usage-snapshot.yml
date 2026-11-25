@@ -7,6 +7,10 @@ name: Usage snapshot (staging)
 # writes nothing and fails if either reading fails, so a missing or expired
 # token shows as a red run, not a zero meter. The owner gave a standing OK
 # for this scheduled write (M8 decision 2).
+#
+# While the closed beta runs (the staging variable BETA_RUNNING is true), the
+# row goes to the `beta` branch, the one the site shows, so its warnings reach
+# the beta's admins. The meters are the whole project's, both branches'.
 on:
   schedule:
     - cron: "0 5 * * *"
@@ -29,7 +33,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Holds DATABASE_URL_STAGING, NEON_API_KEY_STAGING and VERCEL_USAGE_TOKEN.
+    # Holds DATABASE_URL_STAGING, DATABASE_URL_BETA (for the beta),
+    # NEON_API_KEY_STAGING and VERCEL_USAGE_TOKEN.
     environment: staging
     steps:
       - name: Check out
@@ -55,6 +60,8 @@ jobs:
       - name: Record the usage snapshot
         run: pnpm usage-snapshot
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+          # A missing beta URL fails the run: it never falls back to main's.
+          DATABASE_URL: ${{ vars.BETA_RUNNING == 'true' && secrets.DATABASE_URL_BETA || vars.BETA_RUNNING != 'true' && secrets.DATABASE_URL_STAGING || '' }}
+          CLOCK_MODE: ${{ vars.BETA_RUNNING == 'true' && 'replay' || 'system' }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY_STAGING }}
           VERCEL_USAGE_TOKEN: ${{ secrets.VERCEL_USAGE_TOKEN }}
