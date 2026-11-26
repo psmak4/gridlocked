@@ -19,6 +19,8 @@ import {
 } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { enqueueScoring } from "@/game/score-jobs";
+import { type DueStore, republishIfEarlier } from "@/jobs/due-times";
+import type { TickDb } from "@/jobs/tick";
 import { SESSION_LABELS } from "@/play/weekend";
 import { advanceStatus } from "@/results/status";
 import { SCORED_KINDS } from "@/results/validate";
@@ -297,6 +299,7 @@ export async function reviewItem(
     evidence: spec.evidence(view),
     held: await heldLine(db, item),
     actions: spec.actions.flatMap((action) => {
+      if (action.when && !action.when(item)) return [];
       const href = action.href ? action.href(item) : null;
       if (action.href && !href) return [];
       return [{ id: action.id, label: action.label, href }];
@@ -312,14 +315,31 @@ export async function reviewItem(
  * an item that isn't there (`not_found`), a link or an action its kind
  * doesn't have (`invalid`), an item someone else got to first (`stale`), and
  * whatever the action itself refuses (`event_locked`, …).
+ *
+ * With `store`, the due-times file is republished afterwards if the work the
+ * resolve queued (a check, a scoring run) is due before what it says, so the
+ * tick picks it up at its next minute rather than at the next wake.
  */
 export async function resolveReviewItem(
   db: Db,
   now: Date,
   actor: StaffActor,
   input: { id: string; version: number; actionId: string; reason: string },
+  store?: DueStore,
 ): Promise<{ status: "resolved" | "dismissed" }> {
   const reason = requireReason(input.reason);
+  const result = await resolveInTransaction(db, now, actor, input, reason);
+  if (store) await republishIfEarlier(db as TickDb, store, now, now);
+  return result;
+}
+
+function resolveInTransaction(
+  db: Db,
+  now: Date,
+  actor: StaffActor,
+  input: { id: string; version: number; actionId: string },
+  reason: string,
+): Promise<{ status: "resolved" | "dismissed" }> {
   return db.transaction(async (tx) => {
     const [item] = await tx
       .select()
@@ -329,7 +349,11 @@ export async function resolveReviewItem(
     const action = reviewKindSpec(item.kind).actions.find(
       (a) => a.id === input.actionId,
     );
-    if (!action || (!action.run && action.id !== "dismiss")) {
+    if (
+      !action ||
+      (!action.run && action.id !== "dismiss") ||
+      (action.when && !action.when(item))
+    ) {
       throw new StaffError(
         "invalid",
         `${item.kind} has no action ${input.actionId}`,

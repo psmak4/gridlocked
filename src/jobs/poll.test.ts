@@ -328,9 +328,12 @@ describe("the poll_session handler", () => {
       throw new TypeError("fetch failed");
     };
 
+    const forbidden = () => new Response("no", { status: 403 });
+
     it.each([
       ["a 5xx", down],
       ["a network failure", refused],
+      ["a 403, a keyless provider refusing us for now", forbidden],
     ])(
       "three failures (%s) then success: the chain keeps going, results arrive, no give-up",
       async (_name, fail) => {
@@ -412,15 +415,6 @@ describe("the poll_session handler", () => {
       const [job] = await pollJobs();
       expect(job!.lastError).toMatch(/404/);
       expect(await state(race.id)).toBeUndefined();
-    });
-
-    it("a 403 fails the job too", async () => {
-      const race = await startPoll(18, "race");
-      pipeline.serve(
-        "/ergast/f1/2026/18/results.json",
-        () => new Response("no", { status: 403 }),
-      );
-      expect(await run(race.scheduledEnd)).toMatchObject({ failed: 1 });
     });
 
     it("an event with no Jolpica key is a programming error: it still fails the job", async () => {

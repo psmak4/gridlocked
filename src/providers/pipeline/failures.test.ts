@@ -13,12 +13,16 @@ describe("asOutage", () => {
     ["a 500", new ProviderHttpError(500, "boom")],
     ["a 503", new ProviderHttpError(503, "boom")],
     ["a 429 that outlasted the retries", new ProviderHttpError(429, "slow")],
+    [
+      "a 403 (a keyless provider refusing us for now)",
+      new ProviderHttpError(403, "blocked"),
+    ],
     ["a non-JSON body (status 200)", new ProviderHttpError(200, "not JSON")],
   ])("%s is an outage", async (_name, error) => {
     await expect(fails(error)).rejects.toBeInstanceOf(ProviderUnavailableError);
   });
 
-  it.each([400, 401, 403, 404, 410, 304])(
+  it.each([400, 401, 404, 410, 304])(
     "a %i is a bug in the request: it passes through unchanged",
     async (status) => {
       const error = new ProviderHttpError(status, "no");

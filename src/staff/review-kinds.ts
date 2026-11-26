@@ -9,7 +9,8 @@
  *
  * An action with `run` changes something and resolves the item, in the one
  * transaction `resolveReviewItem` opens after claiming it; an action with
- * `href` is a link and resolves nothing; Dismiss closes the item as is.
+ * `href` is a link and resolves nothing; Dismiss closes the item as is. An
+ * action with `when` is offered (and taken) only for the items it is true for.
  */
 import { desc, eq, and } from "drizzle-orm";
 import { seatAssignments, type reviewItems } from "@/db/schema";
@@ -17,6 +18,7 @@ import type { Db } from "@/db/types";
 import { setAvailability } from "./availability";
 import { cancelEvent } from "./calendar";
 import { StaffError } from "./errors";
+import { checkEventAgain, stuckEventOf } from "./finalize-again";
 import { changeSeats, type StaffActor } from "./roster";
 
 export type ReviewItemRow = typeof reviewItems.$inferSelect;
@@ -36,6 +38,8 @@ export type ReviewView = {
 export type ReviewAction = {
   id: string;
   label: string;
+  /** Whether this item gets the action; every item does without it. */
+  when?: (item: Pick<ReviewItemRow, "kind" | "eventId" | "details">) => boolean;
   /** A "Go to …" link: where it goes for this item, or null to leave it out. */
   href?: (item: ReviewView["item"]) => string | null;
   run?: (
@@ -125,6 +129,21 @@ const GO_PRICES = goTo("go_prices", "Go to Prices", () => "/staff/prices");
 const GO_RESULTS = goTo("go_results", "Go to session results", (item) =>
   item.sessionId ? `/staff/results/${item.sessionId}` : null,
 );
+
+/**
+ * "Check the event again now", for an event whose finalize checks stopped
+ * (`finalize_held` past its 14 days, or a `job_dead` finalize check).
+ */
+const CHECK_AGAIN: ReviewAction = {
+  id: "check_again",
+  label: "Check the event again now",
+  when: (item) => stuckEventOf(item) !== null,
+  run: async (tx, now, _actor, item) => {
+    const eventId = stuckEventOf(item);
+    if (!eventId) throw new StaffError("invalid", "the item names no event");
+    await checkEventAgain(tx, now, eventId);
+  },
+};
 
 /** A kind with no screen of its own: a plain title, its details, Dismiss. */
 function plain(
@@ -328,8 +347,9 @@ export const REVIEW_KINDS = {
   ),
   finalize_held: plain(
     "Finalizing is held",
-    (v) => `${eventName(v)} can't become final while items are open.`,
-    [GO_CALENDAR],
+    (v) =>
+      `${eventName(v)} can't become final while items are open. Once they're dealt with, check it again: it becomes final if nothing holds it.`,
+    [CHECK_AGAIN, GO_CALENDAR],
   ),
 
   // Scoring and prices.
@@ -394,7 +414,8 @@ export const REVIEW_KINDS = {
   // Jobs and accounts.
   job_dead: plain(
     "A job failed for good",
-    "A background job failed every retry and stopped.",
+    "A background job failed every retry and stopped. If it was an event's finalize check, check the event again once the cause is fixed.",
+    [CHECK_AGAIN],
   ),
   usage_high: plain(
     "A free tier is over 70%",

@@ -24,6 +24,7 @@ import {
 } from "@/db/schema";
 import { simulatedClock } from "@/lib/clock";
 import { openReviewItem } from "@/reference/review";
+import { checkEventAgain } from "@/staff/finalize-again";
 import { enqueue } from "./queue";
 import { planEventJobs } from "./plan-event";
 import { runDue } from "./runner";
@@ -170,7 +171,7 @@ describe("the finalize_check handler", () => {
     ).toEqual([]);
   });
 
-  it("an unchanged snapshot writes no changes and does not renormalize", async () => {
+  it("an unchanged snapshot writes no changes", async () => {
     const { race, quali } = await setup();
     pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
     pipeline.serve(RACE, jolpicaFixture("r18-results.json"));
@@ -215,6 +216,31 @@ describe("the finalize_check handler", () => {
   });
 
   describe("the last check", () => {
+    it("a provider's passing mistake doesn't hold the race once it goes back to the stored answer", async () => {
+      const { event, race, quali } = await setup();
+      pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
+      let raceBody: unknown = jolpicaFixture("r18-results.json");
+      pipeline.serve(RACE, () => raceBody);
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+
+      // At +2 h the winner's grid comes back null (round 20 of 2026).
+      const bad = loadBody("jolpica/2026/r18-results.json");
+      rowsOf(bad, "Results")[0]!.grid = null;
+      raceBody = bad;
+      await run(after(race.scheduledEnd, 2));
+      expect((await state(race.id))!.status).toBe("under_review");
+
+      // At +6 h the provider sends what we already have.
+      raceBody = jolpicaFixture("r18-results.json");
+      await run(after(race.scheduledEnd, 6));
+      expect((await state(race.id))!.status).toBe("provisional");
+
+      await run(after(race.scheduledEnd, 24));
+      await run(after(race.scheduledEnd, 48));
+      expect(await eventStatus(event.id)).toBe("completed");
+    });
+
     it("holds the event when a session has an open blocking item, with a warning", async () => {
       const { event, race, quali } = await setup();
       pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
@@ -385,6 +411,22 @@ describe("the finalize_check handler", () => {
         .where(eq(reviewItems.dedupeKey, `finalize_held:${event.id}`));
       expect(warning).toMatchObject({ status: "open" });
       expect(warning!.details).toMatchObject({ recheckStopped: true });
+
+      // A month on, the blocker is dealt with and staff check it again.
+      const later = after(race.scheduledEnd, 30 * 24);
+      await t.db
+        .update(reviewItems)
+        .set({ status: "dismissed", resolution: "Dismiss" })
+        .where(eq(reviewItems.dedupeKey, "test:blocking"));
+      await checkEventAgain(t.db, later, event.id);
+      expect((await heldJobs(event.id)).at(-1)).toMatchObject({
+        dedupeKey: `finalize:${event.id}:held:49`,
+        status: "pending",
+        runAt: later,
+      });
+      await run(later);
+      expect(await eventStatus(event.id)).toBe("completed");
+      expect((await state(race.id))!.status).toBe("final");
     });
 
     it("holds the event when a scored session never got results", async () => {
@@ -587,6 +629,36 @@ describe("the finalize_check handler", () => {
   });
 
   describe("a provider outage", () => {
+    it("waits out a 403 the same way: the last check holds and re-checks an hour later", async () => {
+      // Round 21 of 2026: Jolpica answered 403 for half an hour, and the
+      // +48 h check failed every retry and died with no follow-up.
+      const { event, race, quali } = await setup();
+      pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
+      let blocked = false;
+      pipeline.serve(RACE, () =>
+        blocked
+          ? new Response("forbidden", { status: 403 })
+          : jolpicaFixture("r18-results.json"),
+      );
+      await run(quali.scheduledEnd);
+      await run(race.scheduledEnd);
+      blocked = true;
+
+      expect(await run(after(race.scheduledEnd, 48))).toMatchObject({
+        failed: 0,
+      });
+      expect(await eventStatus(event.id)).toBe("scheduled");
+      expect(
+        (await heldJobs(event.id)).map((j) => [j.dedupeKey, j.runAt]),
+      ).toEqual([
+        [`finalize:${event.id}:held:1`, after(race.scheduledEnd, 49)],
+      ]);
+
+      blocked = false;
+      await run(after(race.scheduledEnd, 49));
+      expect(await eventStatus(event.id)).toBe("completed");
+    });
+
     it("skips a failed re-fetch at the early checks, but does not finalize on stored data at the last one", async () => {
       const { event, race, quali } = await setup();
       pipeline.serve(QUALI, jolpicaFixture("r18-qualifying.json"));
